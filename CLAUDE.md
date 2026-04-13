@@ -1,5 +1,29 @@
 # CLAUDE.md
 
+## Tech Stack
+- **Desktop Framework:** Tauri v2 (Rust backend)
+- **Frontend:** Vue 3 (JavaScript, no TypeScript)
+- **UI Library:** Vuetify 3
+- **Build Tool:** Vite
+- **Package Manager:** pnpm
+- **State Management:** Pinia 3
+- **Database:** SQLite (via tauri-plugin-sql)
+- **Icons:** Material Design Icons (@mdi/font)
+- **Target Platforms:** Windows, Linux, macOS
+
+---
+
+## Cross-Platform Rules
+- The app must build and run on Windows, Linux, and macOS.
+- Do not use platform-specific APIs, paths, or behaviors without gating them behind `cfg` (Rust) or runtime platform checks (frontend).
+- Use `std::path::PathBuf` in Rust — never hardcode path separators.
+- Use Tauri's `path` API on the frontend for resolving directories (e.g., app data, home) — never hardcode OS paths.
+- File paths are case-sensitive on Linux — treat them as case-sensitive everywhere.
+- Test any file system, shell, or OS interaction logic against all three platforms conceptually before committing.
+- Line endings: use LF. The repo `.gitattributes` enforces this.
+
+---
+
 ## Core Principles
 - Do not use CDNs for any dependencies. All assets must be installed and managed locally.
 - Maintain strict consistency across the codebase (patterns, naming, structure, and UI).
