@@ -23,7 +23,7 @@ function affiliationFromCotType(cotType) {
   return ['f', 'h', 'n', 'u'].includes(c) ? c : 'u'
 }
 
-export function useMapTracks(getMap) {
+export function useMapTracks(getMap, ranging = { value: false }) {
   const tracksStore   = useTracksStore()
   const settingsStore = useSettingsStore()
   let initialized = false
@@ -112,8 +112,11 @@ export function useMapTracks(getMap) {
       }
     })
 
-    // Click a track dot → open its detail panel (ignored if already open).
+    // Click a track dot → open its detail panel.
+    // Suppressed while the range tool is selecting so the click registers as
+    // a range endpoint instead of opening a panel.
     map.on('click', TRACKS_LAYER_POINTS, (e) => {
+      if (ranging.value) return
       const uid = e.features?.[0]?.properties?.uid
       if (uid) tracksStore.openPanel(uid)
     })

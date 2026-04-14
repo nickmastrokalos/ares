@@ -1,5 +1,5 @@
 <script setup>
-import { ref, provide, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -10,6 +10,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useTracksStore } from '@/stores/tracks'
 import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
+import { useMapRange } from '@/composables/useMapRange'
+import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { getBasemap } from '@/services/basemaps'
 import MapToolbar from '@/components/MapToolbar.vue'
@@ -20,6 +22,7 @@ import ListenersDialog from '@/components/ListenersDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import MapContextMenu from '@/components/MapContextMenu.vue'
 import TrackPanel from '@/components/TrackPanel.vue'
+import RoutePanel from '@/components/RoutePanel.vue'
 import MapFooter from '@/components/MapFooter.vue'
 
 const props = defineProps({
@@ -42,7 +45,10 @@ let map = null
 
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature } = useMapDraw(() => map)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
-const { initLayers: initTrackLayers } = useMapTracks(() => map)
+const { ranging, toggleRange } = useMapRange(() => map)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers } = useMapRoute(() => map)
+const suppressTrackPanel = computed(() => ranging.value || routing.value)
+const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel)
 
 // Expose map-centric helpers to descendant components (OverlaysDialog,
 // AttributesPanel, etc.) without prop-drilling through DrawPanel.
@@ -162,6 +168,7 @@ onMounted(async () => {
   map.on('load', async () => {
     initLayers()
     initTrackLayers()
+    initRouteLayers()
 
     // Start any CoT listeners that were enabled at the time the map loaded.
     for (const listener of settingsStore.cotListeners) {
@@ -202,10 +209,14 @@ onUnmounted(async () => {
       :draw-panel-open="drawPanelOpen"
       :layers-panel-open="layersPanelOpen"
       :measuring="measuring"
+      :ranging="ranging"
+      :routing="routing"
       :mission-name="featuresStore.activeMission?.name || ''"
       @toggle-draw="toggleDrawPanel"
       @toggle-layers="toggleLayersPanel"
       @toggle-measure="toggleMeasure"
+      @toggle-range="toggleRange"
+      @toggle-route="toggleRoute"
       @toggle-listeners="listenersDialogOpen = true"
       @toggle-settings="settingsDialogOpen = true"
       @exit-mission="exitMission"
@@ -219,6 +230,14 @@ onUnmounted(async () => {
           v-for="uid in tracksStore.openPanelList"
           :key="uid"
           :uid="uid"
+        />
+        <RoutePanel
+          v-for="id in openRouteList"
+          :key="id"
+          :route-id="id"
+          :appending="appendingRouteId === id"
+          @close="closeRoutePanel(id)"
+          @append-waypoint="startAppendMode(id)"
         />
         <ListenersDialog v-model="listenersDialogOpen" />
         <SettingsDialog v-model="settingsDialogOpen" />

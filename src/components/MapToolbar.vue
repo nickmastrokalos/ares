@@ -1,10 +1,12 @@
 <script setup>
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-measure', 'toggle-listeners', 'toggle-settings', 'exit-mission'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-measure', 'toggle-range', 'toggle-route', 'toggle-listeners', 'toggle-settings', 'exit-mission'])
 
 defineProps({
   drawPanelOpen: Boolean,
   layersPanelOpen: Boolean,
   measuring: Boolean,
+  ranging: Boolean,
+  routing: Boolean,
   missionName: { type: String, default: '' }
 })
 </script>
@@ -65,6 +67,32 @@ defineProps({
             :color="measuring ? 'primary' : undefined"
             :class="[measuring ? 'toolbar-active' : 'text-medium-emphasis']"
             @click="emit('toggle-measure')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Range" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-map-marker-distance"
+            size="small"
+            :color="ranging ? 'primary' : undefined"
+            :class="[ranging ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-range')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Route" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-routes"
+            size="small"
+            :color="routing ? 'primary' : undefined"
+            :class="[routing ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-route')"
           />
         </template>
       </v-tooltip>

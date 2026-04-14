@@ -69,6 +69,7 @@ export function useMapDraw(getMap) {
         id: 'draw-features-line',
         type: 'line',
         source: FEATURES_SOURCE,
+        filter: ['!=', '_type', 'route'],
         paint: { 'line-color': featureColor, 'line-width': 2 }
       })
       map.addLayer({
@@ -104,7 +105,7 @@ export function useMapDraw(getMap) {
         id: LABELS_LAYER,
         type: 'symbol',
         source: FEATURES_SOURCE,
-        filter: ['has', 'name'],
+        filter: ['all', ['has', 'name'], ['!=', '_type', 'route']],
         layout: {
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
