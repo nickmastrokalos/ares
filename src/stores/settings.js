@@ -10,7 +10,9 @@ const DEFAULTS = {
   selectedBasemap: 'osm',
   cotListeners: [],
   distanceUnits: 'metric',
-  coordinateFormat: 'dd'
+  coordinateFormat: 'dd',
+  trackBreadcrumbs: false,
+  trackBreadcrumbLength: 30  // seconds
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -19,6 +21,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const cotListeners = ref([...DEFAULTS.cotListeners])
   const distanceUnits = ref(DEFAULTS.distanceUnits)
   const coordinateFormat = ref(DEFAULTS.coordinateFormat)
+  const trackBreadcrumbs = ref(DEFAULTS.trackBreadcrumbs)
+  const trackBreadcrumbLength = ref(DEFAULTS.trackBreadcrumbLength)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
   // without a growing switch statement as we add more settings.
@@ -27,7 +31,9 @@ export const useSettingsStore = defineStore('settings', () => {
     selectedBasemap,
     cotListeners,
     distanceUnits,
-    coordinateFormat
+    coordinateFormat,
+    trackBreadcrumbs,
+    trackBreadcrumbLength
   }
 
   // Promise cache: `load()` may be called from multiple places during boot
@@ -89,6 +95,8 @@ export const useSettingsStore = defineStore('settings', () => {
     cotListeners,
     distanceUnits,
     coordinateFormat,
+    trackBreadcrumbs,
+    trackBreadcrumbLength,
     load,
     setSetting,
     addCotListener,

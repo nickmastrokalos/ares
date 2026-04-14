@@ -68,6 +68,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "ares"
 version = "0.1.0"
 dependencies = [
+ "quick-xml 0.37.5",
  "serde",
  "serde_json",
  "tauri",
@@ -76,6 +77,7 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-sql",
  "tauri-plugin-store",
+ "tokio",
 ]
 
 [[package]]
@@ -2729,7 +2731,7 @@ checksum = "740ebea15c5d1428f910cd1a5f52cebf8d25006245ed8ade92702f4943d91e07"
 dependencies = [
  "base64 0.22.1",
  "indexmap 2.14.0",
- "quick-xml",
+ "quick-xml 0.38.4",
  "serde",
  "time",
 ]
@@ -2873,6 +2875,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.37.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

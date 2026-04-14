@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "cot:send": "node scripts/cot-sender.mjs"
   },
   "dependencies": {
     "@mdi/font": "^7.4.47",

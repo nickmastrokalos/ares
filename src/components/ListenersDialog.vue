@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '@/stores/settings'
 import { isValidIP } from '@/services/network'
 
@@ -55,12 +56,23 @@ async function addListener() {
   const error = validateFields(address, newPort.value, newProtocol.value, -1)
   if (error) { formError.value = error; return }
 
+  const port = Number(newPort.value)
+  const protocol = newProtocol.value
+
   await settingsStore.addCotListener({
     name: newName.value.trim(),
     address,
-    port: Number(newPort.value),
-    protocol: newProtocol.value
+    port,
+    protocol
   })
+
+  // New listeners are enabled by default — start immediately.
+  try {
+    await invoke('start_listener', { address, port, protocol })
+  } catch (err) {
+    console.error('Failed to start listener:', err)
+  }
+
   newName.value = ''
   newAddress.value = ''
   newPort.value = ''
@@ -99,11 +111,35 @@ function cancelEdit() {
 }
 
 async function toggleListener(index) {
+  const listener = settingsStore.cotListeners[index]
+  const willEnable = !listener.enabled
   await settingsStore.toggleCotListener(index)
+  try {
+    if (willEnable) {
+      await invoke('start_listener', {
+        address: listener.address,
+        port: listener.port,
+        protocol: listener.protocol ?? 'udp'
+      })
+    } else {
+      await invoke('stop_listener', { address: listener.address, port: listener.port })
+    }
+  } catch (err) {
+    console.error('Failed to toggle listener:', err)
+  }
 }
 
 async function removeListener(index) {
+  const listener = settingsStore.cotListeners[index]
   if (editingIndex.value === index) editingIndex.value = null
+  // Stop the socket task before removing from settings.
+  if (listener.enabled) {
+    try {
+      await invoke('stop_listener', { address: listener.address, port: listener.port })
+    } catch (err) {
+      console.error('Failed to stop listener on remove:', err)
+    }
+  }
   await settingsStore.removeCotListener(index)
 }
 

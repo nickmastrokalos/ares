@@ -30,6 +30,7 @@ src/
     MapView.vue    # Map page, mounted at /map/:missionId
   stores/          # Pinia stores (one file per domain)
     app.js         # Global app state
+    tracks.js      # CoT track state and Tauri event listener
   composables/     # Reusable composition functions (useX.js)
   services/        # Pure modules (geometry, parsers, etc.) with no Vue deps
   components/      # Reusable Vue components
@@ -166,9 +167,40 @@ Currently provided:
 - `LayersPanel` is a floating draggable panel with Online and Offline tabs. Offline is scaffolded for a future map server integration.
 
 ## CoT Listeners
-- Listener configuration is **global** (not mission-scoped) — persisted in the key-value settings store as `cotListeners`, an array of `{ address, enabled }` objects.
-- `ListenersDialog` is a modal dialog opened from the toolbar's `mdi-access-point` button. Users can add addresses, toggle individual listeners on/off, and remove them.
-- The settings store exposes `addCotListener(address)`, `removeCotListener(index)`, and `toggleCotListener(index)` helpers that mutate the array and persist in one step.
-- Actual network listening (UDP sockets, CoT XML parsing) is not yet implemented — the configuration UI is scaffolded first.
+- Listener configuration is **global** (not mission-scoped) — persisted in the key-value settings store as `cotListeners`, an array of `{ name, address, port, protocol, enabled }` objects.
+- `ListenersDialog` is a modal dialog opened from the toolbar's `mdi-access-point` button. Users can add listeners (name, protocol, address, port), toggle individual listeners on/off, edit, and remove them.
+- The settings store exposes `addCotListener`, `updateCotListener`, `removeCotListener`, and `toggleCotListener` helpers that mutate the array and persist in one step.
+- **Wiring to the backend:** `ListenersDialog` calls `invoke('start_listener', ...)` / `invoke('stop_listener', ...)` on toggle and remove. `MapView` starts all enabled listeners on map load and calls `invoke('stop_all_listeners')` on unmount.
+- `useTracksStore.startListening()` wires the `cot-event` Tauri event to the track map and starts a 30-second stale-track pruning interval.
+
+## Track Plotting
+
+### `useTracksStore` (`src/stores/tracks.js`)
+- Pinia store keyed by CoT `uid`. Each entry: `{ uid, cotType, lat, lon, hae, speed, course, callsign, time, stale, updatedAt }`.
+- `trackCollection` computed — GeoJSON `FeatureCollection` of Point features with all track fields as properties plus `affiliation` derived from `cotType[2]` (`f`/`h`/`n`/`u`).
+- `startListening()` — calls `listen('cot-event', ...)`, upserts tracks, starts stale pruning.
+- `stopListening()` — unregisters the listener, stops pruning.
+- `clearTracks()` — empties the Map.
+- Reactivity note: Vue's reactive system does not track internal `Map` mutations. The store reassigns `tracks.value = new Map(tracks.value)` after each update to trigger computed re-evaluation.
+
+### `useMapTracks` (`src/composables/useMapTracks.js`)
+- Composable following the same pattern as `useMapDraw`. Takes `getMap` (getter returning the live MapLibre instance).
+- `initLayers()` — adds GeoJSON source `cot-tracks`, circle layer `cot-tracks-points`, and symbol layer `cot-tracks-labels`. Called from `MapView`'s `map.on('load', ...)` handler alongside `initLayers()`.
+- Circle color is data-driven via a `match` expression on the `affiliation` property: `f`→`#4a9ade`, `h`→`#f44336`, `n`→`#4caf50`, `u`→`#ffeb3b`.
+- Watches `tracksStore.trackCollection` and calls `setData` on the map source whenever it changes.
+- Removes layers and source on `onUnmounted`.
+
+## CoT Test Harness (`scripts/cot-sender.mjs`)
+Node.js script (no external dependencies) that generates synthetic CoT traffic for development.
+
+```sh
+pnpm cot:send                        # 5 tracks, UDP, 127.0.0.1:4242, 3s interval
+pnpm cot:send -- --tracks 10         # 10 tracks
+pnpm cot:send -- --port 8087         # different port
+pnpm cot:send -- --protocol tcp      # TCP instead of UDP
+pnpm cot:send -- --interval 1000     # 1s interval
+```
+
+Each track has a stable `uid` (`ARES-TEST-N`), a NATO phonetic callsign, a CoT affiliation cycling through `f/h/n/u`, and a random-walk position starting near Washington DC. The script reconnects automatically on TCP disconnection.
 
 Consumers must tolerate `null` (the injected helper is absent if the component is ever reused outside `MapView`). Keep these helpers pure "do the map thing" functions — no reactive state, no UI concerns.

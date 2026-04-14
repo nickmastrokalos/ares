@@ -18,7 +18,8 @@ const open = computed({
 // entry here plus a matching `<v-window-item>` below — no router or
 // external config involved.
 const TABS = [
-  { id: 'display', label: 'Display', icon: 'mdi-monitor-eye' }
+  { id: 'display', label: 'Display', icon: 'mdi-monitor-eye' },
+  { id: 'tracks',  label: 'Tracks',  icon: 'mdi-radar' }
 ]
 const activeTab = ref(TABS[0].id)
 
@@ -50,6 +51,20 @@ const coordinateFormat = computed({
   get: () => settingsStore.coordinateFormat,
   set: (v) => settingsStore.setSetting('coordinateFormat', v)
 })
+
+const trackBreadcrumbs = computed({
+  get: () => settingsStore.trackBreadcrumbs,
+  set: (v) => settingsStore.setSetting('trackBreadcrumbs', v)
+})
+
+const trackBreadcrumbLength = computed({
+  get: () => settingsStore.trackBreadcrumbLength,
+  set: (v) => settingsStore.setSetting('trackBreadcrumbLength', v)
+})
+
+function breadcrumbLengthLabel(secs) {
+  return secs === 60 ? '1 min' : `${secs}s`
+}
 </script>
 
 <template>
@@ -150,6 +165,57 @@ const coordinateFormat = computed({
             </div>
           </div>
         </v-window-item>
+        <v-window-item value="tracks">
+          <div class="pa-4">
+            <div class="d-flex align-center">
+              <div class="flex-grow-1">
+                <div class="text-body-2">Track breadcrumbs</div>
+                <div class="text-caption text-medium-emphasis">
+                  Show a trail of past positions behind each track.
+                </div>
+              </div>
+              <v-switch
+                v-model="trackBreadcrumbs"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+              />
+            </div>
+
+            <v-divider class="my-3" />
+
+            <div :class="{ 'text-disabled': !trackBreadcrumbs }">
+              <div class="d-flex align-center mb-1">
+                <div class="flex-grow-1">
+                  <div class="text-body-2">Breadcrumb length</div>
+                  <div class="text-caption text-medium-emphasis">
+                    How far back the trail extends.
+                  </div>
+                </div>
+                <span class="text-body-2 length-value">
+                  {{ breadcrumbLengthLabel(trackBreadcrumbLength) }}
+                </span>
+              </div>
+              <v-slider
+                v-model="trackBreadcrumbLength"
+                :min="5"
+                :max="60"
+                :step="5"
+                :disabled="!trackBreadcrumbs"
+                density="compact"
+                hide-details
+                thumb-size="14"
+                track-size="2"
+                color="primary"
+              />
+              <div class="d-flex justify-space-between text-caption text-medium-emphasis mt-1">
+                <span>5s</span>
+                <span>1 min</span>
+              </div>
+            </div>
+          </div>
+        </v-window-item>
       </v-window>
     </v-card>
   </v-dialog>
@@ -158,5 +224,10 @@ const coordinateFormat = computed({
 <style scoped>
 .settings-tabs {
   min-height: 40px;
+}
+
+.length-value {
+  min-width: 48px;
+  text-align: right;
 }
 </style>

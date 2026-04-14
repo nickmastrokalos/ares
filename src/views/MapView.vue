@@ -3,11 +3,14 @@ import { ref, provide, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { invoke } from '@tauri-apps/api/core'
 import { useMapStore } from '@/stores/map'
 import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
+import { useTracksStore } from '@/stores/tracks'
 import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
+import { useMapTracks } from '@/composables/useMapTracks'
 import { getBasemap } from '@/services/basemaps'
 import MapToolbar from '@/components/MapToolbar.vue'
 import DrawPanel from '@/components/DrawPanel.vue'
@@ -15,6 +18,8 @@ import AttributesPanel from '@/components/AttributesPanel.vue'
 import LayersPanel from '@/components/LayersPanel.vue'
 import ListenersDialog from '@/components/ListenersDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
+import MapContextMenu from '@/components/MapContextMenu.vue'
+import TrackPanel from '@/components/TrackPanel.vue'
 import MapFooter from '@/components/MapFooter.vue'
 
 const props = defineProps({
@@ -26,15 +31,18 @@ const mapContainer = ref(null)
 const mapStore = useMapStore()
 const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
+const tracksStore = useTracksStore()
 const drawPanelOpen = ref(false)
 const layersPanelOpen = ref(false)
 const listenersDialogOpen = ref(false)
 const settingsDialogOpen = ref(false)
 const mouseCoord = ref(null)
+const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature } = useMapDraw(() => map)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
+const { initLayers: initTrackLayers } = useMapTracks(() => map)
 
 // Expose map-centric helpers to descendant components (OverlaysDialog,
 // AttributesPanel, etc.) without prop-drilling through DrawPanel.
@@ -137,12 +145,49 @@ onMounted(async () => {
   map.on('mousemove', (e) => { mouseCoord.value = e.lngLat })
   map.on('mouseout', () => { mouseCoord.value = null })
 
-  map.on('load', () => {
+  map.on('contextmenu', (e) => {
+    e.originalEvent.preventDefault()
+    // Clamp so the menu doesn't overflow the right or bottom edge.
+    const container = mapContainer.value
+    const menuWidth = 250
+    const menuHeight = 90  // approximate
+    const x = Math.min(e.point.x, container.clientWidth  - menuWidth)
+    const y = Math.min(e.point.y, container.clientHeight - menuHeight)
+    contextMenu.value = { x, y, lngLat: e.lngLat }
+  })
+
+  map.on('movestart', () => { contextMenu.value = null })
+  map.on('click', () => { contextMenu.value = null })
+
+  map.on('load', async () => {
     initLayers()
+    initTrackLayers()
+
+    // Start any CoT listeners that were enabled at the time the map loaded.
+    for (const listener of settingsStore.cotListeners) {
+      if (listener.enabled) {
+        try {
+          await invoke('start_listener', {
+            address: listener.address,
+            port: listener.port,
+            protocol: listener.protocol ?? 'udp'
+          })
+        } catch (err) {
+          console.error('Failed to start listener:', err)
+        }
+      }
+    }
+    await tracksStore.startListening()
   })
 })
 
-onUnmounted(() => {
+onUnmounted(async () => {
+  tracksStore.stopListening()
+  try {
+    await invoke('stop_all_listeners')
+  } catch (err) {
+    console.error('Failed to stop listeners:', err)
+  }
   if (map) {
     mapStore.saveView(map)
     map.remove()
@@ -170,8 +215,20 @@ onUnmounted(() => {
         <DrawPanel v-if="drawPanelOpen" @tool-select="onToolSelect" />
         <LayersPanel v-if="layersPanelOpen" />
         <AttributesPanel v-if="featuresStore.selectedFeature" />
+        <TrackPanel
+          v-for="uid in tracksStore.openPanelList"
+          :key="uid"
+          :uid="uid"
+        />
         <ListenersDialog v-model="listenersDialogOpen" />
         <SettingsDialog v-model="settingsDialogOpen" />
+        <MapContextMenu
+          v-if="contextMenu"
+          :x="contextMenu.x"
+          :y="contextMenu.y"
+          :lng-lat="contextMenu.lngLat"
+          @close="contextMenu = null"
+        />
         <MapFooter :coord="mouseCoord" />
       </div>
     </div>
