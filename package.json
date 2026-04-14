@@ -12,9 +12,16 @@
   "dependencies": {
     "@mdi/font": "^7.4.47",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-fs": "^2.5.0",
     "@tauri-apps/plugin-sql": "^2.4.0",
     "@tauri-apps/plugin-store": "^2.4.2",
+    "@tmcw/togeojson": "^7.1.2",
+    "jszip": "^3.10.1",
+    "maplibre-gl": "^5.22.0",
+    "mgrs": "^2.1.0",
     "pinia": "^3.0.4",
+    "tokml": "^0.4.0",
     "vue": "^3.5.32",
     "vue-router": "^4.6.4",
     "vuetify": "^3.8.5"
