@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
+import { useZIndex } from '@/composables/useZIndex'
 import { formatCoordinate } from '@/services/coordinates'
 import { distanceBetween, formatDistance } from '@/services/geometry'
 
@@ -22,6 +23,7 @@ const editingName = ref(false)
 const nameInput   = ref('')
 
 const { pos, onPointerDown } = useDraggable()
+const { zIndex, bringToFront } = useZIndex()
 
 // ---- Derived data ----
 
@@ -103,6 +105,13 @@ async function saveName() {
   )
 }
 
+// ---- Delete route ----
+
+async function deleteRoute() {
+  if (!routeRow.value) return
+  await featuresStore.removeFeature(routeRow.value.id)
+}
+
 // ---- Delete waypoint ----
 
 async function deleteWaypoint(index) {
@@ -148,8 +157,10 @@ watch(routeRow, (row) => {
     :style="{
       left: pos.x + 'px',
       top: pos.y + 'px',
+      zIndex,
       visibility: positioned ? 'visible' : 'hidden'
     }"
+    @pointerdown="bringToFront"
   >
     <!-- Header -->
     <div class="panel-header" @pointerdown="onPointerDown">
@@ -242,6 +253,20 @@ watch(routeRow, (row) => {
         <span class="attr-key">DISTANCE</span>
         <span class="attr-val">{{ totalDistanceLabel }}</span>
       </div>
+
+      <div class="divider" />
+
+      <v-btn
+        size="x-small"
+        variant="text"
+        color="error"
+        class="delete-btn"
+        @pointerdown.stop
+        @click.stop="deleteRoute"
+      >
+        <v-icon size="14">mdi-delete-outline</v-icon>
+        <span class="delete-label">Delete route</span>
+      </v-btn>
     </div>
   </div>
 </template>
@@ -381,6 +406,7 @@ watch(routeRow, (row) => {
 .attr-grid {
   display: grid;
   grid-template-columns: 52px 1fr;
+  column-gap: 8px;
   row-gap: 2px;
   margin-bottom: 2px;
 }
@@ -401,5 +427,15 @@ watch(routeRow, (row) => {
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+.delete-btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.delete-label {
+  font-size: 11px;
+  margin-left: 4px;
 }
 </style>

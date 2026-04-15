@@ -65,6 +65,7 @@ const trackBreadcrumbLength = computed({
 function breadcrumbLengthLabel(secs) {
   return secs === 60 ? '1 min' : `${secs}s`
 }
+
 </script>
 
 <template>
@@ -214,6 +215,7 @@ function breadcrumbLengthLabel(secs) {
                 <span>1 min</span>
               </div>
             </div>
+
           </div>
         </v-window-item>
       </v-window>

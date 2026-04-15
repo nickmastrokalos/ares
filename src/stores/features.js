@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getDb } from '@/plugins/database'
+import { useAppStore } from '@/stores/app'
 
 export const DEFAULT_FEATURE_COLOR = '#ffffff'
 // Fill opacity for polygons/circles/sectors when the user hasn't chosen
@@ -8,6 +9,8 @@ export const DEFAULT_FEATURE_COLOR = '#ffffff'
 export const DEFAULT_FEATURE_OPACITY = 0.2
 
 export const useFeaturesStore = defineStore('features', () => {
+  const appStore = useAppStore()
+
   const missions = ref([])
   const activeMissionId = ref(null)
   const features = ref([])
@@ -40,26 +43,41 @@ export const useFeaturesStore = defineStore('features', () => {
   }))
 
   async function loadMissions() {
-    const db = await getDb()
-    missions.value = await db.select('SELECT * FROM missions ORDER BY updated_at DESC')
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      missions.value = await db.select('SELECT * FROM missions ORDER BY updated_at DESC')
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   async function createMission(name) {
-    const db = await getDb()
-    const result = await db.execute('INSERT INTO missions (name) VALUES ($1)', [name])
-    await loadMissions()
-    return result.lastInsertId
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      const result = await db.execute('INSERT INTO missions (name) VALUES ($1)', [name])
+      await loadMissions()
+      return result.lastInsertId
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   async function renameMission(id, name) {
     const trimmed = name?.trim()
     if (!id || !trimmed) return
-    const db = await getDb()
-    await db.execute(
-      "UPDATE missions SET name = $1, updated_at = datetime('now') WHERE id = $2",
-      [trimmed, id]
-    )
-    await loadMissions()
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      await db.execute(
+        "UPDATE missions SET name = $1, updated_at = datetime('now') WHERE id = $2",
+        [trimmed, id]
+      )
+      await loadMissions()
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   async function deleteMission(id) {
@@ -68,16 +86,21 @@ export const useFeaturesStore = defineStore('features', () => {
 
   async function deleteMissions(ids) {
     if (!ids?.length) return
-    const db = await getDb()
-    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
-    await db.execute(`DELETE FROM features WHERE mission_id IN (${placeholders})`, ids)
-    await db.execute(`DELETE FROM missions WHERE id IN (${placeholders})`, ids)
-    if (ids.includes(activeMissionId.value)) {
-      activeMissionId.value = null
-      features.value = []
-      selectedFeatureId.value = null
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
+      await db.execute(`DELETE FROM features WHERE mission_id IN (${placeholders})`, ids)
+      await db.execute(`DELETE FROM missions WHERE id IN (${placeholders})`, ids)
+      if (ids.includes(activeMissionId.value)) {
+        activeMissionId.value = null
+        features.value = []
+        selectedFeatureId.value = null
+      }
+      await loadMissions()
+    } finally {
+      appStore.endLoad()
     }
-    await loadMissions()
   }
 
   // Snapshot of feature counts per mission, used by the mission picker.
@@ -112,47 +135,67 @@ export const useFeaturesStore = defineStore('features', () => {
       features.value = []
       return
     }
-    const db = await getDb()
-    features.value = await db.select(
-      'SELECT * FROM features WHERE mission_id = $1 ORDER BY created_at',
-      [activeMissionId.value]
-    )
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      features.value = await db.select(
+        'SELECT * FROM features WHERE mission_id = $1 ORDER BY created_at',
+        [activeMissionId.value]
+      )
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   async function addFeature(type, geometry, properties = {}) {
     if (!activeMissionId.value) return null
-    const db = await getDb()
-    const result = await db.execute(
-      'INSERT INTO features (mission_id, type, geometry, properties) VALUES ($1, $2, $3, $4)',
-      [activeMissionId.value, type, JSON.stringify(geometry), JSON.stringify(properties)]
-    )
-    await db.execute(
-      "UPDATE missions SET updated_at = datetime('now') WHERE id = $1",
-      [activeMissionId.value]
-    )
-    await loadFeatures()
-    return result.lastInsertId
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      const result = await db.execute(
+        'INSERT INTO features (mission_id, type, geometry, properties) VALUES ($1, $2, $3, $4)',
+        [activeMissionId.value, type, JSON.stringify(geometry), JSON.stringify(properties)]
+      )
+      await db.execute(
+        "UPDATE missions SET updated_at = datetime('now') WHERE id = $1",
+        [activeMissionId.value]
+      )
+      await loadFeatures()
+      return result.lastInsertId
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   async function updateFeature(id, geometry, properties) {
-    const db = await getDb()
-    await db.execute(
-      "UPDATE features SET geometry = $1, properties = $2, updated_at = datetime('now') WHERE id = $3",
-      [JSON.stringify(geometry), JSON.stringify(properties), id]
-    )
-    await loadFeatures()
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      await db.execute(
+        "UPDATE features SET geometry = $1, properties = $2, updated_at = datetime('now') WHERE id = $3",
+        [JSON.stringify(geometry), JSON.stringify(properties), id]
+      )
+      await loadFeatures()
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   async function updateFeatureProperties(id, patch) {
     const row = features.value.find(f => f.id === id)
     if (!row) return
-    const merged = { ...JSON.parse(row.properties), ...patch }
-    const db = await getDb()
-    await db.execute(
-      "UPDATE features SET properties = $1, updated_at = datetime('now') WHERE id = $2",
-      [JSON.stringify(merged), id]
-    )
-    await loadFeatures()
+    appStore.beginLoad()
+    try {
+      const merged = { ...JSON.parse(row.properties), ...patch }
+      const db = await getDb()
+      await db.execute(
+        "UPDATE features SET properties = $1, updated_at = datetime('now') WHERE id = $2",
+        [JSON.stringify(merged), id]
+      )
+      await loadFeatures()
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   async function removeFeature(id) {
@@ -161,11 +204,16 @@ export const useFeaturesStore = defineStore('features', () => {
 
   async function removeFeatures(ids) {
     if (!ids?.length) return
-    const db = await getDb()
-    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
-    await db.execute(`DELETE FROM features WHERE id IN (${placeholders})`, ids)
-    if (ids.includes(selectedFeatureId.value)) selectedFeatureId.value = null
-    await loadFeatures()
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
+      await db.execute(`DELETE FROM features WHERE id IN (${placeholders})`, ids)
+      if (ids.includes(selectedFeatureId.value)) selectedFeatureId.value = null
+      await loadFeatures()
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   function selectFeature(id) {
@@ -174,9 +222,14 @@ export const useFeaturesStore = defineStore('features', () => {
 
   async function clearFeatures() {
     if (!activeMissionId.value) return
-    const db = await getDb()
-    await db.execute('DELETE FROM features WHERE mission_id = $1', [activeMissionId.value])
-    features.value = []
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      await db.execute('DELETE FROM features WHERE mission_id = $1', [activeMissionId.value])
+      features.value = []
+    } finally {
+      appStore.endLoad()
+    }
   }
 
   return {

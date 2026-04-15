@@ -35,9 +35,20 @@ export function useMapRange(getMap) {
   let nextId     = 0
   let pendingEpA = null  // first endpoint for the in-progress pair
 
-  let clickHandler   = null
-  let keyHandler     = null
-  let stopTrackWatch = null
+  let clickHandler    = null
+  let moveHandler     = null
+  let keyHandler      = null
+  let stopTrackWatch  = null
+
+  // Layers that can serve as range endpoints.
+  const SNAP_LAYERS = [
+    'cot-tracks-points',
+    'manual-tracks-points',
+    'draw-features-points',
+    'draw-features-line',
+    'draw-features-fill',
+    'route-dot'
+  ]
 
   // ---- DOM helpers (match useMapMeasure label style) ----
 
@@ -164,8 +175,10 @@ export function useMapRange(getMap) {
 
   function removeClickHandler() {
     const map = getMap()
-    if (map && clickHandler) map.off('click', clickHandler)
+    if (map && clickHandler)  map.off('click', clickHandler)
+    if (map && moveHandler)   map.off('mousemove', moveHandler)
     clickHandler = null
+    moveHandler  = null
   }
 
   function removeKeyHandler() {
@@ -175,7 +188,7 @@ export function useMapRange(getMap) {
 
   // ---- Selection ----
 
-  // Exits selection mode, releases the click handler. Committed ranges are untouched.
+  // Exits selection mode, releases handlers. Committed ranges are untouched.
   function exitSelecting() {
     removeClickHandler()
     pendingEpA = null
@@ -195,38 +208,58 @@ export function useMapRange(getMap) {
     map?.getSource(RANGE_SOURCE)?.setData({ type: 'FeatureCollection', features: [] })
   }
 
+  // Resolve a click event to an endpoint by snapping to the topmost hit feature.
+  // Returns null if the click lands on empty space (no eligible layers hit).
+  function resolveEndpoint(map, e) {
+    const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
+    if (!hits.length) return null
+
+    const hit   = hits[0]
+    const layer = hit.layer.id
+
+    // CoT track — bind to live track data so the line follows the contact.
+    if (layer === 'cot-tracks-points') {
+      const uid = hit.properties.uid
+      const t   = tracksStore.tracks.get(uid)
+      if (t) return { type: 'track', uid, coord: [t.lon, t.lat] }
+    }
+
+    // Point geometry layers — snap to the exact feature coordinate.
+    if (['manual-tracks-points', 'draw-features-points', 'route-dot'].includes(layer)) {
+      const coords = hit.geometry?.coordinates
+      if (coords) return { type: 'point', coord: coords }
+    }
+
+    // Line / fill layers — use the cursor position on the feature.
+    return { type: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
+  }
+
   // Registers the map click handler and enters selecting state.
-  // After each committed pair the handler resets pendingEpA and keeps running —
-  // the user can place as many range lines as they want without re-clicking
-  // the toolbar button.
+  // Clicks on empty map space are ignored — both endpoints must be features.
+  // After each committed pair the handler resets pendingEpA and keeps running
+  // so the user can place as many range lines as they want without re-clicking.
   function startSelecting() {
     const map = getMap()
     if (!map) return
 
     pendingEpA = null
     isSelecting.value = true
-    map.getCanvasContainer().style.cursor = 'crosshair'
+    map.getCanvasContainer().style.cursor = 'default'
     removeClickHandler()
 
+    // Cursor feedback: crosshair over snappable features, default elsewhere.
+    moveHandler = (e) => {
+      const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
+      map.getCanvasContainer().style.cursor = hits.length ? 'crosshair' : 'default'
+    }
+
     clickHandler = (e) => {
-      // Prefer a CoT track under the click for a live-updating endpoint.
-      const hits = map.queryRenderedFeatures(e.point, { layers: ['cot-tracks-points'] })
-      let ep
-      if (hits.length > 0) {
-        const uid = hits[0].properties.uid
-        const t   = tracksStore.tracks.get(uid)
-        ep = t
-          ? { type: 'track', uid, coord: [t.lon, t.lat] }
-          : { type: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
-      } else {
-        ep = { type: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
-      }
+      const ep = resolveEndpoint(map, e)
+      if (!ep) return  // empty space — ignore
 
       if (!pendingEpA) {
-        // First point captured — wait for second.
         pendingEpA = ep
       } else {
-        // Both endpoints captured — commit and immediately reset for the next pair.
         const r = {
           id: nextId++,
           epA: pendingEpA,
@@ -240,12 +273,11 @@ export function useMapRange(getMap) {
         rebuildSource()
         syncRangeMarkers(r)
         ensureTrackWatch()
-
-        // Auto-reset: stay in selecting mode so the next pair can start immediately.
         pendingEpA = null
       }
     }
 
+    map.on('mousemove', moveHandler)
     map.on('click', clickHandler)
   }
 

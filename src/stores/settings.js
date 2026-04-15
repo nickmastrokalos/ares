@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getStore } from '@/plugins/store'
+import { useAppStore } from '@/stores/app'
 
 // Single source of truth for which settings exist and their default values.
 // Adding a new setting is: add a default here, add a matching `ref` below
@@ -16,6 +17,8 @@ const DEFAULTS = {
 }
 
 export const useSettingsStore = defineStore('settings', () => {
+  const appStore = useAppStore()
+
   const showFeatureLabels = ref(DEFAULTS.showFeatureLabels)
   const selectedBasemap = ref(DEFAULTS.selectedBasemap)
   const cotListeners = ref([...DEFAULTS.cotListeners])
@@ -43,15 +46,20 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function load() {
     if (loadPromise) return loadPromise
+    appStore.beginLoad()
     loadPromise = (async () => {
-      const store = await getStore()
-      for (const key of Object.keys(refs)) {
-        const stored = await store.get(key)
-        // Only override the default when the user has actually set a value —
-        // `null`/`undefined` mean "never written" and should stay as default.
-        if (stored !== undefined && stored !== null) {
-          refs[key].value = stored
+      try {
+        const store = await getStore()
+        for (const key of Object.keys(refs)) {
+          const stored = await store.get(key)
+          // Only override the default when the user has actually set a value —
+          // `null`/`undefined` mean "never written" and should stay as default.
+          if (stored !== undefined && stored !== null) {
+            refs[key].value = stored
+          }
         }
+      } finally {
+        appStore.endLoad()
       }
     })()
     return loadPromise

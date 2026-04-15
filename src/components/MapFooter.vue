@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import { useAppStore } from '@/stores/app'
 import { formatCoordinate } from '@/services/coordinates'
 
 const props = defineProps({
@@ -8,8 +9,9 @@ const props = defineProps({
 })
 
 const settingsStore = useSettingsStore()
+const appStore      = useAppStore()
 
-const text = computed(() => {
+const coordText = computed(() => {
   if (!props.coord) return null
   return formatCoordinate(props.coord.lng, props.coord.lat, settingsStore.coordinateFormat)
 })
@@ -17,7 +19,16 @@ const text = computed(() => {
 
 <template>
   <div class="map-footer">
-    <span v-if="text" class="map-footer__coord text-medium-emphasis">{{ text }}</span>
+    <span v-if="coordText" class="map-footer__coord">{{ coordText }}</span>
+    <span v-else class="map-footer__coord map-footer__coord--placeholder" />
+
+    <v-progress-circular
+      v-if="appStore.loading"
+      indeterminate
+      size="14"
+      width="2"
+      class="map-footer__spinner"
+    />
   </div>
 </template>
 
@@ -31,7 +42,7 @@ const text = computed(() => {
   z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 0 10px;
   background: rgba(var(--v-theme-surface), 0.92);
   border-top: 1px solid rgb(var(--v-theme-surface-variant));
@@ -43,5 +54,17 @@ const text = computed(() => {
   font-size: 11px;
   font-family: monospace;
   letter-spacing: 0.03em;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+
+.map-footer__coord--placeholder {
+  /* holds left-side space so the spinner doesn't jump to center */
+  display: inline-block;
+  width: 1px;
+}
+
+.map-footer__spinner {
+  color: rgba(var(--v-theme-on-surface), 0.45);
+  flex-shrink: 0;
 }
 </style>

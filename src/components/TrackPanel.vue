@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useTracksStore } from '@/stores/tracks'
 import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
+import { useZIndex } from '@/composables/useZIndex'
 import { formatCoordinate } from '@/services/coordinates'
 
 const props = defineProps({
@@ -16,6 +17,7 @@ const panelRef   = ref(null)
 const minimized  = ref(false)
 const positioned = ref(false)
 const { pos, onPointerDown } = useDraggable()
+const { zIndex, bringToFront } = useZIndex()
 
 // Tick counter to drive live "age" and stale countdown displays.
 const now = ref(Date.now())
@@ -95,6 +97,11 @@ onUnmounted(() => {
 watch(track, (t) => {
   if (!t) tracksStore.closePanel(props.uid)
 })
+
+// Bring this panel to front when its track marker is clicked on the map.
+watch(() => tracksStore.focusedUid, (uid) => {
+  if (uid === props.uid) bringToFront()
+})
 </script>
 
 <template>
@@ -104,8 +111,10 @@ watch(track, (t) => {
     :style="{
       left: pos.x + 'px',
       top: pos.y + 'px',
+      zIndex,
       visibility: positioned ? 'visible' : 'hidden'
     }"
+    @pointerdown="bringToFront"
   >
     <!-- Header — always visible -->
     <div class="panel-header" @pointerdown="onPointerDown">
@@ -234,6 +243,7 @@ watch(track, (t) => {
 .attr-grid {
   display: grid;
   grid-template-columns: 52px 1fr;
+  column-gap: 8px;
   row-gap: 2px;
   margin-bottom: 2px;
 }
@@ -254,6 +264,7 @@ watch(track, (t) => {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   word-break: break-all;
 }
 

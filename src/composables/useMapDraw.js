@@ -76,7 +76,7 @@ export function useMapDraw(getMap) {
         id: 'draw-features-points',
         type: 'circle',
         source: FEATURES_SOURCE,
-        filter: ['all', ['==', '$type', 'Point'], ['!=', '_type', 'image']],
+        filter: ['all', ['==', '$type', 'Point'], ['!=', '_type', 'image'], ['!=', '_type', 'manual-track']],
         paint: {
           'circle-color': featureColor,
           'circle-radius': 4

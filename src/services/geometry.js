@@ -136,3 +136,37 @@ function collectCoords(geometry) {
       return []
   }
 }
+
+export function formatSpeed(metersPerSec, units = 'metric') {
+  if (units === 'nautical') return `${(metersPerSec * 1.94384).toFixed(1)} kts`
+  if (units === 'statute') return `${(metersPerSec * 2.23694).toFixed(1)} mph`
+  return `${(metersPerSec * 3.6).toFixed(1)} km/h`
+}
+
+export function speedUnitLabel(units = 'metric') {
+  if (units === 'nautical') return 'kts'
+  if (units === 'statute') return 'mph'
+  return 'km/h'
+}
+
+export function parseSpeedToMs(value, units = 'metric') {
+  const n = parseFloat(String(value).trim())
+  if (isNaN(n) || n < 0) return null
+  if (units === 'nautical') return n * (1852 / 3600)
+  if (units === 'statute') return n * (1609.344 / 3600)
+  return n / 3.6
+}
+
+export function distanceUnitLabel(units = 'metric') {
+  if (units === 'nautical') return 'nm'
+  if (units === 'statute') return 'mi'
+  return 'km'
+}
+
+export function parseDistanceToMeters(value, units = 'metric') {
+  const n = parseFloat(String(value).trim())
+  if (isNaN(n) || n < 0) return null
+  if (units === 'nautical') return n * 1852
+  if (units === 'statute') return n * 1609.344
+  return n * 1000
+}

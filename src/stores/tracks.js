@@ -110,6 +110,12 @@ export const useTracksStore = defineStore('tracks', () => {
     listening.value = false
   }
 
+  function removeTrack(uid) {
+    const m = new Map(tracks.value)
+    m.delete(uid)
+    tracks.value = m
+  }
+
   function clearTracks() {
     tracks.value = new Map()
   }
@@ -119,12 +125,14 @@ export const useTracksStore = defineStore('tracks', () => {
   // be open simultaneously — each one is independent.
 
   const openPanels = ref(new Set())
+  const focusedUid = ref(null)
 
   // Array form for v-for in templates (Set is not directly iterable in Vue templates).
   const openPanelList = computed(() => Array.from(openPanels.value))
 
   function openPanel(uid) {
-    if (openPanels.value.has(uid)) return  // already open — don't duplicate
+    focusedUid.value = uid  // always signal focus, even if panel is already open
+    if (openPanels.value.has(uid)) return
     openPanels.value = new Set(openPanels.value).add(uid)
   }
 
@@ -140,9 +148,11 @@ export const useTracksStore = defineStore('tracks', () => {
     trackCollection,
     startListening,
     stopListening,
+    removeTrack,
     clearTracks,
     openPanels,
     openPanelList,
+    focusedUid,
     openPanel,
     closePanel
   }

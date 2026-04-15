@@ -47,6 +47,44 @@ fn stop_all_listeners(state: tauri::State<ListenerState>) {
     state.0.lock().unwrap().stop_all();
 }
 
+/// Proxy an AIS vessel fetch through Rust to avoid CORS restrictions.
+/// Returns the parsed JSON response body on success, or an error string.
+#[tauri::command]
+async fn fetch_ais_vessels(
+    url: String,
+    api_key: String,
+    min_lat: f64,
+    max_lat: f64,
+    min_lon: f64,
+    max_lon: f64,
+) -> Result<serde_json::Value, String> {
+    let base = url.trim_end_matches('/');
+    let endpoint = format!("{base}/v1/vessels");
+
+    let geometry = serde_json::json!({
+        "type": "bbox",
+        "bbox": [min_lon, min_lat, max_lon, max_lat]
+    });
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(&endpoint)
+        .header("x-api-key", &api_key)
+        .query(&[("geometry", geometry.to_string())])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = res.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {}", status.as_u16()));
+    }
+
+    res.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Resolve the SQLite connection URL used by the `tauri-plugin-sql`.
 ///
 /// - In debug builds the file lives in the project root (one level above
@@ -88,6 +126,7 @@ pub fn run() {
             start_listener,
             stop_listener,
             stop_all_listeners,
+            fetch_ais_vessels,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

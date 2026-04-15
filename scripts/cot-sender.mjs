@@ -18,7 +18,7 @@
  */
 
 import * as dgram from 'node:dgram'
-import * as net   from 'node:net'
+import * as net from 'node:net'
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -29,11 +29,11 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, '')
     const val = argv[i + 1]
-    if      (key === 'host')     args.host     = val
-    else if (key === 'port')     args.port     = Number(val)
+    if (key === 'host') args.host = val
+    else if (key === 'port') args.port = Number(val)
     else if (key === 'protocol') args.protocol = val.toLowerCase()
-    else if (key === 'tracks')   args.tracks   = Math.max(1, Number(val))
-    else if (key === 'speed')    args.speed    = Number(val)
+    else if (key === 'tracks') args.tracks = Math.max(1, Number(val))
+    else if (key === 'speed') args.speed = Number(val)
   }
   return args
 }
@@ -48,14 +48,21 @@ const INTERVAL_MS = 1000
 // ---------------------------------------------------------------------------
 
 const WAYPOINTS = [
-  { lat: 36.91435, lon: -76.16793 },
-  { lat: 36.91534, lon: -76.17696 },
-  { lat: 36.92285, lon: -76.17747 },
-  { lat: 36.93417, lon: -76.17737 },
-  { lat: 36.92862, lon: -76.13399 },
-  { lat: 36.96392, lon: -76.12779 },
-  { lat: 36.97815, lon: -76.19560 },
-  { lat: 36.94616, lon: -76.20935 },
+  { lat: 36.91492, lon: -76.16714 },  // SP
+  { lat: 36.91479, lon: -76.17772 },  // WP 1
+  { lat: 36.91851, lon: -76.17804 },  // WP 2
+  { lat: 36.93504, lon: -76.17676 },  // WP 3
+  { lat: 36.93337, lon: -76.15672 },  // WP 4
+  { lat: 36.94183, lon: -76.13444 },  // WP 5
+  { lat: 36.96245, lon: -76.13717 },  // WP 6
+  { lat: 36.96758, lon: -76.17099 },  // WP 7
+  { lat: 36.96079, lon: -76.20209 },  // WP 8
+  { lat: 36.93863, lon: -76.20097 },  // WP 9
+  { lat: 36.93440, lon: -76.17788 },  // WP 10
+  { lat: 36.92427, lon: -76.17820 },  // WP 11
+  { lat: 36.91376, lon: -76.17932 },  // WP 12
+  { lat: 36.91376, lon: -76.16923 },  // WP 13
+  { lat: 36.91376, lon: -76.16923 },  // EP
 ]
 
 // ---------------------------------------------------------------------------
@@ -65,19 +72,19 @@ const WAYPOINTS = [
 const DEG = Math.PI / 180
 
 function haversine(p1, p2) {
-  const R  = 6_371_000
+  const R = 6_371_000
   const φ1 = p1.lat * DEG, φ2 = p2.lat * DEG
   const Δφ = (p2.lat - p1.lat) * DEG
   const Δλ = (p2.lon - p1.lon) * DEG
-  const a  = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
 function bearing(p1, p2) {
   const φ1 = p1.lat * DEG, φ2 = p2.lat * DEG
   const Δλ = (p2.lon - p1.lon) * DEG
-  const y  = Math.sin(Δλ) * Math.cos(φ2)
-  const x  = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
   return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360
 }
 
@@ -93,7 +100,7 @@ function lerpPoint(p1, p2, t) {
 const N = WAYPOINTS.length
 
 // Segment lengths and bearings for each leg (including the closing leg back to WP0).
-const SEG_LENGTHS  = Array.from({ length: N }, (_, i) => haversine(WAYPOINTS[i], WAYPOINTS[(i + 1) % N]))
+const SEG_LENGTHS = Array.from({ length: N }, (_, i) => haversine(WAYPOINTS[i], WAYPOINTS[(i + 1) % N]))
 const SEG_BEARINGS = Array.from({ length: N }, (_, i) => bearing(WAYPOINTS[i], WAYPOINTS[(i + 1) % N]))
 
 // Cumulative distances from the route start, one entry per segment start.
@@ -115,7 +122,7 @@ function positionAt(dist) {
   }
 
   const frac = (d - CUM_DIST[seg]) / SEG_LENGTHS[seg]
-  const pos  = lerpPoint(WAYPOINTS[seg], WAYPOINTS[(seg + 1) % N], frac)
+  const pos = lerpPoint(WAYPOINTS[seg], WAYPOINTS[(seg + 1) % N], frac)
   return { lat: pos.lat, lon: pos.lon, course: SEG_BEARINGS[seg] }
 }
 
@@ -138,9 +145,9 @@ const COT_TYPE = 'a-f-S-X-M'
 const SPEED_MS = opts.speed * (1852 / 3600)
 
 const trackState = Array.from({ length: opts.tracks }, (_, i) => ({
-  uid:      `ARES-USV-${i + 1}`,
+  uid: `ARES-USV-${i + 1}`,
   callsign: `USV-${NATO[i % NATO.length]}`,
-  dist:     (TOTAL_DIST * i) / opts.tracks   // evenly spaced start positions
+  dist: (TOTAL_DIST * i) / opts.tracks   // evenly spaced start positions
 }))
 
 // ---------------------------------------------------------------------------
@@ -153,7 +160,7 @@ function isoNow(offsetSeconds = 0) {
 
 function buildCot(track) {
   const { lat, lon, course } = positionAt(track.dist)
-  const time  = isoNow()
+  const time = isoNow()
   const stale = isoNow(10)
 
   return (
@@ -181,7 +188,7 @@ function stepTracks() {
 // ---------------------------------------------------------------------------
 
 const LAP_MINS = (TOTAL_DIST / SPEED_MS / 60).toFixed(1)
-const DIST_KM  = (TOTAL_DIST / 1000).toFixed(2)
+const DIST_KM = (TOTAL_DIST / 1000).toFixed(2)
 
 function statusLine(proto) {
   return (
@@ -217,7 +224,7 @@ function sendUdp() {
 // ---------------------------------------------------------------------------
 
 function sendTcp() {
-  let client     = null
+  let client = null
   let intervalId = null
 
   function connect() {

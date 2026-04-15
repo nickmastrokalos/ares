@@ -1,5 +1,5 @@
 <script setup>
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-measure', 'toggle-range', 'toggle-route', 'toggle-listeners', 'toggle-settings', 'exit-mission'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-measure', 'toggle-range', 'toggle-route', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission'])
 
 defineProps({
   drawPanelOpen: Boolean,
@@ -7,6 +7,11 @@ defineProps({
   measuring: Boolean,
   ranging: Boolean,
   routing: Boolean,
+  trackDropPanelOpen: Boolean,
+  trackListOpen: Boolean,
+  ghostPanelOpen: Boolean,
+  interceptPanelOpen: Boolean,
+  aisPanelOpen: Boolean,
   missionName: { type: String, default: '' }
 })
 </script>
@@ -30,8 +35,9 @@ defineProps({
         {{ missionName }}
       </span>
 
-      <v-divider vertical class="mx-2" />
+      <v-divider vertical class="mx-2 toolbar-divider" />
 
+      <!-- Annotation -->
       <v-tooltip text="Draw" location="bottom">
         <template #activator="{ props }">
           <v-btn
@@ -58,6 +64,9 @@ defineProps({
         </template>
       </v-tooltip>
 
+      <v-divider vertical class="mx-2 toolbar-divider" />
+
+      <!-- Analysis -->
       <v-tooltip text="Measure" location="bottom">
         <template #activator="{ props }">
           <v-btn
@@ -93,6 +102,77 @@ defineProps({
             :color="routing ? 'primary' : undefined"
             :class="[routing ? 'toolbar-active' : 'text-medium-emphasis']"
             @click="emit('toggle-route')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-divider vertical class="mx-2 toolbar-divider" />
+
+      <!-- Tracks -->
+      <v-tooltip text="Track Drop" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-map-marker-account"
+            size="small"
+            :color="trackDropPanelOpen ? 'primary' : undefined"
+            :class="[trackDropPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-track-drop')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Track List" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-format-list-bulleted"
+            size="small"
+            :color="trackListOpen ? 'primary' : undefined"
+            :class="[trackListOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-track-list')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Ghosts" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-ghost"
+            size="small"
+            :color="ghostPanelOpen ? 'primary' : undefined"
+            :class="[ghostPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-ghost')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Intercept" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-target"
+            size="small"
+            :color="interceptPanelOpen ? 'primary' : undefined"
+            :class="[interceptPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-intercept')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-divider vertical class="mx-2 toolbar-divider" />
+
+      <!-- Feeds -->
+      <v-tooltip text="AIS Feed" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-ferry"
+            size="small"
+            :color="aisPanelOpen ? 'primary' : undefined"
+            :class="[aisPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-ais')"
           />
         </template>
       </v-tooltip>
@@ -138,5 +218,9 @@ defineProps({
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.toolbar-divider {
+  border-color: rgba(var(--v-theme-on-surface), 0.7) !important;
 }
 </style>
