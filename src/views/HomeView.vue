@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useFeaturesStore } from '@/stores/features'
 import aresIcon from '@/assets/ares-icon.png'
-import { version } from '../../../package.json'
+import { version } from '../../package.json'
 
 const router = useRouter()
 const featuresStore = useFeaturesStore()
