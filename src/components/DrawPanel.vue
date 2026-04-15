@@ -1,5 +1,5 @@
 <script setup>
-import { ref, mergeProps } from 'vue'
+import { ref, mergeProps, onMounted, nextTick } from 'vue'
 import { IO_FORMATS } from '@/services/io'
 import { useFeaturesStore } from '@/stores/features'
 import { useDraggable } from '@/composables/useDraggable'
@@ -10,9 +10,23 @@ const featuresStore = useFeaturesStore()
 
 const activeTool = ref(null)
 const overlaysDialogOpen = ref(false)
+const panelRef = ref(null)
 const { pos, onPointerDown } = useDraggable({ x: 12, y: 12 })
 
+onMounted(async () => {
+  await nextTick()
+  const parent = panelRef.value?.parentElement
+  if (!parent || !panelRef.value) return
+  const panelHeight = panelRef.value.offsetHeight
+  const parentHeight = parent.clientHeight
+  pos.value = {
+    x: 12,
+    y: Math.max(12, Math.round((parentHeight - panelHeight) / 2))
+  }
+})
+
 const tools = [
+  { id: 'point', icon: 'mdi-map-marker-outline', tooltip: 'Point' },
   { id: 'line', icon: 'mdi-vector-line', tooltip: 'Line' },
   { id: 'polygon', icon: 'mdi-vector-polygon', tooltip: 'Polygon' },
   { id: 'box', icon: 'mdi-vector-square', tooltip: 'Box' },
@@ -48,6 +62,7 @@ async function handleExport(format) {
 
 <template>
   <div
+    ref="panelRef"
     class="draw-panel"
     :style="{ left: pos.x + 'px', top: pos.y + 'px' }"
   >

@@ -53,6 +53,15 @@ const coordinateFormat = computed({
   set: (v) => settingsStore.setSetting('coordinateFormat', v)
 })
 
+const basemapOpacity = computed({
+  get: () => settingsStore.basemapOpacity,
+  set: (v) => settingsStore.setSetting('basemapOpacity', v)
+})
+
+function opacityLabel(v) {
+  return `${Math.round(v * 100)}%`
+}
+
 // ---- Track settings ----
 
 const trackBreadcrumbs = computed({
@@ -150,6 +159,37 @@ function formatBadge(ts) {
                 hide-details
                 inset
               />
+            </div>
+
+            <v-divider class="my-3" />
+
+            <div>
+              <div class="d-flex align-center mb-1">
+                <div class="flex-grow-1">
+                  <div class="text-body-2">Basemap dimming</div>
+                  <div class="text-caption text-medium-emphasis">
+                    Fade the basemap to make tracks and overlays stand out.
+                  </div>
+                </div>
+                <span class="text-body-2 length-value">
+                  {{ opacityLabel(basemapOpacity) }}
+                </span>
+              </div>
+              <v-slider
+                v-model="basemapOpacity"
+                :min="0"
+                :max="1"
+                :step="0.05"
+                density="compact"
+                hide-details
+                thumb-size="14"
+                track-size="2"
+                color="primary"
+              />
+              <div class="d-flex justify-space-between text-caption text-medium-emphasis mt-1">
+                <span>Off</span>
+                <span>Full</span>
+              </div>
             </div>
 
             <v-divider class="my-3" />

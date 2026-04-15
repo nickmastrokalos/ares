@@ -1,5 +1,12 @@
 const EARTH_RADIUS = 6371000 // meters
 
+export function boxPolygon(a, b) {
+  return {
+    type: 'Polygon',
+    coordinates: [[a, [b[0], a[1]], b, [a[0], b[1]], a]]
+  }
+}
+
 export function circlePolygon(center, radiusMeters, steps = 64) {
   const coords = []
   for (let i = 0; i <= steps; i++) {

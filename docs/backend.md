@@ -23,7 +23,7 @@ src-tauri/
     migrations.rs      # SQLite schema migrations
     cot.rs             # CoT XML parser
     listeners.rs       # UDP/TCP CoT listener task manager
-  icons/               # Generated app icons
+  icons/               # Generated app icons derived from ../app-icon.png
 ```
 
 ## Conventions
@@ -31,6 +31,7 @@ src-tauri/
 - Register commands in the `invoke_handler` within the `run()` function.
 - Use `serde` for all data serialization between frontend and backend.
 - Use `tauri::async_runtime::spawn` (not `tokio::spawn` directly) for async tasks — it wraps Tokio but integrates with Tauri's handle lifecycle.
+- Treat `app-icon.png` at the repo root as the canonical desktop app icon source. Regenerate `src-tauri/icons/` with `pnpm tauri icon app-icon.png` instead of hand-editing platform-specific icon outputs.
 
 ## Cross-Platform (Windows, Linux, macOS)
 - Use `std::path::PathBuf` and `Path` for all file paths — never hardcode `/` or `\`.

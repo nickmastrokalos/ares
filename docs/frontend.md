@@ -127,7 +127,9 @@ Consequences:
 - `useFeaturesStore.setActiveMission(id)` is the single entry point for "load this mission's features and make it active." It loads `missions` if needed, resolves the id, and fetches the feature rows. Returns the mission row on success, `null` if the id doesn't match.
 - `featuresStore.renameMission(id, name)` bumps `updated_at` so renames surface as recent activity in the picker's default sort.
 - `MapToolbar` shows the active mission name plus a chevron back to the picker.
-- Branding: the helmet PNG at `src/assets/ares-icon.png` (transparent background, alpha channel) is used as both the small logo above the ARES wordmark and as an oversized low-opacity watermark behind the home page for ambient texture.
+- Branding uses two distinct assets:
+  - `src/assets/ares-icon.png` is the in-app helmet mark used in the UI (home-page logo + low-opacity watermark treatment).
+  - `app-icon.png` is the canonical source for generated Tauri app icons. Regenerate `src-tauri/icons/` with `pnpm tauri icon app-icon.png` when the dock / bundle icon artwork changes so dev and packaged builds stay visually aligned.
 
 ## Import / Export
 - Supported formats live in `src/services/io.js` as `IO_FORMATS`:

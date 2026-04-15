@@ -12,6 +12,10 @@
     "sql:allow-close",
     "store:default",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    "fs:allow-desktop-write-recursive",
+    "fs:allow-document-write-recursive",
+    "fs:allow-download-write-recursive",
+    "fs:allow-home-write-recursive"
   ]
 }
