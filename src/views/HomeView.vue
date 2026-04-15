@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useFeaturesStore } from '@/stores/features'
 import aresIcon from '@/assets/ares-icon.png'
+import { version } from '../../../package.json'
 
 const router = useRouter()
 const featuresStore = useFeaturesStore()
@@ -180,6 +181,11 @@ function formatDate(value) {
       class="home-watermark"
       aria-hidden="true"
     />
+
+    <footer class="home-footer">
+      <span>Corvus Program H11 Branch — NSWC Dahlgren Division, Dahlgren VA 22407</span>
+      <span>v{{ version }}</span>
+    </footer>
 
     <v-container class="d-flex flex-column align-center justify-center fill-height home-content">
       <img :src="aresIcon" alt="Ares" class="home-logo mb-3" />
@@ -420,6 +426,23 @@ function formatDate(value) {
 
 .mission-table :deep(tbody tr) {
   cursor: pointer;
+}
+
+.home-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.35);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
 }
 
 /* Tight-fit rename field inside the cell — the default min-height on
