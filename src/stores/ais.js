@@ -65,6 +65,21 @@ export const useAisStore = defineStore('ais', () => {
 
   const vesselCount = computed(() => vessels.value.size)
 
+  // ---- Panel management ----
+
+  const openPanelList = ref([])
+  const focusedMmsi   = ref(null)
+
+  function openPanel(mmsi) {
+    if (!openPanelList.value.includes(mmsi)) openPanelList.value.push(mmsi)
+    focusedMmsi.value = mmsi
+  }
+
+  function closePanel(mmsi) {
+    openPanelList.value = openPanelList.value.filter(m => m !== mmsi)
+    if (focusedMmsi.value === mmsi) focusedMmsi.value = null
+  }
+
   // ---- Persistence ----
 
   async function load() {
@@ -138,8 +153,10 @@ export const useAisStore = defineStore('ais', () => {
     aisBreadcrumbs,
     vessels, lastFetch, fetchError, loading,
     vesselCollection, breadcrumbCollection, vesselCount,
+    openPanelList, focusedMmsi,
     load, fetchVessels,
     setEnabled, setVisible, setFeedUrl, setApiKey,
-    setAisBreadcrumbs
+    setAisBreadcrumbs,
+    openPanel, closePanel
   }
 })

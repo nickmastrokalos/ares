@@ -1,37 +1,38 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settings'
+import { useTileserverStore } from '@/stores/tileserver'
 
 const props = defineProps({
   modelValue: Boolean
 })
 const emit = defineEmits(['update:modelValue'])
 
-const settingsStore = useSettingsStore()
+const settingsStore   = useSettingsStore()
+const tileserverStore = useTileserverStore()
 
 const open = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v)
 })
 
-// Active tab. Keyed list so new sections can be added by dropping a new
-// entry here plus a matching `<v-window-item>` below — no router or
-// external config involved.
 const TABS = [
   { id: 'display', label: 'Display', icon: 'mdi-monitor-eye' },
-  { id: 'tracks',  label: 'Tracks',  icon: 'mdi-radar' }
+  { id: 'tracks',  label: 'Tracks',  icon: 'mdi-radar' },
+  { id: 'maps',    label: 'Maps',    icon: 'mdi-map-outline' }
 ]
 const activeTab = ref(TABS[0].id)
 
-// Two-way binding that writes through to the persistent store on every
-// change. Toggles are cheap; no need to debounce or batch.
+// ---- Display settings ----
+
 const showFeatureLabels = computed({
   get: () => settingsStore.showFeatureLabels,
   set: (v) => settingsStore.setSetting('showFeatureLabels', v)
 })
 
 const DISTANCE_UNITS = [
-  { title: 'Metric (m / km)', value: 'metric' },
+  { title: 'Metric (m / km)',   value: 'metric' },
   { title: 'Statute (ft / mi)', value: 'statute' },
   { title: 'Nautical (m / nm)', value: 'nautical' }
 ]
@@ -44,13 +45,15 @@ const distanceUnits = computed({
 const COORDINATE_FORMATS = [
   { title: 'Decimal degrees', value: 'dd' },
   { title: 'Deg / min / sec', value: 'dms' },
-  { title: 'MGRS', value: 'mgrs' }
+  { title: 'MGRS',            value: 'mgrs' }
 ]
 
 const coordinateFormat = computed({
   get: () => settingsStore.coordinateFormat,
   set: (v) => settingsStore.setSetting('coordinateFormat', v)
 })
+
+// ---- Track settings ----
 
 const trackBreadcrumbs = computed({
   get: () => settingsStore.trackBreadcrumbs,
@@ -66,6 +69,28 @@ function breadcrumbLengthLabel(secs) {
   return secs === 60 ? '1 min' : `${secs}s`
 }
 
+// ---- Offline maps ----
+
+const addingPath = ref(false)
+
+async function pickFolder() {
+  addingPath.value = true
+  try {
+    const selected = await openDialog({ directory: true, multiple: false })
+    if (selected) await tileserverStore.addPath(selected)
+  } finally {
+    addingPath.value = false
+  }
+}
+
+// Group tilesets by their parent path for display
+function tilesetsForPath(path) {
+  return tileserverStore.tilesets.filter(ts => ts.path.startsWith(path))
+}
+
+function formatBadge(ts) {
+  return ts.format.toUpperCase()
+}
 </script>
 
 <template>
@@ -107,6 +132,8 @@ function breadcrumbLengthLabel(secs) {
       <v-divider />
 
       <v-window v-model="activeTab">
+
+        <!-- ---- Display ---- -->
         <v-window-item value="display">
           <div class="pa-4">
             <div class="d-flex align-center">
@@ -166,6 +193,8 @@ function breadcrumbLengthLabel(secs) {
             </div>
           </div>
         </v-window-item>
+
+        <!-- ---- Tracks ---- -->
         <v-window-item value="tracks">
           <div class="pa-4">
             <div class="d-flex align-center">
@@ -215,9 +244,83 @@ function breadcrumbLengthLabel(secs) {
                 <span>1 min</span>
               </div>
             </div>
+          </div>
+        </v-window-item>
+
+        <!-- ---- Maps ---- -->
+        <v-window-item value="maps">
+          <div class="pa-4">
+
+            <div class="d-flex align-center justify-space-between mb-3">
+              <div>
+                <div class="text-body-2">Offline tile paths</div>
+                <div class="text-caption text-medium-emphasis">
+                  Folders containing .mbtiles files served on 127.0.0.1:3650.
+                </div>
+              </div>
+              <v-btn
+                size="small"
+                variant="tonal"
+                prepend-icon="mdi-folder-plus-outline"
+                :loading="addingPath"
+                @click="pickFolder"
+              >
+                Add folder
+              </v-btn>
+            </div>
+
+            <!-- Empty state -->
+            <div
+              v-if="tileserverStore.paths.length === 0"
+              class="empty-paths text-caption text-medium-emphasis"
+            >
+              No paths configured. Add a folder containing .mbtiles files.
+            </div>
+
+            <!-- Path list -->
+            <div
+              v-for="path in tileserverStore.paths"
+              :key="path"
+              class="path-block"
+            >
+              <div class="path-row">
+                <v-icon size="14" class="text-medium-emphasis flex-shrink-0">mdi-folder-outline</v-icon>
+                <span class="path-text text-caption">{{ path }}</span>
+                <v-btn
+                  icon="mdi-close"
+                  size="x-small"
+                  variant="text"
+                  class="text-medium-emphasis flex-shrink-0"
+                  @click="tileserverStore.removePath(path)"
+                />
+              </div>
+
+              <!-- Tilesets found in this path -->
+              <div class="tileset-list">
+                <div
+                  v-if="tilesetsForPath(path).length === 0"
+                  class="text-caption text-disabled ps-5 pb-1"
+                >
+                  No .mbtiles files found
+                </div>
+                <div
+                  v-for="ts in tilesetsForPath(path)"
+                  :key="ts.name"
+                  class="tileset-row"
+                >
+                  <v-icon size="12" class="text-medium-emphasis">mdi-map-outline</v-icon>
+                  <span class="text-caption">{{ ts.display_name }}</span>
+                  <span class="format-badge">{{ formatBadge(ts) }}</span>
+                  <span class="text-caption text-disabled zoom-range">
+                    z{{ ts.minzoom }}–{{ ts.maxzoom }}
+                  </span>
+                </div>
+              </div>
+            </div>
 
           </div>
         </v-window-item>
+
       </v-window>
     </v-card>
   </v-dialog>
@@ -231,5 +334,65 @@ function breadcrumbLengthLabel(secs) {
 .length-value {
   min-width: 48px;
   text-align: right;
+}
+
+/* ---- Offline maps tab ---- */
+
+.empty-paths {
+  border: 1px dashed rgba(var(--v-theme-on-surface), 0.15);
+  border-radius: 4px;
+  padding: 16px;
+  text-align: center;
+}
+
+.path-block {
+  margin-bottom: 8px;
+  border: 1px solid rgb(var(--v-theme-surface-variant));
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 8px;
+  background: rgba(var(--v-theme-surface-variant), 0.3);
+}
+
+.path-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  opacity: 0.7;
+}
+
+.tileset-list {
+  padding: 4px 8px 6px 8px;
+}
+
+.tileset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.format-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: rgba(var(--v-theme-on-surface), 0.45);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+  border-radius: 2px;
+  padding: 0 3px;
+  line-height: 14px;
+}
+
+.zoom-range {
+  margin-left: auto;
 }
 </style>

@@ -2,16 +2,22 @@
 import { ref, inject } from 'vue'
 import { BASEMAPS } from '@/services/basemaps'
 import { useSettingsStore } from '@/stores/settings'
+import { useTileserverStore } from '@/stores/tileserver'
 import { useDraggable } from '@/composables/useDraggable'
 
-const settingsStore = useSettingsStore()
-const switchBasemap = inject('switchBasemap')
+const settingsStore   = useSettingsStore()
+const tileserverStore = useTileserverStore()
+const switchBasemap   = inject('switchBasemap')
 const { pos, onPointerDown } = useDraggable({ x: 148, y: 12 })
 
 const activeTab = ref('online')
 
 function selectBasemap(id) {
   switchBasemap(id)
+}
+
+function offlineId(ts) {
+  return `offline:${ts.name}`
 }
 </script>
 
@@ -58,10 +64,26 @@ function selectBasemap(id) {
       </v-list>
     </div>
 
+    <div v-else-if="tileserverStore.tilesets.length > 0" class="pa-1">
+      <v-list density="compact" bg-color="transparent" class="pa-0">
+        <v-list-item
+          v-for="ts in tileserverStore.tilesets"
+          :key="ts.name"
+          prepend-icon="mdi-map"
+          :title="ts.display_name"
+          :subtitle="`z${ts.minzoom}–${ts.maxzoom}`"
+          :active="settingsStore.selectedBasemap === offlineId(ts)"
+          active-color="primary"
+          rounded="sm"
+          @click="selectBasemap(offlineId(ts))"
+        />
+      </v-list>
+    </div>
+
     <div v-else class="offline-placeholder pa-4 d-flex flex-column align-center ga-2">
       <v-icon icon="mdi-cloud-off-outline" size="28" class="text-medium-emphasis" />
       <span class="text-caption text-medium-emphasis text-center">
-        Connect a map server to use offline maps
+        Add .mbtiles folders in Settings → Maps
       </span>
     </div>
   </div>

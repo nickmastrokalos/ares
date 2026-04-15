@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useTracksStore } from '@/stores/tracks'
 import { useGhostsStore } from '@/stores/ghosts'
 import { useAisStore } from '@/stores/ais'
+import { useTileserverStore } from '@/stores/tileserver'
 import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
 import { useMapRange } from '@/composables/useMapRange'
@@ -34,6 +35,7 @@ import TrackListPanel from '@/components/TrackListPanel.vue'
 import GhostPanel from '@/components/GhostPanel.vue'
 import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
 import AisPanel from '@/components/AisPanel.vue'
+import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import MapFooter from '@/components/MapFooter.vue'
 
 const props = defineProps({
@@ -47,7 +49,8 @@ const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
 const tracksStore = useTracksStore()
 const ghostsStore = useGhostsStore()
-const aisStore    = useAisStore()
+const aisStore          = useAisStore()
+const tileserverStore   = useTileserverStore()
 const drawPanelOpen = ref(false)
 const layersPanelOpen = ref(false)
 const listenersDialogOpen = ref(false)
@@ -96,11 +99,20 @@ provide('clearInterceptMarker', () => {
   }
 })
 
+function resolveBasemapTiles(id) {
+  if (id?.startsWith('offline:')) {
+    const name = id.slice(8)
+    const ts   = tileserverStore.tilesets.find(t => t.name === name)
+    if (ts) return { tiles: [ts.tile_url], tileSize: 256, maxzoom: ts.maxzoom }
+  }
+  return getBasemap(id)
+}
+
 async function switchBasemap(id) {
-  const basemap = getBasemap(id)
   if (map) {
-    const source = map.getSource('basemap')
-    if (source) source.setTiles(basemap.tiles)
+    const source   = map.getSource('basemap')
+    const resolved = resolveBasemapTiles(id)
+    if (source) source.setTiles(resolved.tiles)
   }
   await settingsStore.setSetting('selectedBasemap', id)
 }
@@ -175,8 +187,9 @@ onMounted(async () => {
   }
 
   await settingsStore.load()
+  await tileserverStore.load()
   await aisStore.load()
-  const basemap = getBasemap(settingsStore.selectedBasemap)
+  const basemap = resolveBasemapTiles(settingsStore.selectedBasemap)
 
   map = new maplibregl.Map({
     container: mapContainer.value,
@@ -336,6 +349,11 @@ onUnmounted(async () => {
         <AisPanel
           v-if="aisPanelOpen"
           @close="aisPanelOpen = false"
+        />
+        <AisTrackPanel
+          v-for="mmsi in aisStore.openPanelList"
+          :key="mmsi"
+          :mmsi="mmsi"
         />
         <TrackDropPanel
           v-if="trackDropPanelOpen"

@@ -7,12 +7,14 @@ const AIS_SOURCE  = 'ais-vessels'
 const AIS_LAYER   = 'ais-vessels-points'
 const AIS_LABELS  = 'ais-vessels-labels'
 
-const DEBOUNCE_MS = 600
+const DEBOUNCE_MS  = 600
+const POLL_MS      = 30_000
 
 export function useMapAis(getMap) {
   const aisStore = useAisStore()
   let initialized   = false
   let debounceTimer = null
+  let pollTimer     = null
 
   function getBounds() {
     const map = getMap()
@@ -33,6 +35,20 @@ export function useMapAis(getMap) {
       const bounds = getBounds()
       if (bounds) aisStore.fetchVessels(bounds)
     }, DEBOUNCE_MS)
+  }
+
+  function onVesselClick(e) {
+    const feature = e.features?.[0]
+    if (!feature) return
+    aisStore.openPanel(String(feature.properties.mmsi))
+  }
+
+  function onMouseEnter() {
+    getMap().getCanvas().style.cursor = 'pointer'
+  }
+
+  function onMouseLeave() {
+    getMap().getCanvas().style.cursor = ''
   }
 
   function initLayers() {
@@ -95,10 +111,17 @@ export function useMapAis(getMap) {
     map.on('moveend', scheduleRefetch)
     map.on('zoomend', scheduleRefetch)
 
+    map.on('click', AIS_LAYER, onVesselClick)
+    map.on('mouseenter', AIS_LAYER, onMouseEnter)
+    map.on('mouseleave', AIS_LAYER, onMouseLeave)
+
     initialized = true
 
-    // Trigger an immediate fetch if already enabled
-    if (aisStore.enabled) scheduleRefetch()
+    // Trigger an immediate fetch if already enabled, then poll every 30s
+    if (aisStore.enabled) {
+      scheduleRefetch()
+      pollTimer = setInterval(scheduleRefetch, POLL_MS)
+    }
   }
 
   // Push vessel dot updates to the map source
@@ -119,11 +142,18 @@ export function useMapAis(getMap) {
     { deep: false }
   )
 
-  // When enabled mid-session, kick off an immediate fetch
+  // When enabled mid-session, kick off an immediate fetch and start polling.
+  // When disabled, cancel the poll.
   const stopEnabledWatch = watch(
     () => aisStore.enabled,
     (val) => {
-      if (val) scheduleRefetch()
+      if (val) {
+        scheduleRefetch()
+        if (!pollTimer) pollTimer = setInterval(scheduleRefetch, POLL_MS)
+      } else {
+        clearInterval(pollTimer)
+        pollTimer = null
+      }
     }
   )
 
@@ -132,10 +162,14 @@ export function useMapAis(getMap) {
     stopCrumbWatch()
     stopEnabledWatch()
     clearTimeout(debounceTimer)
+    clearInterval(pollTimer)
     const map = getMap()
     if (!map) return
     map.off('moveend', scheduleRefetch)
     map.off('zoomend', scheduleRefetch)
+    map.off('click',      AIS_LAYER, onVesselClick)
+    map.off('mouseenter', AIS_LAYER, onMouseEnter)
+    map.off('mouseleave', AIS_LAYER, onMouseLeave)
     if (map.getLayer(AIS_LABELS))     map.removeLayer(AIS_LABELS)
     if (map.getLayer(AIS_LAYER))      map.removeLayer(AIS_LAYER)
     if (map.getLayer(AIS_CRUMB_LAYER)) map.removeLayer(AIS_CRUMB_LAYER)

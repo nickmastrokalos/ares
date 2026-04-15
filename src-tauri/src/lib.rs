@@ -4,6 +4,7 @@ use std::sync::Mutex;
 mod cot;
 mod listeners;
 mod migrations;
+mod tileserver;
 
 use listeners::ListenerManager;
 
@@ -11,6 +12,33 @@ struct DatabaseUrl(String);
 
 /// Managed state holding all active CoT listener tasks.
 struct ListenerState(Mutex<ListenerManager>);
+
+/// Managed state for the local MBTiles tile server.
+struct TileServerState(tileserver::Registry);
+
+// ---- Tile server commands ----
+
+/// Scan `path` (a directory) for .mbtiles files and register them.
+/// Returns the list of newly discovered tilesets.
+#[tauri::command]
+fn add_tile_path(
+    path: String,
+    state: tauri::State<TileServerState>,
+) -> Vec<tileserver::TilesetInfo> {
+    tileserver::register_path(&state.0, &path)
+}
+
+/// Remove all tilesets whose files live in `path`.
+#[tauri::command]
+fn remove_tile_path(path: String, state: tauri::State<TileServerState>) {
+    tileserver::unregister_path(&state.0, &path);
+}
+
+/// Return all currently registered tilesets.
+#[tauri::command]
+fn list_tilesets(state: tauri::State<TileServerState>) -> Vec<tileserver::TilesetInfo> {
+    tileserver::list(&state.0)
+}
 
 #[tauri::command]
 fn get_database_url(state: tauri::State<DatabaseUrl>) -> String {
@@ -108,9 +136,17 @@ fn resolve_database_url() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db_url = resolve_database_url();
+    let db_url        = resolve_database_url();
+    let tile_registry = tileserver::new_registry();
 
     tauri::Builder::default()
+        .setup({
+            let tile_registry = tile_registry.clone();
+            move |_app| {
+                tileserver::start(tile_registry);
+                Ok(())
+            }
+        })
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations(&db_url, migrations::migrations())
@@ -121,12 +157,16 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(DatabaseUrl(db_url))
         .manage(ListenerState(Mutex::new(ListenerManager::new())))
+        .manage(TileServerState(tile_registry))
         .invoke_handler(tauri::generate_handler![
             get_database_url,
             start_listener,
             stop_listener,
             stop_all_listeners,
             fetch_ais_vessels,
+            add_tile_path,
+            remove_tile_path,
+            list_tilesets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
