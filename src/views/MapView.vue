@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, provide, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -20,6 +20,7 @@ import { useMapManualTracks } from '@/composables/useMapManualTracks'
 import { useMapGhosts } from '@/composables/useMapGhosts'
 import { useMapAis } from '@/composables/useMapAis'
 import { getBasemap } from '@/services/basemaps'
+import neCountries from '@/assets/ne-countries-110m.json'
 import MapToolbar from '@/components/MapToolbar.vue'
 import DrawPanel from '@/components/DrawPanel.vue'
 import AttributesPanel from '@/components/AttributesPanel.vue'
@@ -202,6 +203,7 @@ onMounted(async () => {
       // labels work offline.
       glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sources: {
+        'world-land': { type: 'geojson', data: neCountries },
         basemap: {
           type: 'raster',
           tiles: basemap.tiles,
@@ -209,12 +211,32 @@ onMounted(async () => {
         }
       },
       layers: [
+        // ---- World reference (always visible, renders behind raster tiles) ----
+        {
+          id: 'world-ocean',
+          type: 'background',
+          paint: { 'background-color': '#141820' }
+        },
+        {
+          id: 'world-land',
+          type: 'fill',
+          source: 'world-land',
+          paint: { 'fill-color': '#1e2330', 'fill-opacity': 1 }
+        },
+        {
+          id: 'world-borders',
+          type: 'line',
+          source: 'world-land',
+          paint: { 'line-color': '#353c50', 'line-width': 0.5 }
+        },
+        // ---- Basemap tiles on top — offline areas fall through to above ----
         {
           id: 'basemap-tiles',
           type: 'raster',
           source: 'basemap',
           minzoom: 0,
-          maxzoom: basemap.maxzoom
+          maxzoom: basemap.maxzoom,
+          paint: { 'raster-opacity': settingsStore.basemapOpacity }
         }
       ]
     },
@@ -268,6 +290,16 @@ onMounted(async () => {
       }
     }
     await tracksStore.startListening()
+
+    // Apply basemap opacity live when the setting changes.
+    watch(
+      () => settingsStore.basemapOpacity,
+      (val) => {
+        if (map?.getLayer('basemap-tiles')) {
+          map.setPaintProperty('basemap-tiles', 'raster-opacity', val)
+        }
+      }
+    )
   })
 })
 

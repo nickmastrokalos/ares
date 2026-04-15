@@ -1,5 +1,6 @@
 import { ref, watch, onUnmounted } from 'vue'
 import {
+  boxPolygon,
   circlePolygon,
   sectorPolygon,
   distanceBetween,
@@ -222,6 +223,9 @@ export function useMapDraw(getMap) {
 
     dblClickHandler = async (e) => {
       e.preventDefault()
+      // A double-click fires two 'click' events before 'dblclick', so the
+      // last point in the array is a duplicate of the finish position. Pop it.
+      points.pop()
       if (points.length < 2) return
       const geometry = { type: 'LineString', coordinates: [...points] }
       await featuresStore.addFeature('line', geometry, { name: 'Line' })
@@ -254,6 +258,8 @@ export function useMapDraw(getMap) {
 
     dblClickHandler = async (e) => {
       e.preventDefault()
+      // Same double-click deduplication as the line handler.
+      points.pop()
       if (points.length < 3) return
       const coords = [...points, points[0]]
       const geometry = { type: 'Polygon', coordinates: [coords] }
@@ -354,13 +360,6 @@ export function useMapDraw(getMap) {
     map.on('click', clickHandler)
     map.on('mousemove', moveHandler)
     window.addEventListener('keydown', keyHandler)
-  }
-
-  function boxPolygon(a, b) {
-    return {
-      type: 'Polygon',
-      coordinates: [[a, [b[0], a[1]], b, [a[0], b[1]], a]]
-    }
   }
 
   function startBox() {
@@ -659,6 +658,28 @@ export function useMapDraw(getMap) {
     }
   }
 
+  function startPoint() {
+    const map = getMap()
+    map.getCanvasContainer().style.cursor = 'crosshair'
+
+    moveHandler = (e) => {
+      updatePreview({ type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] })
+    }
+
+    clickHandler = async (e) => {
+      const geometry = { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] }
+      await featuresStore.addFeature('point', geometry, { name: 'Point' })
+      cleanup()
+      startPoint()
+    }
+
+    keyHandler = (e) => { if (e.key === 'Escape') cancel() }
+
+    map.on('click', clickHandler)
+    map.on('mousemove', moveHandler)
+    window.addEventListener('keydown', keyHandler)
+  }
+
   function setTool(toolId) {
     cleanup()
     activeTool.value = toolId
@@ -674,6 +695,7 @@ export function useMapDraw(getMap) {
     map.doubleClickZoom.disable()
 
     const starters = {
+      point: startPoint,
       line: startLine,
       polygon: startPolygon,
       box: startBox,

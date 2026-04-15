@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "cot:send": "node scripts/cot-sender.mjs"
+    "cot:send": "node scripts/cot-sender.mjs",
+    "build:mac": "tauri build",
+    "build:mac:universal": "tauri build --target universal-apple-darwin"
   },
   "dependencies": {
     "@mdi/font": "^7.4.47",
@@ -22,7 +24,6 @@
     "maplibre-gl": "^5.22.0",
     "mgrs": "^2.1.0",
     "pinia": "^3.0.4",
-    "tokml": "^0.4.0",
     "vue": "^3.5.32",
     "vue-router": "^4.6.4",
     "vuetify": "^3.8.5"

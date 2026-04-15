@@ -13,7 +13,8 @@ const DEFAULTS = {
   distanceUnits: 'metric',
   coordinateFormat: 'dd',
   trackBreadcrumbs: false,
-  trackBreadcrumbLength: 30  // seconds
+  trackBreadcrumbLength: 30,  // seconds
+  basemapOpacity: 1.0
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -26,6 +27,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const coordinateFormat = ref(DEFAULTS.coordinateFormat)
   const trackBreadcrumbs = ref(DEFAULTS.trackBreadcrumbs)
   const trackBreadcrumbLength = ref(DEFAULTS.trackBreadcrumbLength)
+  const basemapOpacity = ref(DEFAULTS.basemapOpacity)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
   // without a growing switch statement as we add more settings.
@@ -36,7 +38,8 @@ export const useSettingsStore = defineStore('settings', () => {
     distanceUnits,
     coordinateFormat,
     trackBreadcrumbs,
-    trackBreadcrumbLength
+    trackBreadcrumbLength,
+    basemapOpacity
   }
 
   // Promise cache: `load()` may be called from multiple places during boot
@@ -105,6 +108,7 @@ export const useSettingsStore = defineStore('settings', () => {
     coordinateFormat,
     trackBreadcrumbs,
     trackBreadcrumbLength,
+    basemapOpacity,
     load,
     setSetting,
     addCotListener,

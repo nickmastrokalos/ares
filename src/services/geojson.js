@@ -28,7 +28,7 @@ export async function importGeoJson(featuresStore) {
   for (const feature of features) {
     if (!feature.geometry) continue
     const type = inferType(feature)
-    const props = { name: feature.properties?.name || type, ...feature.properties }
+    const props = { name: feature.properties?.name || type, ...fromSimplestyle(feature.properties ?? {}) }
     await featuresStore.addFeature(type, feature.geometry, props)
   }
 
@@ -43,7 +43,7 @@ export async function exportGeoJson(featuresStore) {
     type: 'FeatureCollection',
     features: fc.features.map(f => ({
       ...f,
-      properties: cleanProps(f.properties)
+      properties: withSimplestyle(cleanProps(f.properties))
     }))
   }
 
@@ -88,4 +88,42 @@ function cleanProps(props) {
   const cleaned = { ...props }
   delete cleaned._dbId
   return cleaned
+}
+
+// Add simplestyle-spec properties so tools like geojson.io render our colors.
+// https://github.com/mapbox/simplestyle-spec
+function withSimplestyle(props) {
+  const color   = props.color   || '#ffffff'
+  const opacity = props.opacity ?? 0.2
+  const type    = props._type
+
+  if (type === 'point') {
+    return { ...props, 'marker-color': color, 'marker-size': 'medium' }
+  }
+  if (type === 'line') {
+    return { ...props, 'stroke': color, 'stroke-width': 3, 'stroke-opacity': 1 }
+  }
+  // polygon, circle, sector, box — all filled shapes
+  return {
+    ...props,
+    'stroke': color,
+    'stroke-width': 2,
+    'stroke-opacity': 1,
+    'fill': color,
+    'fill-opacity': opacity
+  }
+}
+
+// When importing a foreign GeoJSON that carries only simplestyle properties
+// (no internal color/opacity), map them back so the feature renders correctly.
+function fromSimplestyle(props) {
+  const result = { ...props }
+  if (!result.color) {
+    result.color = props['marker-color'] || props['stroke'] || props['fill'] || null
+    if (result.color === null) delete result.color
+  }
+  if (result.opacity == null && props['fill-opacity'] != null) {
+    result.opacity = props['fill-opacity']
+  }
+  return result
 }
