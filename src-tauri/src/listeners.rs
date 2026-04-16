@@ -163,6 +163,11 @@ impl ListenerManager {
     }
 }
 
+/// Maximum bytes buffered per TCP connection before the connection is dropped.
+/// A legitimate CoT message is a few KB at most; 1 MB is a generous ceiling
+/// that prevents a misbehaving or malicious peer from exhausting memory.
+const MAX_TCP_BUF: usize = 1_048_576;
+
 /// Read from a TCP connection, accumulate bytes, split on `</event>`,
 /// parse each complete message and emit to the frontend.
 async fn handle_tcp_connection(
@@ -181,6 +186,13 @@ async fn handle_tcp_connection(
             Ok(0) => break, // connection closed
             Ok(n) => {
                 buf.extend_from_slice(&tmp[..n]);
+                if buf.len() > MAX_TCP_BUF {
+                    eprintln!(
+                        "[cot] TCP buffer exceeded {} bytes from {peer}, dropping connection",
+                        MAX_TCP_BUF
+                    );
+                    break;
+                }
                 // Split on </event> — each complete tag is one CoT message.
                 while let Some(end) = find_end_tag(&buf) {
                     let message = buf[..end].to_vec();

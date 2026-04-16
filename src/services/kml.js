@@ -2,6 +2,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { readFile, writeFile } from '@tauri-apps/plugin-fs'
 import { kml as parseKml } from '@tmcw/togeojson'
 import JSZip from 'jszip'
+import { esc } from '@/services/xml'
 
 // ---- Export ----------------------------------------------------------------
 
@@ -10,10 +11,11 @@ export async function exportKml(featuresStore) {
   if (!fc.features.length) return
 
   const missionName = featuresStore.activeMission?.name || 'export'
+  const safeName = missionName.replace(/[^a-zA-Z0-9_-]/g, '_')
   const kmlString = buildKml(fc.features, missionName)
 
   const file = await save({
-    defaultPath: `${missionName}.kml`,
+    defaultPath: `${safeName}.kml`,
     filters: [
       { name: 'KML', extensions: ['kml'] },
       { name: 'KMZ', extensions: ['kmz'] }
@@ -176,14 +178,6 @@ function toKmlColor(hex, alpha) {
 
 function coordStr(coords) {
   return coords.map(([lng, lat]) => `${lng},${lat},0`).join('\n          ')
-}
-
-function esc(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
 }
 
 // ---- Import (unchanged) ----------------------------------------------------

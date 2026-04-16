@@ -60,7 +60,13 @@ watch(open, (isOpen) => {
   if (!isOpen) return
   selected.value    = []
   filterQuery.value = ''
-  items.value       = featuresStore.features.slice()
+  // Pre-parse properties once on open so display helpers don't re-parse
+  // on every render / filter keystroke.
+  items.value = featuresStore.features.map(row => {
+    let parsedProps = {}
+    try { parsedProps = JSON.parse(row.properties) } catch {}
+    return { ...row, parsedProps }
+  })
 })
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -98,13 +104,8 @@ function displaySubtitle(row) {
 }
 
 function parsedName(row) {
-  try {
-    const props = JSON.parse(row.properties)
-    const name  = props?.name?.trim()
-    return name || null
-  } catch {
-    return null
-  }
+  const name = row.parsedProps?.name?.trim()
+  return name || null
 }
 
 function typeLabel(type) {

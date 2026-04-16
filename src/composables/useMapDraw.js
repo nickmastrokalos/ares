@@ -1192,7 +1192,18 @@ export function useMapDraw(getMap) {
     map.fitBounds(bounds, { padding: 80, duration: 800, maxZoom: 16 })
   }
 
-  onUnmounted(() => cleanup())
+  onUnmounted(() => {
+    cleanup()
+    const map = getMap()
+    if (!map) return
+    if (selectionClickHandler) map.off('click', selectionClickHandler)
+    if (hoverEnter) {
+      for (const layer of SELECTABLE_LAYERS) {
+        map.off('mouseenter', layer, hoverEnter)
+        map.off('mouseleave', layer, hoverLeave)
+      }
+    }
+  })
 
   return { activeTool, draggingFeature, setTool, cancel, syncFeatures, initLayers, flyToGeometry, moveFeature }
 }

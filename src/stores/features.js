@@ -167,6 +167,29 @@ export const useFeaturesStore = defineStore('features', () => {
     }
   }
 
+  // Inserts multiple features in a single transaction and calls loadFeatures
+  // once when done — avoids N full-table reloads during batch import.
+  async function addFeatures(items) {
+    if (!activeMissionId.value || !items.length) return
+    appStore.beginLoad()
+    try {
+      const db = await getDb()
+      for (const { type, geometry, properties } of items) {
+        await db.execute(
+          'INSERT INTO features (mission_id, type, geometry, properties) VALUES ($1, $2, $3, $4)',
+          [activeMissionId.value, type, JSON.stringify(geometry), JSON.stringify(properties)]
+        )
+      }
+      await db.execute(
+        "UPDATE missions SET updated_at = datetime('now') WHERE id = $1",
+        [activeMissionId.value]
+      )
+      await loadFeatures()
+    } finally {
+      appStore.endLoad()
+    }
+  }
+
   async function updateFeature(id, geometry, properties) {
     appStore.beginLoad()
     try {
@@ -249,6 +272,7 @@ export const useFeaturesStore = defineStore('features', () => {
     setActiveMission,
     loadFeatures,
     addFeature,
+    addFeatures,
     updateFeature,
     updateFeatureProperties,
     removeFeature,

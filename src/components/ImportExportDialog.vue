@@ -23,6 +23,7 @@ const selectedFormat = ref(null)
 const exporting      = ref(false)
 const importing      = ref(false)
 const importError    = ref(null)
+const exportError    = ref(null)
 const filterQuery    = ref('')
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -140,6 +141,7 @@ watch(() => props.modelValue, open => {
   exporting.value      = false
   importing.value      = false
   importError.value    = null
+  exportError.value    = null
   filterQuery.value    = ''
   selectedIds.value    = new Set(exportableFeatures.value.map(f => f.properties._dbId))
 })
@@ -189,22 +191,19 @@ async function doImport(fmt) {
       const bytes    = await readFile(filePath)
       const xml      = new TextDecoder().decode(bytes)
       const features = importCotFeatures(xml)
-      for (const { type, geometry, properties } of features) {
-        await featuresStore.addFeature(type, geometry, properties)
-      }
+      await featuresStore.addFeatures(features)
     } else if (fmt.id === 'tak-package') {
       const bytes    = await readFile(filePath)
       const zip      = await JSZip.loadAsync(bytes)
       const cotFiles = Object.keys(zip.files).filter(
         n => n.endsWith('.cot') && !zip.files[n].dir
       )
+      const allFeatures = []
       for (const name of cotFiles) {
-        const xml      = await zip.files[name].async('string')
-        const features = importCotFeatures(xml)
-        for (const { type, geometry, properties } of features) {
-          await featuresStore.addFeature(type, geometry, properties)
-        }
+        const xml = await zip.files[name].async('string')
+        allFeatures.push(...importCotFeatures(xml))
       }
+      await featuresStore.addFeatures(allFeatures)
     } else if (fmt.id === 'kml') {
       await importKml(featuresStore)
     } else if (fmt.id === 'geojson') {
@@ -221,7 +220,8 @@ async function doImport(fmt) {
 
 async function doExport() {
   if (!canExport.value) return
-  exporting.value = true
+  exporting.value  = true
+  exportError.value = null
 
   const missionName = (featuresStore.activeMission?.name ?? 'mission')
     .replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -238,6 +238,7 @@ async function doExport() {
     close()
   } catch (err) {
     console.error('Export failed:', err)
+    exportError.value = err.message ?? 'Export failed.'
   } finally {
     exporting.value = false
   }
@@ -419,6 +420,10 @@ async function doExport() {
                 <div class="text-body-2 font-weight-medium mb-1">{{ fmt.label }}</div>
                 <div class="text-caption text-medium-emphasis">{{ fmt.description }}</div>
               </div>
+            </div>
+
+            <div v-if="exportError" class="mt-3 text-caption text-error">
+              {{ exportError }}
             </div>
 
           </div>

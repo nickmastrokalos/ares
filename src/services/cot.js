@@ -1,4 +1,5 @@
 import { circlePolygon, sectorPolygon, ellipsePolygon, ringCentroid } from '@/services/geometry'
+import { esc } from '@/services/xml'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -117,14 +118,6 @@ function extractImportColors(detail) {
 }
 
 // ── XML helpers ───────────────────────────────────────────────────────────────
-
-function esc(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
 
 function round6(n) { return Math.round(n * 1e6) / 1e6 }
 function round2(n) { return Math.round(n * 100)  / 100  }

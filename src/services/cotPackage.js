@@ -2,16 +2,7 @@ import JSZip from 'jszip'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 import { featureToCoTDoc } from '@/services/cot'
-
-// ── XML helper ────────────────────────────────────────────────────────────────
-
-function esc(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+import { esc } from '@/services/xml'
 
 // ── CoT ZIP (flat archive, one .cot per feature) ──────────────────────────────
 
@@ -29,7 +20,7 @@ export async function exportCotZip(fcFeatures, missionName) {
     count++
   }
 
-  if (!count) return
+  if (!count) throw new Error('No exportable features — all selected items are unsupported types.')
 
   const filePath = await save({
     defaultPath: `${missionName}-cot.zip`,
@@ -69,7 +60,7 @@ export async function exportTakDataPackage(fcFeatures, missionName) {
     contents.push({ zipEntry, uid })
   }
 
-  if (!contents.length) return
+  if (!contents.length) throw new Error('No exportable features — all selected items are unsupported types.')
 
   zip.file('MANIFEST/manifest.xml', buildManifest(packageUid, missionName, contents))
 
