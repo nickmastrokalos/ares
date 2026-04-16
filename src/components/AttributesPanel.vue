@@ -204,7 +204,6 @@ async function commitColor(value) {
   const feature = featuresStore.selectedFeature
   if (!feature) return
   color.value = value
-  colorMenu.value = false
   await featuresStore.updateFeatureProperties(feature.id, { color: value })
 }
 
