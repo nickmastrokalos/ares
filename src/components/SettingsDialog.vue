@@ -69,6 +69,11 @@ const trackBreadcrumbs = computed({
   set: (v) => settingsStore.setSetting('trackBreadcrumbs', v)
 })
 
+const milStdSymbology = computed({
+  get: () => settingsStore.milStdSymbology,
+  set: (v) => settingsStore.setSetting('milStdSymbology', v)
+})
+
 const trackBreadcrumbLength = computed({
   get: () => settingsStore.trackBreadcrumbLength,
   set: (v) => settingsStore.setSetting('trackBreadcrumbLength', v)
@@ -147,9 +152,9 @@ function formatBadge(ts) {
           <div class="pa-4">
             <div class="d-flex align-center">
               <div class="flex-grow-1">
-                <div class="text-body-2">Show feature names on map</div>
+                <div class="text-body-2">Show labels on map</div>
                 <div class="text-caption text-medium-emphasis">
-                  Render each drawing's name as a label on the map.
+                  Render name labels for shapes, routes, tracks, and AIS vessels.
                 </div>
               </div>
               <v-switch
@@ -283,6 +288,24 @@ function formatBadge(ts) {
                 <span>5s</span>
                 <span>1 min</span>
               </div>
+            </div>
+
+            <v-divider class="my-3" />
+
+            <div class="d-flex align-center">
+              <div class="flex-grow-1">
+                <div class="text-body-2">MIL-STD-2525 symbology</div>
+                <div class="text-caption text-medium-emphasis">
+                  Replace track dots with military symbology icons based on CoT type.
+                </div>
+              </div>
+              <v-switch
+                v-model="milStdSymbology"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+              />
             </div>
           </div>
         </v-window-item>

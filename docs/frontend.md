@@ -66,6 +66,7 @@ const theme = await store.get('theme')
   - **Display → Show feature names on map** (`showFeatureLabels`, default `true`) — toggles the `draw-features-labels` symbol layer in `useMapDraw`. Label rendering needs a `glyphs` URL on the MapLibre style; see `MapView.vue` (`glyphs:` field). TODO: self-host glyphs so labels work offline.
   - **Display → Distance units** (`distanceUnits`, default `'metric'`) — controls how distances are formatted throughout the app. Options: `'metric'` (m/km), `'statute'` (ft/mi), `'nautical'` (m/nm). `formatDistance(meters, units)` in `src/services/geometry.js` is the single conversion point.
   - **Display → Coordinate format** (`coordinateFormat`, default `'dd'`) — controls how map coordinates are displayed in `MapFooter`. Options: `'dd'` (decimal degrees), `'dms'` (degrees/minutes/seconds), `'mgrs'` (MGRS via the `mgrs` npm package). `formatCoordinate(lng, lat, format)` in `src/services/coordinates.js` is the single conversion point.
+  - **Display → Use MIL-STD-2525 symbology** (`milStdSymbology`, default `false`) — when enabled, typed manual tracks render as MIL-STD-2525 icons; untyped tracks keep the affiliation-colored circle. See [tracks.md](./tracks.md) for layer mechanics.
 
 ## Routing
 - Define all routes in `src/router/index.js`.
@@ -146,7 +147,9 @@ Every drawn or imported feature has a `type` string stored in the `features` tab
 | `sector` | `Polygon` | `name`, `color`, `opacity`, `center` [lng,lat], `radius` (m), `startAngle` (°), `endAngle` (°) | Three clicks: center → start bearing → end bearing |
 | `route` | `LineString` | `name`, `color`, `waypoints` array of `{ label, role }` where role is `'SP'`/`'WP'`/`'EP'` | Click waypoints, double-click to finish |
 | `image` | `Point` (center) | `name`, `src` (base64 data URL), `naturalWidth`, `naturalHeight`, `widthMeters` | File picker then single map click |
-| `manual-track` | `Point` | `name`, `color`, `speed` (m/s), `course` (°), `callsign`, `cotType` | Created via Manual Track panel, not drawn |
+| `manual-track` | `Point` | `callsign`, `affiliation`, `cotType` (optional), `hae` (m), `course` (°), `speed` (kts) | Created via Manual Track panel, not drawn |
+
+Manual track placement, editing, listing, and rendering are fully documented in [tracks.md](./tracks.md) — including the `TrackDropPanel` two-step placement flow, `ManualTrackPanel`, `TrackTypePicker`, and the MIL-STD-2525 dual-layer pipeline. `cotType` is optional; tracks without one render as affiliation-colored circles regardless of the 2525 symbology setting.
 
 Geometry for parametric shapes (`box`, `circle`, `ellipse`, `sector`) is stored **both** as a pre-computed polygon (for rendering) and as canonical parameters in `properties` (for editing and re-export). When a user edits parameters, the polygon geometry is recalculated and both are written back to SQLite atomically.
 
@@ -268,34 +271,13 @@ Currently provided:
 - **Wiring to the backend:** `ListenersDialog` calls `invoke('start_listener', ...)` / `invoke('stop_listener', ...)` on toggle and remove. `MapView` starts all enabled listeners on map load and calls `invoke('stop_all_listeners')` on unmount.
 - `useTracksStore.startListening()` wires the `cot-event` Tauri event to the track map and starts a 30-second stale-track pruning interval.
 
-## Track Plotting
+## Tracks
 
-### `useTracksStore` (`src/stores/tracks.js`)
-- Pinia store keyed by CoT `uid`. Each entry: `{ uid, cotType, lat, lon, hae, speed, course, callsign, time, stale, updatedAt }`.
-- `trackCollection` computed — GeoJSON `FeatureCollection` of Point features with all track fields as properties plus `affiliation` derived from `cotType[2]` (`f`/`h`/`n`/`u`).
-- `startListening()` — calls `listen('cot-event', ...)`, upserts tracks, starts stale pruning.
-- `stopListening()` — unregisters the listener, stops pruning.
-- `clearTracks()` — empties the Map.
-- Reactivity note: Vue's reactive system does not track internal `Map` mutations. The store reassigns `tracks.value = new Map(tracks.value)` after each update to trigger computed re-evaluation.
+The project has two track systems — ephemeral CoT-feed tracks and persistent user-placed manual tracks. Both are documented together in [tracks.md](./tracks.md), including:
 
-### `useMapTracks` (`src/composables/useMapTracks.js`)
-- Composable following the same pattern as `useMapDraw`. Takes `getMap` (getter returning the live MapLibre instance).
-- `initLayers()` — adds GeoJSON source `cot-tracks`, circle layer `cot-tracks-points`, and symbol layer `cot-tracks-labels`. Called from `MapView`'s `map.on('load', ...)` handler alongside `initLayers()`.
-- Circle color is data-driven via a `match` expression on the `affiliation` property: `f`→`#4a9ade`, `h`→`#f44336`, `n`→`#4caf50`, `u`→`#ffeb3b`.
-- Watches `tracksStore.trackCollection` and calls `setData` on the map source whenever it changes.
-- Removes layers and source on `onUnmounted`.
-
-## CoT Test Harness (`scripts/cot-sender.mjs`)
-Node.js script (no external dependencies) that generates synthetic CoT traffic for development.
-
-```sh
-pnpm cot:send                        # 5 tracks, UDP, 127.0.0.1:4242, 3s interval
-pnpm cot:send -- --tracks 10         # 10 tracks
-pnpm cot:send -- --port 8087         # different port
-pnpm cot:send -- --protocol tcp      # TCP instead of UDP
-pnpm cot:send -- --interval 1000     # 1s interval
-```
-
-Each track has a stable `uid` (`ARES-TEST-N`), a NATO phonetic callsign, a CoT affiliation cycling through `f/h/n/u`, and a random-walk position starting near Washington DC. The script reconnects automatically on TCP disconnection.
-
-Consumers must tolerate `null` (the injected helper is absent if the component is ever reused outside `MapView`). Keep these helpers pure "do the map thing" functions — no reactive state, no UI concerns.
+- `useTracksStore` and `useMapTracks` (CoT-feed tracks, `cot-tracks` source/layers)
+- Manual track placement (`TrackDropPanel`), editing (`ManualTrackPanel`), and listing (`TrackListPanel`)
+- `TrackTypePicker` + `src/services/trackTypes.js` catalog
+- MIL-STD-2525 symbology toggle and dual-layer rendering pipeline
+- `src/services/sidc.js` — `cotTypeToSidc`, `getOrCreateIcon`, `sidcToDataUrl`
+- CoT test harness script (`scripts/cot-sender.mjs`)

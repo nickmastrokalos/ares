@@ -1,17 +1,56 @@
 import { watch, onUnmounted } from 'vue'
 import { useAisStore } from '@/stores/ais'
+import { useSettingsStore } from '@/stores/settings'
 
-const AIS_CRUMBS  = 'ais-breadcrumbs'
+const AIS_CRUMBS      = 'ais-breadcrumbs'
 const AIS_CRUMB_LAYER = 'ais-breadcrumbs-line'
-const AIS_SOURCE  = 'ais-vessels'
-const AIS_LAYER   = 'ais-vessels-points'
-const AIS_LABELS  = 'ais-vessels-labels'
+const AIS_SOURCE      = 'ais-vessels'
+const AIS_LAYER       = 'ais-vessels-points'
+const AIS_LAYER_ARROWS = 'ais-vessels-arrows'
+const AIS_LABELS      = 'ais-vessels-labels'
+
+/**
+ * Draw a north-pointing filled arrowhead onto an offscreen canvas and return
+ * the pixel data in the format MapLibre's addImage() expects.
+ *
+ * The arrow defaults to pointing up (0° = north). The symbol layer applies
+ * `icon-rotate: ['get', 'course']` to aim it at each vessel's COG.
+ */
+function createArrowImage() {
+  const SIZE = 20
+  const RATIO = 2
+  const canvas = document.createElement('canvas')
+  canvas.width  = SIZE * RATIO
+  canvas.height = SIZE * RATIO
+  const ctx = canvas.getContext('2d')
+  ctx.scale(RATIO, RATIO)
+
+  // Arrowhead pointing up: tip at top-center, notched base so it reads as
+  // a proper directional chevron rather than a plain triangle.
+  ctx.beginPath()
+  ctx.moveTo(10,  2)   // tip
+  ctx.lineTo(18, 18)   // bottom-right wing
+  ctx.lineTo(10, 13)   // inner notch
+  ctx.lineTo( 2, 18)   // bottom-left wing
+  ctx.closePath()
+
+  ctx.fillStyle = '#ffeb3b'
+  ctx.fill()
+  ctx.strokeStyle = '#000000'
+  ctx.lineWidth = 1.2
+  ctx.lineJoin = 'round'
+  ctx.stroke()
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  return { width: canvas.width, height: canvas.height, data: imageData.data }
+}
 
 const DEBOUNCE_MS  = 600
 const POLL_MS      = 30_000
 
-export function useMapAis(getMap) {
-  const aisStore = useAisStore()
+export function useMapAis(getMap, dispatcher = null) {
+  const aisStore      = useAisStore()
+  const settingsStore = useSettingsStore()
   let initialized   = false
   let debounceTimer = null
   let pollTimer     = null
@@ -78,15 +117,36 @@ export function useMapAis(getMap) {
       data: aisStore.vesselCollection
     })
 
+    // Circle layer — shown when breadcrumbs/tails are off.
     map.addLayer({
       id: AIS_LAYER,
       type: 'circle',
       source: AIS_SOURCE,
+      layout: {
+        'visibility': aisStore.aisBreadcrumbs ? 'none' : 'visible'
+      },
       paint: {
         'circle-radius': 5,
         'circle-color': '#ffeb3b',
         'circle-stroke-width': 1,
         'circle-stroke-color': '#000000'
+      }
+    })
+
+    // Arrow layer — shown when breadcrumbs/tails are on.
+    // Each arrow rotates to match the vessel's COG (course over ground).
+    map.addImage('ais-arrow', createArrowImage(), { pixelRatio: 2 })
+    map.addLayer({
+      id: AIS_LAYER_ARROWS,
+      type: 'symbol',
+      source: AIS_SOURCE,
+      layout: {
+        'icon-image': 'ais-arrow',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-rotation-alignment': 'map',
+        'icon-rotate': ['coalesce', ['get', 'course'], 0],
+        'visibility': aisStore.aisBreadcrumbs ? 'visible' : 'none'
       }
     })
 
@@ -99,7 +159,8 @@ export function useMapAis(getMap) {
         'text-size': 10,
         'text-offset': [0, 1.4],
         'text-anchor': 'top',
-        'text-allow-overlap': false
+        'text-allow-overlap': false,
+        'visibility': settingsStore.showFeatureLabels ? 'visible' : 'none'
       },
       paint: {
         'text-color': '#ffeb3b',
@@ -111,9 +172,26 @@ export function useMapAis(getMap) {
     map.on('moveend', scheduleRefetch)
     map.on('zoomend', scheduleRefetch)
 
-    map.on('click', AIS_LAYER, onVesselClick)
-    map.on('mouseenter', AIS_LAYER, onMouseEnter)
-    map.on('mouseleave', AIS_LAYER, onMouseLeave)
+    if (dispatcher) {
+      dispatcher.register('ais-vessels', {
+        layers: [AIS_LAYER, AIS_LAYER_ARROWS],
+        action: (f) => aisStore.openPanel(String(f.properties.mmsi)),
+        suppress: () => false,
+        label: (f) => ({
+          text: f.properties.name || String(f.properties.mmsi),
+          subtitle: 'AIS Vessel',
+          icon: 'mdi-ferry'
+        }),
+        dedupeKey: (f) => String(f.properties.mmsi)
+      })
+    } else {
+      map.on('click', AIS_LAYER, onVesselClick)
+      map.on('click', AIS_LAYER_ARROWS, onVesselClick)
+    }
+    map.on('mouseenter', AIS_LAYER,        onMouseEnter)
+    map.on('mouseleave', AIS_LAYER,        onMouseLeave)
+    map.on('mouseenter', AIS_LAYER_ARROWS, onMouseEnter)
+    map.on('mouseleave', AIS_LAYER_ARROWS, onMouseLeave)
 
     initialized = true
 
@@ -157,7 +235,28 @@ export function useMapAis(getMap) {
     }
   )
 
+  watch(
+    () => settingsStore.showFeatureLabels,
+    (show) => {
+      const map = getMap()
+      if (!map?.getLayer(AIS_LABELS)) return
+      map.setLayoutProperty(AIS_LABELS, 'visibility', show ? 'visible' : 'none')
+    }
+  )
+
+  // When heading tails are toggled, swap between circle and arrow icon layers.
+  watch(
+    () => aisStore.aisBreadcrumbs,
+    (tails) => {
+      const map = getMap()
+      if (!map?.getLayer(AIS_LAYER)) return
+      map.setLayoutProperty(AIS_LAYER,        'visibility', tails ? 'none'    : 'visible')
+      map.setLayoutProperty(AIS_LAYER_ARROWS, 'visibility', tails ? 'visible' : 'none')
+    }
+  )
+
   onUnmounted(() => {
+    if (dispatcher) dispatcher.unregister('ais-vessels')
     stopDataWatch()
     stopCrumbWatch()
     stopEnabledWatch()
@@ -167,14 +266,18 @@ export function useMapAis(getMap) {
     if (!map) return
     map.off('moveend', scheduleRefetch)
     map.off('zoomend', scheduleRefetch)
-    map.off('click',      AIS_LAYER, onVesselClick)
-    map.off('mouseenter', AIS_LAYER, onMouseEnter)
-    map.off('mouseleave', AIS_LAYER, onMouseLeave)
-    if (map.getLayer(AIS_LABELS))     map.removeLayer(AIS_LABELS)
-    if (map.getLayer(AIS_LAYER))      map.removeLayer(AIS_LAYER)
+    map.off('click',      AIS_LAYER,        onVesselClick)
+    map.off('click',      AIS_LAYER_ARROWS, onVesselClick)
+    map.off('mouseenter', AIS_LAYER,        onMouseEnter)
+    map.off('mouseleave', AIS_LAYER,        onMouseLeave)
+    map.off('mouseenter', AIS_LAYER_ARROWS, onMouseEnter)
+    map.off('mouseleave', AIS_LAYER_ARROWS, onMouseLeave)
+    if (map.getLayer(AIS_LABELS))      map.removeLayer(AIS_LABELS)
+    if (map.getLayer(AIS_LAYER_ARROWS)) map.removeLayer(AIS_LAYER_ARROWS)
+    if (map.getLayer(AIS_LAYER))       map.removeLayer(AIS_LAYER)
     if (map.getLayer(AIS_CRUMB_LAYER)) map.removeLayer(AIS_CRUMB_LAYER)
-    if (map.getSource(AIS_SOURCE))    map.removeSource(AIS_SOURCE)
-    if (map.getSource(AIS_CRUMBS))    map.removeSource(AIS_CRUMBS)
+    if (map.getSource(AIS_SOURCE))     map.removeSource(AIS_SOURCE)
+    if (map.getSource(AIS_CRUMBS))     map.removeSource(AIS_CRUMBS)
     initialized = false
   })
 

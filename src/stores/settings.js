@@ -14,6 +14,7 @@ const DEFAULTS = {
   coordinateFormat: 'dd',
   trackBreadcrumbs: false,
   trackBreadcrumbLength: 30,  // seconds
+  milStdSymbology: false,
   basemapOpacity: 1.0
 }
 
@@ -27,6 +28,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const coordinateFormat = ref(DEFAULTS.coordinateFormat)
   const trackBreadcrumbs = ref(DEFAULTS.trackBreadcrumbs)
   const trackBreadcrumbLength = ref(DEFAULTS.trackBreadcrumbLength)
+  const milStdSymbology = ref(DEFAULTS.milStdSymbology)
   const basemapOpacity = ref(DEFAULTS.basemapOpacity)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
@@ -39,6 +41,7 @@ export const useSettingsStore = defineStore('settings', () => {
     coordinateFormat,
     trackBreadcrumbs,
     trackBreadcrumbLength,
+    milStdSymbology,
     basemapOpacity
   }
 
@@ -108,6 +111,7 @@ export const useSettingsStore = defineStore('settings', () => {
     coordinateFormat,
     trackBreadcrumbs,
     trackBreadcrumbLength,
+    milStdSymbology,
     basemapOpacity,
     load,
     setSetting,

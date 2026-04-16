@@ -11,6 +11,7 @@ import { useTracksStore } from '@/stores/tracks'
 import { useGhostsStore } from '@/stores/ghosts'
 import { useAisStore } from '@/stores/ais'
 import { useTileserverStore } from '@/stores/tileserver'
+import { useClickDispatcher } from '@/composables/useClickDispatcher'
 import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
 import { useMapRange } from '@/composables/useMapRange'
@@ -28,6 +29,7 @@ import LayersPanel from '@/components/LayersPanel.vue'
 import ListenersDialog from '@/components/ListenersDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import MapContextMenu from '@/components/MapContextMenu.vue'
+import MapFeaturePicker from '@/components/MapFeaturePicker.vue'
 import TrackPanel from '@/components/TrackPanel.vue'
 import RoutePanel from '@/components/RoutePanel.vue'
 import TrackDropPanel from '@/components/TrackDropPanel.vue'
@@ -70,16 +72,17 @@ const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
-const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map)
+const dispatcher = useClickDispatcher()
+const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const { ranging, toggleRange } = useMapRange(() => map)
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher)
 const externalSuppress = computed(() => ranging.value || routing.value)
-const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress)
+const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress, dispatcher)
 const suppressTrackPanel = computed(() => ranging.value || routing.value || placing.value != null)
-const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel)
+const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
-const { initLayers: initAisLayers }   = useMapAis(() => map)
+const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher)
 
 // Expose map-centric helpers to descendant components (OverlaysDialog,
 // AttributesPanel, etc.) without prop-drilling through DrawPanel.
@@ -272,10 +275,11 @@ onMounted(async () => {
     contextMenu.value = { x, y, lngLat: e.lngLat }
   })
 
-  map.on('movestart', () => { contextMenu.value = null })
+  map.on('movestart', () => { contextMenu.value = null; dispatcher.dismiss() })
   map.on('click', () => { contextMenu.value = null })
 
   map.on('load', async () => {
+    dispatcher.install(map)
     initLayers()
     initRouteLayers()
     initGhostLayers()
@@ -421,6 +425,14 @@ onUnmounted(async () => {
           :y="contextMenu.y"
           :lng-lat="contextMenu.lngLat"
           @close="contextMenu = null"
+        />
+        <MapFeaturePicker
+          v-if="dispatcher.pickerState.value"
+          :x="dispatcher.pickerState.value.x"
+          :y="dispatcher.pickerState.value.y"
+          :items="dispatcher.pickerState.value.items"
+          @select="dispatcher.selectItem($event)"
+          @close="dispatcher.dismiss()"
         />
         <MapFooter :coord="mouseCoord" />
       </div>

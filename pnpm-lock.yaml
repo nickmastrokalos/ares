@@ -38,6 +38,9 @@ importers:
       mgrs:
         specifier: ^2.1.0
         version: 2.1.0
+      milsymbol:
+        specifier: ^3.0.4
+        version: 3.0.4
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(vue@3.5.32)
@@ -565,6 +568,9 @@ packages:
 
   mgrs@2.1.0:
     resolution: {integrity: sha512-/pjuM02PUAhp4dazfccTSKBGTGPFkRz9LKwGJKusc/B20apcGG/CYnRHx0kXmLXy4m5O3p6y6nOVxEnErPpFvQ==}
+
+  milsymbol@3.0.4:
+    resolution: {integrity: sha512-Jrs1RBCag2IzyEJwI476i2+pNHdi8WMwAp2mDD23g3TR48ERdHmdQgPXZUosRKyhPMr58/eOPyyLE53lMPPAgw==}
 
   minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
@@ -1201,6 +1207,8 @@ snapshots:
       tinyqueue: 3.0.0
 
   mgrs@2.1.0: {}
+
+  milsymbol@3.0.4: {}
 
   minimist@1.2.8: {}
 

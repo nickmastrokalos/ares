@@ -25,6 +25,8 @@ const AFFIL_KEYS    = ['f', 'n', 'u', 'h']
 
 const filterKind   = ref('all')   // 'all' | 'cot' | 'manual'
 const filterAffils = ref(new Set(AFFIL_KEYS))
+const filterName   = ref('')
+const sortDir      = ref('asc')
 
 function setKind(kind) {
   filterKind.value = kind
@@ -41,8 +43,12 @@ function toggleAffil(key) {
 }
 
 const filtersActive = computed(() =>
-  filterKind.value !== 'all' || filterAffils.value.size < AFFIL_KEYS.length
+  filterKind.value !== 'all' || filterAffils.value.size < AFFIL_KEYS.length || filterName.value.trim() !== ''
 )
+
+function toggleSort() {
+  sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+}
 
 // ---- Unified track list ----
 
@@ -74,16 +80,21 @@ const allTracks = computed(() => {
     })
   }
 
-  return result.sort((a, b) => a.callsign.localeCompare(b.callsign))
+  return result.sort((a, b) => {
+    const cmp = a.callsign.localeCompare(b.callsign)
+    return sortDir.value === 'asc' ? cmp : -cmp
+  })
 })
 
-const visibleTracks = computed(() =>
-  allTracks.value.filter(t => {
+const visibleTracks = computed(() => {
+  const name = filterName.value.trim().toLowerCase()
+  return allTracks.value.filter(t => {
     if (filterKind.value !== 'all' && t.kind !== filterKind.value) return false
     if (!filterAffils.value.has(t.affiliation)) return false
+    if (name && !t.callsign.toLowerCase().includes(name)) return false
     return true
   })
-)
+})
 
 // ---- Actions ----
 
@@ -131,6 +142,19 @@ onMounted(() => {
       <span class="track-count" :class="{ 'track-count--filtered': filtersActive }">
         {{ filtersActive ? `${visibleTracks.length} / ${allTracks.length}` : allTracks.length }}
       </span>
+      <v-tooltip :text="sortDir === 'asc' ? 'Sort Z→A' : 'Sort A→Z'" location="top">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            :icon="sortDir === 'asc' ? 'mdi-sort-ascending' : 'mdi-sort-descending'"
+            size="x-small"
+            variant="text"
+            class="text-medium-emphasis header-btn"
+            @pointerdown.stop
+            @click.stop="toggleSort"
+          />
+        </template>
+      </v-tooltip>
       <v-spacer />
       <v-btn
         icon="mdi-close"
@@ -156,6 +180,16 @@ onMounted(() => {
             @click="setKind(opt.value)"
           >{{ opt.label }}</button>
         </div>
+      </div>
+
+      <!-- Name search -->
+      <div class="filter-row">
+        <input
+          v-model="filterName"
+          class="name-search"
+          placeholder="Search callsign…"
+          @pointerdown.stop
+        />
       </div>
 
       <!-- Affiliation -->
@@ -354,6 +388,28 @@ onMounted(() => {
   background: rgba(var(--v-theme-primary), 0.15);
   border-color: rgba(var(--v-theme-primary), 0.5);
   color: rgb(var(--v-theme-primary));
+}
+
+.name-search {
+  flex: 1;
+  font-size: 11px;
+  background: rgba(var(--v-theme-surface-variant), 0.4);
+  border: 1px solid rgb(var(--v-theme-surface-variant));
+  border-radius: 3px;
+  color: rgba(var(--v-theme-on-surface), 0.87);
+  padding: 2px 7px;
+  line-height: 18px;
+  outline: none;
+  width: 100%;
+}
+
+.name-search::placeholder {
+  color: rgba(var(--v-theme-on-surface), 0.35);
+}
+
+.name-search:focus {
+  border-color: rgba(var(--v-theme-primary), 0.5);
+  background: rgba(var(--v-theme-surface-variant), 0.6);
 }
 
 .filter-affils {

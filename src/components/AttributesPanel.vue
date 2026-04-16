@@ -27,6 +27,7 @@ const { pos, onPointerDown } = useDraggable()
 const positioned = ref(false)
 
 const name = ref('')
+const remarks = ref('')
 const color = ref(DEFAULT_FEATURE_COLOR)
 const colorMenu = ref(false)
 const opacity = ref(DEFAULT_FEATURE_OPACITY)
@@ -153,8 +154,9 @@ watch(
   () => featuresStore.selectedFeature,
   (feature) => {
     if (!feature) return
-    name.value = feature.properties?.name ?? ''
-    color.value = feature.properties?.color ?? DEFAULT_FEATURE_COLOR
+    name.value    = feature.properties?.name    ?? ''
+    remarks.value = feature.properties?.remarks ?? ''
+    color.value   = feature.properties?.color   ?? DEFAULT_FEATURE_COLOR
     opacity.value = feature.properties?.opacity ?? DEFAULT_FEATURE_OPACITY
     widthMeters.value = feature.properties?.widthMeters ?? 500
     syncGeometryRefs(feature)
@@ -208,6 +210,13 @@ async function commitName() {
   if (!feature) return
   if (name.value === (feature.properties?.name ?? '')) return
   await featuresStore.updateFeatureProperties(feature.id, { name: name.value })
+}
+
+async function commitRemarks() {
+  const feature = featuresStore.selectedFeature
+  if (!feature) return
+  if (remarks.value === (feature.properties?.remarks ?? '')) return
+  await featuresStore.updateFeatureProperties(feature.id, { remarks: remarks.value })
 }
 
 async function commitColor(value) {
@@ -879,6 +888,23 @@ onMounted(async () => {
       </template>
 
     </div>
+
+    <!-- ---- Remarks row ---- -->
+    <div class="remarks-row">
+      <div class="remarks-label">Remarks</div>
+      <v-textarea
+        v-model="remarks"
+        placeholder="None"
+        density="compact"
+        variant="plain"
+        hide-details
+        auto-grow
+        rows="1"
+        max-rows="4"
+        class="remarks-field"
+        @blur="commitRemarks"
+      />
+    </div>
   </div>
 </template>
 
@@ -929,6 +955,13 @@ onMounted(async () => {
 
 .name-field :deep(.v-field__field) {
   align-items: center;
+}
+
+.remarks-field :deep(.v-field__input) {
+  font-size: 11px;
+  min-height: unset;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
 .swatch-dot {
@@ -1041,6 +1074,20 @@ onMounted(async () => {
   gap: 6px;
   padding: 6px 8px 8px 8px;
   border-top: 1px solid rgb(var(--v-theme-surface-variant));
+}
+
+.remarks-row {
+  padding: 6px 8px 8px;
+  border-top: 1px solid rgb(var(--v-theme-surface-variant));
+}
+
+.remarks-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(var(--v-theme-on-surface), 0.38);
+  margin-bottom: 4px;
 }
 
 /* Column wrapper that stacks sub-rows vertically and sizes itself to its

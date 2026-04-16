@@ -313,7 +313,7 @@ function featureToCoT(feature, now) {
       `  <detail>`,
       `    <contact callsign="${esc(name)}" />`,
       `    <link_attr order="Ascending" routetype="Primary" direction="Infil" method="Foot" color="${colorInt}" />`,
-      `    <remarks />`,
+      remarks ? `    <remarks>${esc(remarks)}</remarks>` : `    <remarks />`,
       `    <archive />`,
       `    <__routeinfo><__navcues /></__routeinfo>`,
       ...linkLines,
@@ -470,7 +470,7 @@ export function importCotFeatures(xmlText) {
       results.push({
         type:       'route',
         geometry:   { type: 'LineString', coordinates: coords },
-        properties: { name, color: routeColor, waypoints }
+        properties: { name, color: routeColor, waypoints, ...(remarks ? { remarks } : {}) }
       })
       continue
     }
