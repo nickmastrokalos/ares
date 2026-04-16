@@ -252,8 +252,15 @@ export function useMapDraw(getMap) {
 
     moveHandler = (e) => {
       if (points.length === 0) return
-      const coords = [...points, [e.lngLat.lng, e.lngLat.lat], points[0]]
-      updatePreview({ type: 'Polygon', coordinates: [coords] })
+      const cursor = [e.lngLat.lng, e.lngLat.lat]
+      // With only one point a closed polygon ring would be degenerate (3
+      // positions, two of them identical) and MapLibre won't render it.
+      // Show a simple line segment instead so the user gets immediate feedback.
+      if (points.length === 1) {
+        updatePreview({ type: 'LineString', coordinates: [points[0], cursor] })
+        return
+      }
+      updatePreview({ type: 'Polygon', coordinates: [[...points, cursor, points[0]]] })
     }
 
     dblClickHandler = async (e) => {
