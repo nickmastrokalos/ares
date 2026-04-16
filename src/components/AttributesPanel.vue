@@ -72,9 +72,8 @@ const lineLengthLabel = computed(() => {
 // Functional palette — color is data here (how the user distinguishes
 // features on the map), not decoration. Kept intentionally small.
 const SWATCHES = [
-  '#ffffff', '#f44336', '#ff9800', '#ffeb3b',
-  '#4caf50', '#00bcd4', '#4a9ade', '#9c27b0',
-  '#e91e63', '#795548', '#9e9e9e', '#616161'
+  '#ffffff', '#f44336', '#ff9800', '#ffeb3b', '#4caf50', '#00bcd4', '#4a9ade',
+  '#9c27b0', '#e91e63', '#795548', '#9e9e9e', '#616161', '#2196f3', '#000000',
 ]
 
 // ---- Helpers ----
@@ -947,7 +946,7 @@ onMounted(async () => {
 
 .swatch-grid {
   display: grid;
-  grid-template-columns: repeat(4, 24px);
+  grid-template-columns: repeat(7, 24px);
   gap: 6px;
 }
 
