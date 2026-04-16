@@ -1172,6 +1172,23 @@ export function useMapDraw(getMap) {
     syncImages(featuresStore.featureCollection)
   }
 
+  // Patches the FEATURES_SOURCE color for a single feature without a DB write.
+  // Used by AttributesPanel to give live map feedback while the color picker
+  // is open. The DB write happens separately when the picker closes.
+  function previewFeatureColor(featureId, color) {
+    const map = getMap()
+    if (!map) return
+    const fc = featuresStore.featureCollection
+    map.getSource(FEATURES_SOURCE)?.setData({
+      ...fc,
+      features: fc.features.map(f =>
+        f.properties._dbId === featureId
+          ? { ...f, properties: { ...f.properties, color } }
+          : f
+      )
+    })
+  }
+
   // Pan/zoom the map to encompass a given geometry. Points get a fly-to
   // (zoomed in if the user was far out); everything else uses fitBounds
   // with a capped max zoom so single-segment lines / tiny polygons don't
@@ -1205,5 +1222,5 @@ export function useMapDraw(getMap) {
     }
   })
 
-  return { activeTool, draggingFeature, setTool, cancel, syncFeatures, initLayers, flyToGeometry, moveFeature }
+  return { activeTool, draggingFeature, setTool, cancel, syncFeatures, initLayers, flyToGeometry, moveFeature, previewFeatureColor }
 }

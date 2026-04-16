@@ -70,7 +70,7 @@ const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
-const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature } = useMapDraw(() => map)
+const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const { ranging, toggleRange } = useMapRange(() => map)
 const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers } = useMapRoute(() => map)
@@ -86,6 +86,7 @@ const { initLayers: initAisLayers }   = useMapAis(() => map)
 provide('flyToGeometry', flyToGeometry)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
+provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 
 provide('setInterceptMarker', (lon, lat) => {

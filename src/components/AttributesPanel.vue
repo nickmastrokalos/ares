@@ -21,6 +21,7 @@ const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
 const moveFeature = inject('moveFeature', null)
 const draggingFeature = inject('draggingFeature', null)
+const previewFeatureColor = inject('previewFeatureColor', null)
 const panelRef = ref(null)
 const { pos, onPointerDown } = useDraggable()
 const positioned = ref(false)
@@ -191,6 +192,15 @@ watch(colorMenu, async (open) => {
   if (normalized !== stored) {
     await featuresStore.updateFeatureProperties(feature.id, { color: normalized })
   }
+})
+
+// Live-preview the color on the map while the picker is open, without
+// a DB write per frame. The commit-on-close watcher above persists it.
+watch(color, (newColor) => {
+  if (!colorMenu.value || !previewFeatureColor) return
+  const feature = featuresStore.selectedFeature
+  if (!feature) return
+  previewFeatureColor(feature.id, newColor)
 })
 
 async function commitName() {
