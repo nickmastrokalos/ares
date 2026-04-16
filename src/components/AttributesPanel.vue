@@ -178,6 +178,22 @@ if (draggingFeature) {
   })
 }
 
+// Commit the color when the picker popover closes. Swatch clicks already
+// commit immediately and close the menu; this watcher covers the fine-tune
+// canvas / hex-input path where the menu stays open while the user adjusts.
+// Normalise to lowercase so storage is always consistent (#ff9800 not #FF9800).
+watch(colorMenu, async (open) => {
+  if (open) return
+  const feature = featuresStore.selectedFeature
+  if (!feature) return
+  const normalized = color.value.toLowerCase()
+  color.value = normalized
+  const stored = (feature.properties?.color ?? DEFAULT_FEATURE_COLOR).toLowerCase()
+  if (normalized !== stored) {
+    await featuresStore.updateFeatureProperties(feature.id, { color: normalized })
+  }
+})
+
 async function commitName() {
   const feature = featuresStore.selectedFeature
   if (!feature) return
@@ -498,18 +514,29 @@ onMounted(async () => {
           </v-btn>
         </template>
 
-        <v-card class="pa-2">
-          <div class="swatch-grid">
-            <button
-              v-for="swatch in SWATCHES"
-              :key="swatch"
-              type="button"
-              class="swatch-option"
-              :class="{ selected: swatch.toLowerCase() === color.toLowerCase() }"
-              :style="{ backgroundColor: swatch }"
-              @click="commitColor(swatch)"
-            />
+        <v-card class="color-picker-card">
+          <div class="pa-2">
+            <div class="swatch-grid">
+              <button
+                v-for="swatch in SWATCHES"
+                :key="swatch"
+                type="button"
+                class="swatch-option"
+                :class="{ selected: swatch.toLowerCase() === color.toLowerCase() }"
+                :style="{ backgroundColor: swatch }"
+                @click="commitColor(swatch)"
+              />
+            </div>
           </div>
+          <v-divider />
+          <v-color-picker
+            v-model="color"
+            :modes="['hex']"
+            hide-sliders
+            elevation="0"
+            width="220"
+            class="color-picker-fine"
+          />
         </v-card>
       </v-menu>
 
@@ -902,6 +929,20 @@ onMounted(async () => {
   height: 18px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.color-picker-card {
+  overflow: hidden;
+}
+
+/* Strip the default background and padding Vuetify adds around the picker
+   canvas so it sits flush inside our popover card. */
+.color-picker-fine :deep(.v-color-picker__controls) {
+  padding: 8px 8px 4px;
+}
+
+.color-picker-fine :deep(.v-color-picker__canvas) {
+  border-radius: 0;
 }
 
 .swatch-grid {

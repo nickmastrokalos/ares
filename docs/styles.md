@@ -59,7 +59,7 @@ Drawn features on the map are **data**, not chrome. The user picks the color and
 - Per-feature color and fill-opacity are stored on `properties.color` / `properties.opacity` and resolved in MapLibre paint expressions via `['coalesce', ['get', '<prop>'], <default>]`. The stroke stays fully opaque so the shape boundary remains visible at any fill opacity.
 - Opacity is editable in `AttributesPanel` via a slider popover, only surfaced when the selected feature is fillable — lines and points never show the control.
 - The selection highlight is a separate layer (`draw-features-selected`) rendered in the info blue (`#4a9ade`) on top of the feature. It never replaces the feature's own color.
-- `AttributesPanel` exposes a small functional palette for the color picker. Keep the palette curated — do not expose a full RGB picker unless explicitly needed.
+- `AttributesPanel` color picker: a curated 12-swatch quick-select grid for common colors, plus a `v-color-picker` canvas (hex mode only, no alpha) for fine-tuning. Swatches commit immediately and close the popover; canvas/hex changes commit when the popover closes. Color is always stored as lowercase `#rrggbb`.
 
 ## Floating Panels
 - Shared surface style: `rgba(var(--v-theme-surface), 0.92)` background, `1px solid rgb(var(--v-theme-surface-variant))` border, `4px` radius.
