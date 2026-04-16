@@ -7,6 +7,27 @@ export function boxPolygon(a, b) {
   }
 }
 
+// Build a box polygon from canonical SW/NE corners, optionally rotated by
+// `rotationDeg` degrees clockwise around the box's center. Rotation is
+// applied in a cosine-corrected local plane so it looks correct on the map
+// regardless of latitude.
+export function rotatedBoxPolygon(sw, ne, rotationDeg = 0) {
+  const cx = (sw[0] + ne[0]) / 2
+  const cy = (sw[1] + ne[1]) / 2
+  const corners = [sw, [ne[0], sw[1]], ne, [sw[0], ne[1]]]
+  const rotated = corners.map(([lng, lat]) => {
+    if (rotationDeg === 0) return [lng, lat]
+    const rad = (rotationDeg * Math.PI) / 180
+    const cosA = Math.cos(rad)
+    const sinA = Math.sin(rad)
+    const cosLat = Math.cos(cy * Math.PI / 180)
+    const dx = (lng - cx) * cosLat
+    const dy = lat - cy
+    return [cx + (dx * cosA - dy * sinA) / cosLat, cy + dx * sinA + dy * cosA]
+  })
+  return { type: 'Polygon', coordinates: [[...rotated, rotated[0]]] }
+}
+
 export function circlePolygon(center, radiusMeters, steps = 64) {
   const coords = []
   for (let i = 0; i <= steps; i++) {

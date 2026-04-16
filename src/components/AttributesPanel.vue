@@ -7,7 +7,7 @@ import {
 } from '@/stores/features'
 import { useDraggable } from '@/composables/useDraggable'
 import { useSettingsStore } from '@/stores/settings'
-import { formatDistance, parseDistanceToMeters, distanceBetween, circlePolygon, sectorPolygon, boxPolygon } from '@/services/geometry'
+import { formatDistance, parseDistanceToMeters, distanceBetween, circlePolygon, sectorPolygon, rotatedBoxPolygon } from '@/services/geometry'
 import CoordInput from '@/components/CoordInput.vue'
 
 // Shapes that actually render a fill layer. Opacity has no visible effect
@@ -43,6 +43,7 @@ const vertexVals  = ref([])    // line / polygon vertices
 const radiusStr     = ref('')
 const startAngleStr = ref('')
 const endAngleStr   = ref('')
+const rotationStr   = ref('0')
 
 const isImage = computed(() => featuresStore.selectedFeature?.type === 'image')
 const isFillable = computed(() =>
@@ -104,11 +105,19 @@ function syncGeometryRefs(feature) {
       endAngleStr.value   = String(p.endAngle ?? 90)
       break
     case 'box': {
-      const ring = g.coordinates[0]
-      const lngs = ring.map(c => c[0])
-      const lats  = ring.map(c => c[1])
-      swVal.value = [Math.min(...lngs), Math.min(...lats)]
-      neVal.value = [Math.max(...lngs), Math.max(...lats)]
+      // Use stored sw/ne when available (set on creation or after first edit);
+      // fall back to deriving from polygon vertices for older axis-aligned boxes.
+      if (p.sw && p.ne) {
+        swVal.value = [...p.sw]
+        neVal.value = [...p.ne]
+      } else {
+        const ring = g.coordinates[0]
+        const lngs = ring.map(c => c[0])
+        const lats  = ring.map(c => c[1])
+        swVal.value = [Math.min(...lngs), Math.min(...lats)]
+        neVal.value = [Math.max(...lngs), Math.max(...lats)]
+      }
+      rotationStr.value = String(p.rotationDeg ?? 0)
       break
     }
     case 'line':
@@ -265,9 +274,10 @@ async function commitSwCorner([lng, lat]) {
   if (feature?.type !== 'box') return
   const ne = neVal.value
   if (!ne) return
+  const rotDeg = feature.properties.rotationDeg ?? 0
   await featuresStore.updateFeature(feature.id,
-    boxPolygon([lng, lat], ne),
-    { ...feature.properties }
+    rotatedBoxPolygon([lng, lat], ne, rotDeg),
+    { ...feature.properties, sw: [lng, lat], ne }
   )
 }
 
@@ -276,9 +286,25 @@ async function commitNeCorner([lng, lat]) {
   if (feature?.type !== 'box') return
   const sw = swVal.value
   if (!sw) return
+  const rotDeg = feature.properties.rotationDeg ?? 0
   await featuresStore.updateFeature(feature.id,
-    boxPolygon(sw, [lng, lat]),
-    { ...feature.properties }
+    rotatedBoxPolygon(sw, [lng, lat], rotDeg),
+    { ...feature.properties, sw, ne: [lng, lat] }
+  )
+}
+
+async function commitRotation() {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'box') return
+  const angle = parseFloat(rotationStr.value)
+  if (!isFinite(angle)) { rotationStr.value = String(feature.properties.rotationDeg ?? 0); return }
+  const clamped = ((angle % 360) + 360) % 360
+  const sw = feature.properties.sw ?? swVal.value
+  const ne = feature.properties.ne ?? neVal.value
+  if (!sw || !ne) return
+  await featuresStore.updateFeature(feature.id,
+    rotatedBoxPolygon(sw, ne, clamped),
+    { ...feature.properties, sw, ne, rotationDeg: clamped }
   )
 }
 
@@ -584,6 +610,20 @@ onMounted(async () => {
         <div class="geo-field">
           <span class="geo-label">NE</span>
           <CoordInput :model-value="neVal" @commit="commitNeCorner" />
+        </div>
+        <div class="geo-field">
+          <span class="geo-label">Rot°</span>
+          <v-text-field
+            v-model="rotationStr"
+            density="compact"
+            variant="outlined"
+            rounded="sm"
+            hide-details
+            single-line
+            class="geo-input geo-input--angle"
+            @blur="commitRotation"
+            @keydown.enter="commitRotation"
+          />
         </div>
       </template>
 

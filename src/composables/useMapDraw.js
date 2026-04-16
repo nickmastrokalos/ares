@@ -372,8 +372,9 @@ export function useMapDraw(getMap) {
       if (points.length === 0) {
         points.push(pt)
       } else {
-        const geometry = boxPolygon(points[0], pt)
-        featuresStore.addFeature('box', geometry, { name: 'Box' })
+        const sw = [Math.min(points[0][0], pt[0]), Math.min(points[0][1], pt[1])]
+        const ne = [Math.max(points[0][0], pt[0]), Math.max(points[0][1], pt[1])]
+        featuresStore.addFeature('box', boxPolygon(sw, ne), { name: 'Box', sw, ne, rotationDeg: 0 })
         cleanup()
         startBox()
       }
