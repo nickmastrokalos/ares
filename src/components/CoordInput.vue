@@ -277,6 +277,6 @@ watch(
 
 /* MGRS */
 .ci-field--mgrs-zone   { width: 38px; text-transform: uppercase; }
-.ci-field--mgrs-sq     { width: 26px; text-transform: uppercase; }
+.ci-field--mgrs-sq     { width: 34px; text-transform: uppercase; }
 .ci-field--mgrs-digits { width: 50px; }
 </style>

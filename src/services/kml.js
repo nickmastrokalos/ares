@@ -31,7 +31,34 @@ export async function exportKml(featuresStore) {
   }
 }
 
-function buildKml(features, documentName) {
+// Accept a pre-filtered features array instead of pulling from the store.
+// Used by ExportCotDialog to export only the user-selected subset.
+export async function exportKmlSubset(fcFeatures, documentName) {
+  if (!fcFeatures.length) return
+
+  const kmlString = buildKml(fcFeatures, documentName)
+  const safeName  = documentName.replace(/[^a-zA-Z0-9_-]/g, '_')
+
+  const file = await save({
+    defaultPath: `${safeName}.kml`,
+    filters: [
+      { name: 'KML', extensions: ['kml'] },
+      { name: 'KMZ', extensions: ['kmz'] }
+    ]
+  })
+  if (!file) return
+
+  if (file.endsWith('.kmz')) {
+    const zip = new JSZip()
+    zip.file('doc.kml', kmlString)
+    const blob = await zip.generateAsync({ type: 'uint8array' })
+    await writeFile(file, blob)
+  } else {
+    await writeFile(file, new TextEncoder().encode(kmlString))
+  }
+}
+
+export function buildKml(features, documentName) {
   const placemarks = features.map(featureToKml).filter(Boolean).join('\n')
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',

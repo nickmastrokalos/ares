@@ -55,7 +55,7 @@
 Drawn features on the map are **data**, not chrome. The user picks the color and we render it as-is — this is the one place where saturated color is expected.
 
 - Default feature color: `#ffffff` (white) — defined as `DEFAULT_FEATURE_COLOR` in `src/stores/features.js`. Features without an explicit color fall back to this.
-- Features are rendered with a **solid 2px stroke** and, for fillable shapes (polygon / circle / sector), a fill whose opacity is per-feature (defaults to 20% via `DEFAULT_FEATURE_OPACITY`). No glow, halo, or outline-on-outline treatment.
+- Features are rendered with a **solid 2px stroke** and, for fillable shapes (polygon / box / circle / ellipse / sector), a fill whose opacity is per-feature (defaults to 20% via `DEFAULT_FEATURE_OPACITY`). No glow, halo, or outline-on-outline treatment.
 - Per-feature color and fill-opacity are stored on `properties.color` / `properties.opacity` and resolved in MapLibre paint expressions via `['coalesce', ['get', '<prop>'], <default>]`. The stroke stays fully opaque so the shape boundary remains visible at any fill opacity.
 - Opacity is editable in `AttributesPanel` via a slider popover, only surfaced when the selected feature is fillable — lines and points never show the control.
 - The selection highlight is a separate layer (`draw-features-selected`) rendered in the info blue (`#4a9ade`) on top of the feature. It never replaces the feature's own color.
