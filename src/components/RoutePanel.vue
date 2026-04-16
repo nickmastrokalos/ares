@@ -1,11 +1,18 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, inject, onMounted } from 'vue'
 import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
 import { formatCoordinate } from '@/services/coordinates'
 import { distanceBetween, formatDistance } from '@/services/geometry'
+
+const ROUTE_DEFAULT_COLOR = '#ffffff'
+
+const SWATCHES = [
+  '#ffffff', '#f44336', '#ff9800', '#ffeb3b', '#4caf50', '#00bcd4', '#4a9ade',
+  '#9c27b0', '#e91e63', '#795548', '#9e9e9e', '#616161', '#2196f3', '#000000',
+]
 
 const props = defineProps({
   routeId:   { type: Number, required: true },
@@ -16,11 +23,14 @@ const emit = defineEmits(['close', 'append-waypoint'])
 
 const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
+const previewRouteColor = inject('previewRouteColor', null)
 
 const minimized  = ref(false)
 const positioned = ref(false)
 const editingName = ref(false)
 const nameInput   = ref('')
+const color      = ref(ROUTE_DEFAULT_COLOR)
+const colorMenu  = ref(false)
 
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
@@ -74,11 +84,46 @@ const totalDistanceLabel = computed(() =>
 
 const canDelete = computed(() => waypoints.value.length > 2)
 
-// ---- Role dot color ----
+// ---- Color ----
 
 function roleColor() {
-  return '#ffffff'
+  return color.value
 }
+
+function commitColor(hex) {
+  color.value = hex.toLowerCase()
+  if (!routeRow.value) return
+  featuresStore.updateFeature(
+    routeRow.value.id,
+    routeGeometry.value,
+    { ...routeProps.value, color: color.value }
+  )
+}
+
+watch(colorMenu, async (open) => {
+  if (open) return
+  if (!routeRow.value) return
+  const normalized = color.value.toLowerCase()
+  color.value = normalized
+  const stored = (routeProps.value?.color ?? ROUTE_DEFAULT_COLOR).toLowerCase()
+  if (normalized !== stored) {
+    await featuresStore.updateFeature(
+      routeRow.value.id,
+      routeGeometry.value,
+      { ...routeProps.value, color: normalized }
+    )
+  }
+})
+
+watch(color, (newColor) => {
+  if (!colorMenu.value || !previewRouteColor) return
+  if (!routeRow.value) return
+  previewRouteColor(routeRow.value.id, newColor)
+})
+
+watch(routeProps, (props) => {
+  if (props) color.value = (props.color ?? ROUTE_DEFAULT_COLOR).toLowerCase()
+}, { immediate: true })
 
 // ---- Coord format ----
 
@@ -165,6 +210,47 @@ watch(routeRow, (row) => {
     <!-- Header -->
     <div class="panel-header" @pointerdown="onPointerDown">
       <v-icon size="14" class="text-medium-emphasis" style="flex-shrink:0">mdi-routes</v-icon>
+
+      <!-- Color picker -->
+      <v-menu
+        v-model="colorMenu"
+        :close-on-content-click="false"
+        location="bottom"
+        offset="6"
+      >
+        <template #activator="{ props: menuProps }">
+          <span
+            v-bind="menuProps"
+            class="route-color-dot"
+            :style="{ backgroundColor: color }"
+            @pointerdown.stop
+          />
+        </template>
+        <v-card class="color-picker-card">
+          <div class="pa-2">
+            <div class="swatch-grid">
+              <button
+                v-for="swatch in SWATCHES"
+                :key="swatch"
+                type="button"
+                class="swatch-option"
+                :class="{ selected: swatch.toLowerCase() === color.toLowerCase() }"
+                :style="{ backgroundColor: swatch }"
+                @click="commitColor(swatch)"
+              />
+            </div>
+          </div>
+          <v-divider />
+          <v-color-picker
+            v-model="color"
+            :modes="['hex']"
+            hide-sliders
+            elevation="0"
+            width="220"
+            class="color-picker-fine"
+          />
+        </v-card>
+      </v-menu>
 
       <!-- Inline name edit -->
       <template v-if="editingName">
@@ -437,5 +523,48 @@ watch(routeRow, (row) => {
 .delete-label {
   font-size: 11px;
   margin-left: 4px;
+}
+
+.route-color-dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.color-picker-card {
+  overflow: hidden;
+}
+
+.color-picker-fine :deep(.v-color-picker__controls) {
+  padding: 8px 8px 4px;
+}
+
+.color-picker-fine :deep(.v-color-picker__canvas) {
+  border-radius: 0;
+}
+
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 24px);
+  gap: 6px;
+}
+
+.swatch-option {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  background-clip: padding-box;
+}
+
+.swatch-option.selected {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
 }
 </style>

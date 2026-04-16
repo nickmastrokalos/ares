@@ -116,7 +116,7 @@ export function useMapRoute(getMap) {
       id: LINE_LAYER,
       type: 'line',
       source: LINES_SOURCE,
-      paint: { 'line-color': ROUTE_COLOR, 'line-width': 2 }
+      paint: { 'line-color': ['coalesce', ['get', 'color'], ROUTE_COLOR], 'line-width': 2 }
     })
 
     map.addSource(WAYPOINTS_SOURCE, {
@@ -129,7 +129,7 @@ export function useMapRoute(getMap) {
       source: WAYPOINTS_SOURCE,
       paint: {
         'circle-radius': 5,
-        'circle-color': ROUTE_COLOR,
+        'circle-color': ['coalesce', ['get', 'color'], ROUTE_COLOR],
         'circle-stroke-color': 'rgba(0,0,0,0.5)',
         'circle-stroke-width': 1
       }
@@ -232,9 +232,11 @@ export function useMapRoute(getMap) {
       const waypoints  = properties.waypoints ?? []
       const total      = coords.length
 
+      const color = properties.color ?? ROUTE_COLOR
+
       lineFeatures.push({
         type: 'Feature',
-        properties: { _dbId: row.id },
+        properties: { _dbId: row.id, color },
         geometry
       })
 
@@ -244,6 +246,7 @@ export function useMapRoute(getMap) {
           type: 'Feature',
           properties: {
             _dbId: row.id,
+            color,
             label: wp.label ?? wpLabel(i, total),
             role:  wp.role  ?? (i === 0 ? 'SP' : i === total - 1 ? 'EP' : 'WP')
           },
@@ -518,6 +521,39 @@ export function useMapRoute(getMap) {
     }
   )
 
+  // ---- Live color preview ----
+
+  function previewRouteColor(routeId, color) {
+    const map = getMap()
+    if (!map) return
+
+    const linesSrc = map.getSource(LINES_SOURCE)
+    if (linesSrc) {
+      const data = linesSrc._data ?? { type: 'FeatureCollection', features: [] }
+      linesSrc.setData({
+        ...data,
+        features: data.features.map(f =>
+          f.properties._dbId === routeId
+            ? { ...f, properties: { ...f.properties, color } }
+            : f
+        )
+      })
+    }
+
+    const wpSrc = map.getSource(WAYPOINTS_SOURCE)
+    if (wpSrc) {
+      const data = wpSrc._data ?? { type: 'FeatureCollection', features: [] }
+      wpSrc.setData({
+        ...data,
+        features: data.features.map(f =>
+          f.properties._dbId === routeId
+            ? { ...f, properties: { ...f.properties, color } }
+            : f
+        )
+      })
+    }
+  }
+
   // ---- Cleanup ----
 
   onUnmounted(() => {
@@ -549,6 +585,7 @@ export function useMapRoute(getMap) {
     closeRoutePanel,
     startAppendMode,
     toggleRoute,
-    initLayers
+    initLayers,
+    previewRouteColor
   }
 }

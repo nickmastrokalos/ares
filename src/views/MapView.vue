@@ -73,7 +73,7 @@ let map = null
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const { ranging, toggleRange } = useMapRange(() => map)
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers } = useMapRoute(() => map)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map)
 const externalSuppress = computed(() => ranging.value || routing.value)
 const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress)
 const suppressTrackPanel = computed(() => ranging.value || routing.value || placing.value != null)
@@ -88,6 +88,7 @@ provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
 provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
+provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
 
 provide('setInterceptMarker', (lon, lat) => {
   if (!map) return
