@@ -22,20 +22,68 @@ impl ListenerManager {
     /// Start a UDP listener bound to `address:port`. Emits `cot-event` for
     /// every successfully parsed CoT message. If a listener already exists
     /// for this address:port it is stopped and replaced.
+    ///
+    /// When `address` is an IPv4 multicast address (`224.0.0.0/4`) the socket
+    /// is bound to `0.0.0.0:port` and the OS is told to join the multicast
+    /// group via `IP_ADD_MEMBERSHIP` / `join_multicast_v4`. Without this the
+    /// kernel silently drops all inbound multicast packets.
     pub fn start_udp(&mut self, address: String, port: u16, app: AppHandle) {
         let key = format!("{address}:{port}");
         self.stop(&key);
 
-        let bind_addr = format!("{address}:{port}");
         let handle = tauri::async_runtime::spawn(async move {
-            let socket = match tokio::net::UdpSocket::bind(&bind_addr).await {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("[cot] UDP bind {bind_addr} failed: {e}");
-                    return;
+            // Detect IPv4 multicast (224.0.0.0/4) and handle separately.
+            let socket = match address.parse::<std::net::Ipv4Addr>() {
+                Ok(group) if group.is_multicast() => {
+                    // Bind to 0.0.0.0:port — binding to the multicast address
+                    // itself is not portable and not required.
+                    let std_sock = match std::net::UdpSocket::bind(
+                        std::net::SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, port),
+                    ) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("[cot] UDP bind 0.0.0.0:{port} failed: {e}");
+                            return;
+                        }
+                    };
+                    if let Err(e) = std_sock.set_nonblocking(true) {
+                        eprintln!("[cot] UDP set_nonblocking failed: {e}");
+                        return;
+                    }
+                    if let Err(e) =
+                        std_sock.join_multicast_v4(&group, &std::net::Ipv4Addr::UNSPECIFIED)
+                    {
+                        eprintln!("[cot] UDP join_multicast_v4 {group} failed: {e}");
+                        return;
+                    }
+                    match tokio::net::UdpSocket::from_std(std_sock) {
+                        Ok(s) => {
+                            eprintln!(
+                                "[cot] UDP listener started on 0.0.0.0:{port} (multicast {group})"
+                            );
+                            s
+                        }
+                        Err(e) => {
+                            eprintln!("[cot] UDP from_std failed: {e}");
+                            return;
+                        }
+                    }
+                }
+                _ => {
+                    // Unicast (or non-IPv4): bind directly as before.
+                    let bind_addr = format!("{address}:{port}");
+                    match tokio::net::UdpSocket::bind(&bind_addr).await {
+                        Ok(s) => {
+                            eprintln!("[cot] UDP listener started on {bind_addr}");
+                            s
+                        }
+                        Err(e) => {
+                            eprintln!("[cot] UDP bind {bind_addr} failed: {e}");
+                            return;
+                        }
+                    }
                 }
             };
-            eprintln!("[cot] UDP listener started on {bind_addr}");
 
             let mut buf = vec![0u8; 65536];
             loop {
@@ -54,7 +102,7 @@ impl ListenerManager {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[cot] UDP recv error on {bind_addr}: {e}");
+                        eprintln!("[cot] UDP recv error ({address}:{port}): {e}");
                         break;
                     }
                 }
