@@ -2,6 +2,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { readFile, writeFile } from '@tauri-apps/plugin-fs'
 import { kml as parseKml } from '@tmcw/togeojson'
 import JSZip from 'jszip'
+import { esc } from '@/services/xml'
 
 // ---- Export ----------------------------------------------------------------
 
@@ -10,10 +11,11 @@ export async function exportKml(featuresStore) {
   if (!fc.features.length) return
 
   const missionName = featuresStore.activeMission?.name || 'export'
+  const safeName = missionName.replace(/[^a-zA-Z0-9_-]/g, '_')
   const kmlString = buildKml(fc.features, missionName)
 
   const file = await save({
-    defaultPath: `${missionName}.kml`,
+    defaultPath: `${safeName}.kml`,
     filters: [
       { name: 'KML', extensions: ['kml'] },
       { name: 'KMZ', extensions: ['kmz'] }
@@ -31,7 +33,34 @@ export async function exportKml(featuresStore) {
   }
 }
 
-function buildKml(features, documentName) {
+// Accept a pre-filtered features array instead of pulling from the store.
+// Used by ExportCotDialog to export only the user-selected subset.
+export async function exportKmlSubset(fcFeatures, documentName) {
+  if (!fcFeatures.length) return
+
+  const kmlString = buildKml(fcFeatures, documentName)
+  const safeName  = documentName.replace(/[^a-zA-Z0-9_-]/g, '_')
+
+  const file = await save({
+    defaultPath: `${safeName}.kml`,
+    filters: [
+      { name: 'KML', extensions: ['kml'] },
+      { name: 'KMZ', extensions: ['kmz'] }
+    ]
+  })
+  if (!file) return
+
+  if (file.endsWith('.kmz')) {
+    const zip = new JSZip()
+    zip.file('doc.kml', kmlString)
+    const blob = await zip.generateAsync({ type: 'uint8array' })
+    await writeFile(file, blob)
+  } else {
+    await writeFile(file, new TextEncoder().encode(kmlString))
+  }
+}
+
+export function buildKml(features, documentName) {
   const placemarks = features.map(featureToKml).filter(Boolean).join('\n')
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -149,14 +178,6 @@ function toKmlColor(hex, alpha) {
 
 function coordStr(coords) {
   return coords.map(([lng, lat]) => `${lng},${lat},0`).join('\n          ')
-}
-
-function esc(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
 }
 
 // ---- Import (unchanged) ----------------------------------------------------

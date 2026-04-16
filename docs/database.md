@@ -91,17 +91,17 @@ mission is active).
 | `updated_at` | TEXT    | Bumped by the store whenever features change.    |
 
 ### `features` (migration v1; `project_id` renamed to `mission_id` in v2)
-Individual geometries (line, polygon, circle, sector, point) belonging to a mission.
+Individual geometries belonging to a mission.
 
-| Column       | Type    | Notes                                                        |
-|--------------|---------|--------------------------------------------------------------|
-| `id`         | INTEGER | Primary key, autoincrement.                                  |
-| `mission_id` | INTEGER | FK → `missions.id`, `ON DELETE CASCADE`.                     |
-| `type`       | TEXT    | `line` / `polygon` / `circle` / `sector` / `point`.          |
-| `geometry`   | TEXT    | JSON-serialized GeoJSON geometry.                            |
-| `properties` | TEXT    | JSON-serialized property bag (name, radius, angles, etc.).   |
-| `created_at` | TEXT    | `datetime('now')` default.                                   |
-| `updated_at` | TEXT    | Bumped on edit.                                              |
+| Column       | Type    | Notes                                                                                     |
+|--------------|---------|-------------------------------------------------------------------------------------------|
+| `id`         | INTEGER | Primary key, autoincrement.                                                               |
+| `mission_id` | INTEGER | FK → `missions.id`, `ON DELETE CASCADE`.                                                  |
+| `type`       | TEXT    | Shape type string — see *Shape types* section in `frontend.md` for the full enumeration. |
+| `geometry`   | TEXT    | JSON-serialized GeoJSON geometry object.                                                  |
+| `properties` | TEXT    | JSON-serialized property bag (name, color, canonical parameters — see *Shape types*).     |
+| `created_at` | TEXT    | `datetime('now')` default.                                                                |
+| `updated_at` | TEXT    | Bumped on edit.                                                                           |
 
 ### Migration v2 — rename to missions
 Dropped the "projects" vocabulary in favor of "missions" to match the

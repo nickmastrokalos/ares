@@ -1,12 +1,17 @@
 import { ref, watch, onUnmounted } from 'vue'
 import {
   boxPolygon,
+  rotatedBoxPolygon,
   circlePolygon,
   sectorPolygon,
+  ellipsePolygon,
+  destinationPoint,
   distanceBetween,
   bearingBetween,
+  inverseRotateAroundCenter,
   geometryBounds,
-  computeImageCorners
+  computeImageCorners,
+  ringCentroid
 } from '@/services/geometry'
 import { pickAndReadImage } from '@/services/imageOverlay'
 import { useFeaturesStore, DEFAULT_FEATURE_COLOR, DEFAULT_FEATURE_OPACITY } from '@/stores/features'
@@ -15,8 +20,10 @@ import { useSettingsStore } from '@/stores/settings'
 const PREVIEW_SOURCE = 'draw-preview'
 const FEATURES_SOURCE = 'draw-features'
 const IMAGE_BOUNDS_SOURCE = 'draw-image-bounds'
+const VERTEX_HANDLES_SOURCE = 'draw-vertex-handles'
 const SELECTED_LAYER = 'draw-features-selected'
 const LABELS_LAYER = 'draw-features-labels'
+const VERTEX_HANDLES_LAYER = 'draw-vertex-handles-layer'
 
 // Expressions resolving per-feature color / fill-opacity from properties,
 // with shared defaults when unset. Data-driven so the attributes panel can
@@ -41,6 +48,12 @@ export function useMapDraw(getMap) {
   // Suppresses the selection click handler so the drag doesn't simultaneously
   // deselect the feature being moved.
   let isMovingFeature = false
+  // Non-null while a vertex handle drag is in progress.
+  let dragState = null
+  let vertexHandlesSetup = false
+  // Exposes the transient feature state during a handle drag so the
+  // AttributesPanel can sync its fields in real-time without a DB round-trip.
+  const draggingFeature = ref(null)
 
   const SELECTABLE_LAYERS = [
     'draw-features-fill',
@@ -167,6 +180,24 @@ export function useMapDraw(getMap) {
         paint: { 'fill-color': 'rgba(0,0,0,0)', 'fill-opacity': 0 }
       })
     }
+
+    if (!map.getSource(VERTEX_HANDLES_SOURCE)) {
+      map.addSource(VERTEX_HANDLES_SOURCE, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      })
+      map.addLayer({
+        id: VERTEX_HANDLES_LAYER,
+        type: 'circle',
+        source: VERTEX_HANDLES_SOURCE,
+        paint: {
+          'circle-radius': 6,
+          'circle-color': '#ffffff',
+          'circle-stroke-color': '#4a9ade',
+          'circle-stroke-width': 2
+        }
+      })
+    }
   }
 
   function updatePreview(geojson) {
@@ -252,8 +283,15 @@ export function useMapDraw(getMap) {
 
     moveHandler = (e) => {
       if (points.length === 0) return
-      const coords = [...points, [e.lngLat.lng, e.lngLat.lat], points[0]]
-      updatePreview({ type: 'Polygon', coordinates: [coords] })
+      const cursor = [e.lngLat.lng, e.lngLat.lat]
+      // With only one point a closed polygon ring would be degenerate (3
+      // positions, two of them identical) and MapLibre won't render it.
+      // Show a simple line segment instead so the user gets immediate feedback.
+      if (points.length === 1) {
+        updatePreview({ type: 'LineString', coordinates: [points[0], cursor] })
+        return
+      }
+      updatePreview({ type: 'Polygon', coordinates: [[...points, cursor, points[0]]] })
     }
 
     dblClickHandler = async (e) => {
@@ -362,6 +400,55 @@ export function useMapDraw(getMap) {
     window.addEventListener('keydown', keyHandler)
   }
 
+  function startEllipse() {
+    const map = getMap()
+    points = []
+    let radiusMajor = 0
+    let rotation    = 0
+    map.getCanvasContainer().style.cursor = 'crosshair'
+
+    clickHandler = (e) => {
+      const pt = [e.lngLat.lng, e.lngLat.lat]
+      if (points.length === 0) {
+        points.push(pt)
+      } else if (points.length === 1) {
+        radiusMajor = distanceBetween(points[0], pt)
+        rotation    = bearingBetween(points[0], pt)
+        points.push(pt)
+      } else {
+        const radiusMinor = distanceBetween(points[0], pt)
+        const geometry = ellipsePolygon(points[0], radiusMajor, radiusMinor, rotation)
+        featuresStore.addFeature('ellipse', geometry, {
+          name: 'Ellipse',
+          center: points[0],
+          radiusMajor,
+          radiusMinor,
+          rotation
+        })
+        cleanup()
+        startEllipse()
+      }
+    }
+
+    moveHandler = (e) => {
+      const cursor = [e.lngLat.lng, e.lngLat.lat]
+      if (points.length === 0) return
+      if (points.length === 1) {
+        const r = distanceBetween(points[0], cursor)
+        updatePreview(circlePolygon(points[0], r))
+      } else {
+        const radiusMinor = distanceBetween(points[0], cursor)
+        updatePreview(ellipsePolygon(points[0], radiusMajor, radiusMinor, rotation))
+      }
+    }
+
+    keyHandler = (e) => { if (e.key === 'Escape') cancel() }
+
+    map.on('click', clickHandler)
+    map.on('mousemove', moveHandler)
+    window.addEventListener('keydown', keyHandler)
+  }
+
   function startBox() {
     const map = getMap()
     points = []
@@ -372,8 +459,9 @@ export function useMapDraw(getMap) {
       if (points.length === 0) {
         points.push(pt)
       } else {
-        const geometry = boxPolygon(points[0], pt)
-        featuresStore.addFeature('box', geometry, { name: 'Box' })
+        const sw = [Math.min(points[0][0], pt[0]), Math.min(points[0][1], pt[1])]
+        const ne = [Math.max(points[0][0], pt[0]), Math.max(points[0][1], pt[1])]
+        featuresStore.addFeature('box', boxPolygon(sw, ne), { name: 'Box', sw, ne, rotationDeg: 0 })
         cleanup()
         startBox()
       }
@@ -700,6 +788,7 @@ export function useMapDraw(getMap) {
       polygon: startPolygon,
       box: startBox,
       circle: startCircle,
+      ellipse: startEllipse,
       sector: startSector,
       image: startImage
     }
@@ -738,11 +827,315 @@ export function useMapDraw(getMap) {
     map.setFilter(SELECTED_LAYER, ['==', '_dbId', id])
   }
 
+  // Returns a GeoJSON FeatureCollection of draggable handle Points for the
+  // selected feature. Each Point carries `kind` and `index` properties that
+  // applyVertexDrag uses to identify which parameter to update on drag.
+  function computeHandles(feature) {
+    if (!feature || activeTool.value) return { type: 'FeatureCollection', features: [] }
+    const { type, geometry: geom, properties: props } = feature
+    const handles = []
+
+    if (type === 'point') {
+      handles.push({ lng: geom.coordinates[0], lat: geom.coordinates[1], kind: 'vertex', index: 0 })
+    } else if (type === 'line') {
+      geom.coordinates.forEach(([lng, lat], i) =>
+        handles.push({ lng, lat, kind: 'vertex', index: i })
+      )
+    } else if (type === 'polygon') {
+      const ring = geom.coordinates[0]
+      // Exclude the closing duplicate (last === first).
+      for (let i = 0; i < ring.length - 1; i++) {
+        handles.push({ lng: ring[i][0], lat: ring[i][1], kind: 'vertex', index: i })
+      }
+      // Center handle lets the user translate the whole polygon.
+      const [clon, clat] = ringCentroid(ring)
+      handles.push({ lng: clon, lat: clat, kind: 'center', index: ring.length })
+    } else if (type === 'circle') {
+      const { center, radius } = props
+      handles.push({ lng: center[0], lat: center[1], kind: 'center', index: 0 })
+      const [rlng, rlat] = destinationPoint(center, radius, 90)
+      handles.push({ lng: rlng, lat: rlat, kind: 'radius', index: 1 })
+    } else if (type === 'sector') {
+      const { center, radius, startAngle, endAngle } = props
+      let sweep = endAngle - startAngle
+      if (sweep <= 0) sweep += 360
+      const bisector = startAngle + sweep / 2
+      handles.push({ lng: center[0], lat: center[1], kind: 'center', index: 0 })
+      const [rlng, rlat] = destinationPoint(center, radius, bisector)
+      handles.push({ lng: rlng, lat: rlat, kind: 'radius', index: 1 })
+      const [slng, slat] = destinationPoint(center, radius, startAngle)
+      handles.push({ lng: slng, lat: slat, kind: 'startAngle', index: 2 })
+      const [elng, elat] = destinationPoint(center, radius, endAngle)
+      handles.push({ lng: elng, lat: elat, kind: 'endAngle', index: 3 })
+    } else if (type === 'ellipse') {
+      const { center, radiusMajor, radiusMinor, rotation = 0 } = props
+      handles.push({ lng: center[0], lat: center[1], kind: 'center', index: 0 })
+      const [mlng, mlat] = destinationPoint(center, radiusMajor, rotation)
+      handles.push({ lng: mlng, lat: mlat, kind: 'majorTip', index: 1 })
+      const [nlng, nlat] = destinationPoint(center, radiusMinor, (rotation + 90) % 360)
+      handles.push({ lng: nlng, lat: nlat, kind: 'minorTip', index: 2 })
+    } else if (type === 'box') {
+      const { sw, ne, rotationDeg = 0 } = props
+      const corners = sw && ne
+        ? rotatedBoxPolygon(sw, ne, rotationDeg).coordinates[0]
+        : geom.coordinates[0]
+      for (let i = 0; i < 4; i++) {
+        handles.push({ lng: corners[i][0], lat: corners[i][1], kind: 'corner', index: i })
+      }
+      // Center handle lets the user translate the whole box.
+      const bSw = sw ?? [Math.min(...geom.coordinates[0].map(c => c[0])), Math.min(...geom.coordinates[0].map(c => c[1]))]
+      const bNe = ne ?? [Math.max(...geom.coordinates[0].map(c => c[0])), Math.max(...geom.coordinates[0].map(c => c[1]))]
+      handles.push({ lng: (bSw[0] + bNe[0]) / 2, lat: (bSw[1] + bNe[1]) / 2, kind: 'center', index: 4 })
+    } else if (type === 'image') {
+      handles.push({ lng: geom.coordinates[0], lat: geom.coordinates[1], kind: 'anchor', index: 0 })
+    }
+
+    return {
+      type: 'FeatureCollection',
+      features: handles.map(h => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [h.lng, h.lat] },
+        properties: { kind: h.kind, index: h.index }
+      }))
+    }
+  }
+
+  // Pure function: given a feature snapshot and the dragged handle's new
+  // position, returns the updated { geometry, properties } pair. For literal
+  // shapes it splices coordinates directly; for parametric shapes it
+  // back-computes properties and regenerates via the existing builders.
+  function applyVertexDrag(feature, kind, index, [lng, lat]) {
+    const props = { ...feature.properties }
+    const geom = feature.geometry
+
+    if (feature.type === 'point') {
+      return { geometry: { type: 'Point', coordinates: [lng, lat] }, properties: props }
+    }
+
+    if (feature.type === 'line') {
+      const coords = geom.coordinates.map((c, i) => i === index ? [lng, lat] : c)
+      return { geometry: { type: 'LineString', coordinates: coords }, properties: props }
+    }
+
+    if (feature.type === 'polygon') {
+      if (kind === 'center') {
+        const ring = geom.coordinates[0]
+        const [clon, clat] = ringCentroid(ring)
+        const dLng = lng - clon
+        const dLat = lat - clat
+        const newRing = ring.map(([lo, la]) => [lo + dLng, la + dLat])
+        return { geometry: { type: 'Polygon', coordinates: [newRing] }, properties: props }
+      }
+      const ring = [...geom.coordinates[0]]
+      ring[index] = [lng, lat]
+      // Keep the closing duplicate in sync with vertex 0.
+      if (index === 0) ring[ring.length - 1] = [lng, lat]
+      return { geometry: { type: 'Polygon', coordinates: [ring] }, properties: props }
+    }
+
+    if (feature.type === 'circle') {
+      const center = kind === 'center' ? [lng, lat] : [...props.center]
+      const radius = kind === 'radius'
+        ? distanceBetween(props.center, [lng, lat])
+        : props.radius
+      return { geometry: circlePolygon(center, radius), properties: { ...props, center, radius } }
+    }
+
+    if (feature.type === 'sector') {
+      let center = [...props.center]
+      let { radius, startAngle, endAngle } = props
+      if (kind === 'center') center = [lng, lat]
+      else if (kind === 'radius') radius = distanceBetween(props.center, [lng, lat])
+      else if (kind === 'startAngle') startAngle = bearingBetween(props.center, [lng, lat])
+      else if (kind === 'endAngle') endAngle = bearingBetween(props.center, [lng, lat])
+      return {
+        geometry: sectorPolygon(center, radius, startAngle, endAngle),
+        properties: { ...props, center, radius, startAngle, endAngle }
+      }
+    }
+
+    if (feature.type === 'ellipse') {
+      let center = [...props.center]
+      let { radiusMajor, radiusMinor, rotation = 0 } = props
+      if (kind === 'center') center = [lng, lat]
+      else if (kind === 'majorTip') {
+        radiusMajor = distanceBetween(props.center, [lng, lat])
+        rotation    = bearingBetween(props.center, [lng, lat])
+      } else if (kind === 'minorTip') {
+        radiusMinor = distanceBetween(props.center, [lng, lat])
+      }
+      return {
+        geometry: ellipsePolygon(center, radiusMajor, radiusMinor, rotation),
+        properties: { ...props, center, radiusMajor, radiusMinor, rotation }
+      }
+    }
+
+    if (feature.type === 'box') {
+      let sw = props.sw ? [...props.sw] : null
+      let ne = props.ne ? [...props.ne] : null
+      const rotationDeg = props.rotationDeg ?? 0
+      if (!sw || !ne) {
+        // Legacy box without stored sw/ne: derive from geometry bounds.
+        const coords = geom.coordinates[0]
+        sw = [Math.min(...coords.map(c => c[0])), Math.min(...coords.map(c => c[1]))]
+        ne = [Math.max(...coords.map(c => c[0])), Math.max(...coords.map(c => c[1]))]
+      }
+      if (kind === 'center') {
+        // Translate the whole box by the delta from old center to drag point.
+        const cx = (sw[0] + ne[0]) / 2
+        const cy = (sw[1] + ne[1]) / 2
+        const dLng = lng - cx
+        const dLat = lat - cy
+        const newSw = [sw[0] + dLng, sw[1] + dLat]
+        const newNe = [ne[0] + dLng, ne[1] + dLat]
+        return {
+          geometry: rotatedBoxPolygon(newSw, newNe, rotationDeg),
+          properties: { ...props, sw: newSw, ne: newNe, rotationDeg }
+        }
+      }
+      // Reverse-rotate the drag point into the box's unrotated frame so sw/ne
+      // can be updated in plain axis-aligned space.
+      const cx = (sw[0] + ne[0]) / 2
+      const cy = (sw[1] + ne[1]) / 2
+      const [ulng, ulat] = inverseRotateAroundCenter([lng, lat], [cx, cy], rotationDeg)
+      // Corner order matches rotatedBoxPolygon: 0=SW, 1=SE, 2=NE, 3=NW.
+      if (index === 0) { sw[0] = ulng; sw[1] = ulat }
+      else if (index === 1) { ne[0] = ulng; sw[1] = ulat }
+      else if (index === 2) { ne[0] = ulng; ne[1] = ulat }
+      else if (index === 3) { sw[0] = ulng; ne[1] = ulat }
+      return {
+        geometry: rotatedBoxPolygon(sw, ne, rotationDeg),
+        properties: { ...props, sw, ne, rotationDeg }
+      }
+    }
+
+    if (feature.type === 'image') {
+      return { geometry: { type: 'Point', coordinates: [lng, lat] }, properties: props }
+    }
+
+    return { geometry: geom, properties: props }
+  }
+
+  // Wire cursor and drag handlers on the vertex handles layer. Called once
+  // from initLayers; subsequent calls are no-ops.
+  function setupVertexHandles(map) {
+    if (vertexHandlesSetup) return
+    vertexHandlesSetup = true
+    const canvas = map.getCanvasContainer()
+
+    map.on('mouseenter', VERTEX_HANDLES_LAYER, () => {
+      if (activeTool.value) return
+      canvas.style.cursor = 'grab'
+    })
+
+    map.on('mouseleave', VERTEX_HANDLES_LAYER, () => {
+      if (activeTool.value || dragState) return
+      canvas.style.cursor = ''
+    })
+
+    map.on('mousedown', VERTEX_HANDLES_LAYER, (e) => {
+      if (activeTool.value || isMovingFeature) return
+      e.preventDefault()
+
+      const handle = e.features[0].properties
+      const feature = featuresStore.selectedFeature
+      if (!feature) return
+
+      dragState = {
+        featureId: feature.id,
+        kind: handle.kind,
+        index: Number(handle.index),
+        // Deep clone so the original snapshot is never mutated mid-drag.
+        originalFeature: JSON.parse(JSON.stringify(feature))
+      }
+      isMovingFeature = true
+      map.dragPan.disable()
+      canvas.style.cursor = 'grabbing'
+
+      let hasMoved = false
+      let lastLngLat = null
+
+      function onWindowMouseMove(me) {
+        hasMoved = true
+        if (!dragState) return
+        const rect = canvas.getBoundingClientRect()
+        lastLngLat = map.unproject([me.clientX - rect.left, me.clientY - rect.top])
+        const { geometry, properties } = applyVertexDrag(
+          dragState.originalFeature, dragState.kind, dragState.index,
+          [lastLngLat.lng, lastLngLat.lat]
+        )
+        // Live preview: patch FEATURES_SOURCE directly — no DB write per frame.
+        const fc = featuresStore.featureCollection
+        map.getSource(FEATURES_SOURCE)?.setData({
+          ...fc,
+          features: fc.features.map(f =>
+            f.properties._dbId === dragState.featureId
+              ? { ...f, geometry, properties: { ...f.properties, ...properties } }
+              : f
+          )
+        })
+        // Move handles alongside the shape in real-time.
+        map.getSource(VERTEX_HANDLES_SOURCE)?.setData(
+          computeHandles({ ...dragState.originalFeature, geometry, properties })
+        )
+        // Broadcast live state to the AttributesPanel without a store write.
+        draggingFeature.value = { ...dragState.originalFeature, geometry, properties }
+      }
+
+      function finish(commit) {
+        window.removeEventListener('mousemove', onWindowMouseMove)
+        window.removeEventListener('mouseup', onWindowMouseUp)
+        window.removeEventListener('keydown', onWindowKeyDown)
+        if (!dragState) return
+        const savedState = dragState
+        dragState = null
+        isMovingFeature = false
+        map.dragPan.enable()
+        canvas.style.cursor = ''
+
+        draggingFeature.value = null
+
+        if (commit && hasMoved && lastLngLat) {
+          // Single DB write on release using the final drag position.
+          const { geometry, properties } = applyVertexDrag(
+            savedState.originalFeature, savedState.kind, savedState.index,
+            [lastLngLat.lng, lastLngLat.lat]
+          )
+          featuresStore.updateFeature(savedState.featureId, geometry, properties)
+        } else {
+          // Escape or zero-movement click: revert the live preview.
+          map.getSource(FEATURES_SOURCE)?.setData(featuresStore.featureCollection)
+          map.getSource(VERTEX_HANDLES_SOURCE)?.setData(computeHandles(featuresStore.selectedFeature))
+        }
+      }
+
+      function onWindowMouseUp() { finish(true) }
+      function onWindowKeyDown(ke) { if (ke.key === 'Escape') finish(false) }
+
+      window.addEventListener('mousemove', onWindowMouseMove)
+      window.addEventListener('mouseup', onWindowMouseUp)
+      window.addEventListener('keydown', onWindowKeyDown)
+    })
+  }
+
   watch(
     () => featuresStore.selectedFeatureId,
     () => {
       const map = getMap()
       if (map) applySelectionFilter(map)
+    }
+  )
+
+  // Refresh vertex handles whenever the selected feature changes (e.g. after
+  // an attribute panel edit or a DB commit from a drag). Skip while a drag is
+  // in progress — the drag loop manages the handles directly in that case.
+  watch(
+    () => featuresStore.selectedFeature,
+    (f) => {
+      if (dragState) return
+      const map = getMap()
+      const src = map?.getSource(VERTEX_HANDLES_SOURCE)
+      if (src) src.setData(computeHandles(f))
     }
   )
 
@@ -773,9 +1166,27 @@ export function useMapDraw(getMap) {
     if (!map) return
     setupMapSources(map)
     setupSelection(map)
+    setupVertexHandles(map)
     applySelectionFilter(map)
     syncFeatures()
     syncImages(featuresStore.featureCollection)
+  }
+
+  // Patches the FEATURES_SOURCE color for a single feature without a DB write.
+  // Used by AttributesPanel to give live map feedback while the color picker
+  // is open. The DB write happens separately when the picker closes.
+  function previewFeatureColor(featureId, color) {
+    const map = getMap()
+    if (!map) return
+    const fc = featuresStore.featureCollection
+    map.getSource(FEATURES_SOURCE)?.setData({
+      ...fc,
+      features: fc.features.map(f =>
+        f.properties._dbId === featureId
+          ? { ...f, properties: { ...f.properties, color } }
+          : f
+      )
+    })
   }
 
   // Pan/zoom the map to encompass a given geometry. Points get a fly-to
@@ -798,7 +1209,18 @@ export function useMapDraw(getMap) {
     map.fitBounds(bounds, { padding: 80, duration: 800, maxZoom: 16 })
   }
 
-  onUnmounted(() => cleanup())
+  onUnmounted(() => {
+    cleanup()
+    const map = getMap()
+    if (!map) return
+    if (selectionClickHandler) map.off('click', selectionClickHandler)
+    if (hoverEnter) {
+      for (const layer of SELECTABLE_LAYERS) {
+        map.off('mouseenter', layer, hoverEnter)
+        map.off('mouseleave', layer, hoverLeave)
+      }
+    }
+  })
 
-  return { activeTool, setTool, cancel, syncFeatures, initLayers, flyToGeometry, moveFeature }
+  return { activeTool, draggingFeature, setTool, cancel, syncFeatures, initLayers, flyToGeometry, moveFeature, previewFeatureColor }
 }

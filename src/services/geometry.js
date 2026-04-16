@@ -7,11 +7,51 @@ export function boxPolygon(a, b) {
   }
 }
 
+// Build a box polygon from canonical SW/NE corners, optionally rotated by
+// `rotationDeg` degrees clockwise around the box's center. Rotation is
+// applied in a cosine-corrected local plane so it looks correct on the map
+// regardless of latitude.
+export function rotatedBoxPolygon(sw, ne, rotationDeg = 0) {
+  const cx = (sw[0] + ne[0]) / 2
+  const cy = (sw[1] + ne[1]) / 2
+  const corners = [sw, [ne[0], sw[1]], ne, [sw[0], ne[1]]]
+  const rotated = corners.map(([lng, lat]) => {
+    if (rotationDeg === 0) return [lng, lat]
+    const rad = (rotationDeg * Math.PI) / 180
+    const cosA = Math.cos(rad)
+    const sinA = Math.sin(rad)
+    const cosLat = Math.cos(cy * Math.PI / 180)
+    const dx = (lng - cx) * cosLat
+    const dy = lat - cy
+    return [cx + (dx * cosA - dy * sinA) / cosLat, cy + dx * sinA + dy * cosA]
+  })
+  return { type: 'Polygon', coordinates: [[...rotated, rotated[0]]] }
+}
+
 export function circlePolygon(center, radiusMeters, steps = 64) {
   const coords = []
   for (let i = 0; i <= steps; i++) {
     const angle = (i / steps) * 360
     coords.push(destinationPoint(center, radiusMeters, angle))
+  }
+  return { type: 'Polygon', coordinates: [coords] }
+}
+
+// Build an ellipse polygon from a center point, semi-major and semi-minor radii
+// (in meters), and a rotation (azimuth of the major axis from north, in degrees).
+// The parametric form is converted to bearing + distance per step so the shape
+// is accurate on the sphere regardless of latitude.
+export function ellipsePolygon(center, radiusMajor, radiusMinor, rotationDeg = 0, steps = 64) {
+  const coords = []
+  const r = rotationDeg * Math.PI / 180
+  for (let i = 0; i <= steps; i++) {
+    const t     = (i / steps) * 2 * Math.PI
+    // Decompose into east/north components using the rotated ellipse frame.
+    const east  = radiusMajor * Math.cos(t) * Math.sin(r) + radiusMinor * Math.sin(t) * Math.cos(r)
+    const north = radiusMajor * Math.cos(t) * Math.cos(r) - radiusMinor * Math.sin(t) * Math.sin(r)
+    const dist    = Math.sqrt(east * east + north * north)
+    const bearing = (Math.atan2(east, north) * 180 / Math.PI + 360) % 360
+    coords.push(destinationPoint(center, dist, bearing))
   }
   return { type: 'Polygon', coordinates: [coords] }
 }
@@ -107,6 +147,17 @@ export function formatDistance(meters, units = 'metric') {
   return `${(meters / 1000).toFixed(2)} km`
 }
 
+// Bounding-box centroid of a closed coordinate ring. Returns [lng, lat].
+// Used for both the AttributesPanel center display and the center drag handle.
+export function ringCentroid(ring) {
+  const lons = ring.map(c => c[0])
+  const lats = ring.map(c => c[1])
+  return [
+    (Math.min(...lons) + Math.max(...lons)) / 2,
+    (Math.min(...lats) + Math.max(...lats)) / 2
+  ]
+}
+
 // Bounding box for any standard GeoJSON geometry. Returns [[west, south],
 // [east, north]] which MapLibre's fitBounds accepts directly, or null if
 // the geometry has no usable coordinates.
@@ -176,4 +227,19 @@ export function parseDistanceToMeters(value, units = 'metric') {
   if (units === 'nautical') return n * 1852
   if (units === 'statute') return n * 1609.344
   return n * 1000
+}
+
+// Inverse of the cosine-corrected rotation applied by rotatedBoxPolygon.
+// Rotates `point` around `center` by -deg degrees (same math, transposed
+// matrix) and returns a new [lng, lat]. Used by vertex drag to convert a
+// screen-dragged corner back into the box's unrotated axis-aligned frame.
+export function inverseRotateAroundCenter([lng, lat], [cx, cy], deg) {
+  if (deg === 0) return [lng, lat]
+  const rad = (deg * Math.PI) / 180
+  const cosA = Math.cos(rad)
+  const sinA = Math.sin(rad)
+  const cosLat = Math.cos(cy * Math.PI / 180)
+  const dx = (lng - cx) * cosLat
+  const dy = lat - cy
+  return [cx + (dx * cosA + dy * sinA) / cosLat, cy + (-dx * sinA + dy * cosA)]
 }

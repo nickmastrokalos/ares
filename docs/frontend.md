@@ -131,20 +131,108 @@ Consequences:
   - `src/assets/ares-icon.png` is the in-app helmet mark used in the UI (home-page logo + low-opacity watermark treatment).
   - `app-icon.png` is the canonical source for generated Tauri app icons. Regenerate `src-tauri/icons/` with `pnpm tauri icon app-icon.png` when the dock / bundle icon artwork changes so dev and packaged builds stay visually aligned.
 
+## Shape Types
+
+Every drawn or imported feature has a `type` string stored in the `features` table. This string drives rendering, handle logic, AttributesPanel cards, and import/export behavior.
+
+| Type | GeoJSON geometry | Canonical properties | Draw interaction |
+|------|-----------------|----------------------|------------------|
+| `point` | `Point` | `name`, `color` | Single click |
+| `line` | `LineString` | `name`, `color` | Click vertices, double-click to finish |
+| `polygon` | `Polygon` | `name`, `color`, `opacity` | Click vertices, double-click to finish |
+| `box` | `Polygon` | `name`, `color`, `opacity`, `sw` [lng,lat], `ne` [lng,lat], `rotationDeg` | Two clicks: opposite corners |
+| `circle` | `Polygon` (64-step approximation) | `name`, `color`, `opacity`, `center` [lng,lat], `radius` (meters) | Two clicks: center then edge |
+| `ellipse` | `Polygon` (64-step approximation) | `name`, `color`, `opacity`, `center` [lng,lat], `radiusMajor` (m), `radiusMinor` (m), `rotation` (degrees, azimuth of major axis from north) | Three clicks: center → major-axis tip → minor-axis tip |
+| `sector` | `Polygon` | `name`, `color`, `opacity`, `center` [lng,lat], `radius` (m), `startAngle` (°), `endAngle` (°) | Three clicks: center → start bearing → end bearing |
+| `route` | `LineString` | `name`, `color`, `waypoints` array of `{ label, role }` where role is `'SP'`/`'WP'`/`'EP'` | Click waypoints, double-click to finish |
+| `image` | `Point` (center) | `name`, `src` (base64 data URL), `naturalWidth`, `naturalHeight`, `widthMeters` | File picker then single map click |
+| `manual-track` | `Point` | `name`, `color`, `speed` (m/s), `course` (°), `callsign`, `cotType` | Created via Manual Track panel, not drawn |
+
+Geometry for parametric shapes (`box`, `circle`, `ellipse`, `sector`) is stored **both** as a pre-computed polygon (for rendering) and as canonical parameters in `properties` (for editing and re-export). When a user edits parameters, the polygon geometry is recalculated and both are written back to SQLite atomically.
+
+The `featureCollection` computed in `useFeaturesStore` always tags every feature with `_dbId` (the SQLite row id) and `_type` (the type string) so map layers and UI components can filter without additional queries.
+
+Fillable types (shapes that have a fill and opacity control): `polygon`, `box`, `circle`, `ellipse`, `sector`.
+
+### Shape handles (`useMapDraw`)
+
+`computeHandles(feature)` returns a list of draggable handle descriptors for the selected feature. Each handle has `{ id, kind, position, index? }`:
+
+- **`point` / `circle` / `ellipse` / `sector`:** a single `center` handle at the shape's anchor point.
+- **`line`:** one `vertex` handle per coordinate.
+- **`polygon`:** one `vertex` handle per ring vertex + one `center` handle at the ring's bounding-box centroid. Dragging the center translates all vertices.
+- **`box`:** `sw` and `ne` corner handles + one `center` handle at the midpoint. Dragging a corner reshapes; dragging the center translates.
+- **`ellipse`:** `center`, `majorTip` (at bearing `rotation` from center), and `minorTip` (at bearing `rotation + 90°`). Dragging tips resizes each axis independently.
+
+Drag state is exposed as the `draggingFeature` reactive ref (provided from `MapView` as `'draggingFeature'`). `AttributesPanel` injects it and watches for changes to live-update field values while the user drags.
+
 ## Import / Export
-- Supported formats live in `src/services/io.js` as `IO_FORMATS`:
-  ```js
-  { id, label, importFn, exportFn }
-  ```
-  Adding a new format = adding one entry plus a matching module under `src/services/<format>.js`. The `DrawPanel` menus iterate this list, so the UI picks up new formats automatically.
-- **Imports always land in the active mission.** They no longer create a mission per file — missions are explicit and picked on the home page. An importer that's called with no active mission bails out (belt-and-suspenders; the UI isn't reachable without one).
-- Each format module owns its own file dialog, parse/serialize, and filename handling. Shared conventions:
-  - On **export**, the `_dbId` internal property is stripped but `_type` is preserved so a file can round-trip back into the same shape kind (a circle stays a circle, not a generic polygon). The default filename is derived from the active mission's name.
-  - On **import**, `inferType(feature)` prefers `properties._type` if present and falls back to mapping GeoJSON geometry types to our shape vocabulary.
-- The `DrawPanel` exposes one `mdi-import` and one `mdi-export` button. Each opens a `v-menu` listing `IO_FORMATS`; picking an entry invokes that format's `importFn` / `exportFn`.
+
+`ImportExportDialog.vue` (opened from the `mdi-swap-vertical` toolbar button) is the single entry point for all import and export operations. It uses a two-step flow for export (select features → choose format) and a one-click format grid for import.
+
+### Supported formats
+
+| Direction | Format | Service module | Notes |
+|-----------|--------|----------------|-------|
+| Import | CoT XML | `src/services/cot.js` → `importCotFeatures` | Single `<event>` or `<events>` wrapper |
+| Import | TAK Data Package | `src/services/cot.js` → `importCotFeatures` | ZIP with `MANIFEST/manifest.xml` + `{uid}/{uid}.cot` files |
+| Import | KML / KMZ | `src/services/kml.js` → `importKml` | Google Earth / GIS format |
+| Import | GeoJSON | `src/services/geojson.js` → `importGeoJson` | Geographic JSON |
+| Export | KML | `src/services/kml.js` → `exportKmlSubset` | |
+| Export | CoT ZIP | `src/services/cotPackage.js` → `exportCotZip` | Flat ZIP, one `.cot` per feature |
+| Export | TAK Data Package | `src/services/cotPackage.js` → `exportTakDataPackage` | ATAK / WinTAK compatible |
+
+All imports land in the active mission. The UI is unreachable without an active mission, so no defensive guard is needed inside the service modules.
+
+Exportable types: `point`, `line`, `polygon`, `box`, `circle`, `ellipse`, `sector`, `route`. Not exported: `image` (data-URL blobs are not portable in CoT/KML), `manual-track` (managed separately).
+
+### CoT XML format (`src/services/cot.js`)
+
+TAK-compatible CoT (Cursor on Target) XML. The file follows the conventions observed in real WinTAK data package exports.
+
+**Color encoding** — TAK uses signed 32-bit ARGB integers as a `value` attribute, not hex strings:
+```
+<strokeColor value="-1" />   ← white opaque (0xFFFFFFFF as signed i32)
+<fillColor value="-2130706433" />  ← 50% transparent white
+```
+`appToCoTColorInt(hexRgb, alpha)` converts `#RRGGBB` + opacity → signed int string.  
+`cotIntToAppColor(intStr)` is the inverse.  
+Legacy hex text content (`<strokeColor>#FFFFFFFF</strokeColor>`) is also handled on import for round-trip compatibility with older Ares exports.
+
+**Polygon / line vertices** — stored as `<link point="lat,lon" />` elements directly in `<detail>` (not inside a `<shape>` element). For closed polygons the last link repeats the first coordinate.
+
+**Per-shape CoT types and detail structure:**
+
+| Ares type | CoT `type` | `how` | Notable detail elements |
+|-----------|-----------|-------|-------------------------|
+| `point` | `b-m-p-s-m` | `h-g-i-g-o` | `<color argb="int" />`, `<usericon iconsetpath="..." />` |
+| `line` | `u-d-f` | `h-e` | `<link point="lat,lon" />` × N (open, no repeat) |
+| `polygon` / `box` | `u-d-f` | `h-e` | `<link point="lat,lon" />` × N+1 (last repeats first) |
+| `circle` | `u-d-c-c` | `h-g-i-g-o` | `<shape><ellipse minor="r" major="r" angle="360" /></shape>` |
+| `ellipse` | `u-d-c-e` | `h-g-i-g-o` | `<shape><ellipse minor="…" major="…" angle="…" /></shape>` (angle = azimuth of major axis) |
+| `sector` | `u-d-f` | `h-e` | `<shape><arc radius="…" start="…" end="…" /></shape>` |
+| `route` | `b-m-r` | `h-g-i-g-o` | `<link_attr … color="int" />`, `<link uid="…" point="lat,lon" type="b-m-p-w" callsign="…" />` × N |
+
+All shape events include: `access="Undefined"`, `hae="9999999"`, `ce="9999999"`, `le="9999999"`, `<archive />`, `<strokeWeight value="1" />`, `<strokeStyle value="solid" />`, `<clamped value="False" />`, `<height value="0.00" />`, `<height_unit value="4" />`.
+
+**Stale times:** points → +1 year; all other shapes → +7 days.
+
+**Import parser** handles both `<link point>` (TAK format) and legacy `<polyline>` text-content (older Ares exports). For polygon/line: if first coord == last coord → polygon, otherwise line. Route waypoints use `<link uid][point]>` (both attributes present). Unrecognised or unsupported CoT types (`u-d-f-m` freehand, etc.) are silently skipped.
+
+### TAK Data Package (`src/services/cotPackage.js`)
+
+ZIP archive with the structure TAK clients (ATAK / WinTAK) expect:
+```
+MANIFEST/manifest.xml
+ares-{dbId}/ares-{dbId}.cot    ← one directory + file per feature
+…
+```
+The `MANIFEST/manifest.xml` uses `MissionPackageManifest version="2"` with a `Configuration` block (package name + uid) and a `Contents` block (one `<Content>` per `.cot` entry, carrying only a `uid` parameter — no `name` parameter, matching real TAK exports).
+
+`exportCotZip` produces a simpler flat ZIP (`{uid}.cot` at root) for cases where a full data package is not needed.
 
 ## Overlay Management
-- `OverlaysDialog` (triggered from the `DrawPanel`'s `mdi-shape-outline` button) lists **features in the current mission** with checkboxes and calls `removeFeatures(ids)` for bulk removal. Cross-mission management happens on the home page instead.
+- `OverlaysDialog` (triggered from the `mdi-shape-outline` button in the toolbar's Annotation group) lists **features in the current mission** with checkboxes and calls `removeFeatures(ids)` for bulk removal. Cross-mission management happens on the home page instead.
 - Each row shows the user-given name (falling back to the capitalized type). When a name exists, the subtitle shows the shape type as a secondary cue; otherwise the subtitle is omitted so we don't repeat the type twice.
 - Each row has a fly-to button (`mdi-crosshairs-gps`) wired to an injected `flyToGeometry` function. Clicking it pans/zooms the map to the feature's bounds (or flies to the point, for `Point` features) and closes the dialog so the destination is visible.
 - The dialog takes a shallow copy of `featuresStore.features` when it opens — the store already scopes that list to the active mission, so no join or extra query is needed. The snapshot is intentionally non-reactive; reopening the dialog refreshes it.
@@ -157,10 +245,15 @@ Consequences:
 
 Currently provided:
 
-| Key              | Shape                          | Source                       |
-|------------------|--------------------------------|------------------------------|
-| `flyToGeometry`  | `(geometry) => void`           | `useMapDraw().flyToGeometry` |
-| `switchBasemap`  | `(id: string) => Promise`      | `MapView.switchBasemap`      |
+| Key                    | Shape                              | Source                              |
+|------------------------|------------------------------------|-------------------------------------|
+| `flyToGeometry`        | `(geometry) => void`               | `useMapDraw().flyToGeometry`        |
+| `moveFeature`          | `(id) => void`                     | `useMapDraw().moveFeature`          |
+| `draggingFeature`      | `Ref<feature \| null>`             | `useMapDraw().draggingFeature`      |
+| `openManualTrackPanel` | `(id) => void`                     | `useMapManualTracks().openPanel`    |
+| `switchBasemap`        | `(id) => Promise`                  | `MapView.switchBasemap`             |
+| `setInterceptMarker`   | `(lon, lat) => void`               | `MapView` (inline)                  |
+| `clearInterceptMarker` | `() => void`                       | `MapView` (inline)                  |
 
 ## Basemap Switching
 - Available basemaps are defined in `src/services/basemaps.js` as the `BASEMAPS` array. Adding a new online basemap = adding one entry with `{ id, name, icon, tiles, tileSize, maxzoom }`.

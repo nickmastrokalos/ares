@@ -7,19 +7,21 @@ import {
 } from '@/stores/features'
 import { useDraggable } from '@/composables/useDraggable'
 import { useSettingsStore } from '@/stores/settings'
-import { formatDistance, parseDistanceToMeters, distanceBetween, circlePolygon, sectorPolygon, boxPolygon } from '@/services/geometry'
+import { formatDistance, parseDistanceToMeters, distanceBetween, circlePolygon, sectorPolygon, ellipsePolygon, rotatedBoxPolygon, ringCentroid } from '@/services/geometry'
 import CoordInput from '@/components/CoordInput.vue'
 
 // Shapes that actually render a fill layer. Opacity has no visible effect
 // on lines/points, so the control stays hidden for those.
-const FILLABLE_TYPES = new Set(['polygon', 'circle', 'sector'])
+const FILLABLE_TYPES = new Set(['polygon', 'circle', 'ellipse', 'sector'])
 
 // Shapes that expose numeric geometry fields.
-const GEOMETRY_FIELD_TYPES = new Set(['point', 'circle', 'sector', 'box', 'line', 'polygon'])
+const GEOMETRY_FIELD_TYPES = new Set(['point', 'circle', 'ellipse', 'sector', 'box', 'line', 'polygon'])
 
 const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
 const moveFeature = inject('moveFeature', null)
+const draggingFeature = inject('draggingFeature', null)
+const previewFeatureColor = inject('previewFeatureColor', null)
 const panelRef = ref(null)
 const { pos, onPointerDown } = useDraggable()
 const positioned = ref(false)
@@ -40,9 +42,12 @@ const neVal       = ref(null)  // box NE corner
 const vertexVals  = ref([])    // line / polygon vertices
 
 // Non-coordinate geometry values (radius, angles)
-const radiusStr     = ref('')
-const startAngleStr = ref('')
-const endAngleStr   = ref('')
+const radiusStr      = ref('')
+const radiusMajorStr = ref('')
+const radiusMinorStr = ref('')
+const startAngleStr  = ref('')
+const endAngleStr    = ref('')
+const rotationStr    = ref('0')
 
 const isImage = computed(() => featuresStore.selectedFeature?.type === 'image')
 const isFillable = computed(() =>
@@ -68,12 +73,16 @@ const lineLengthLabel = computed(() => {
 // Functional palette — color is data here (how the user distinguishes
 // features on the map), not decoration. Kept intentionally small.
 const SWATCHES = [
-  '#ffffff', '#f44336', '#ff9800', '#ffeb3b',
-  '#4caf50', '#00bcd4', '#4a9ade', '#9c27b0',
-  '#e91e63', '#795548', '#9e9e9e', '#616161'
+  '#ffffff', '#f44336', '#ff9800', '#ffeb3b', '#4caf50', '#00bcd4', '#4a9ade',
+  '#9c27b0', '#e91e63', '#795548', '#9e9e9e', '#616161', '#2196f3', '#000000',
 ]
 
 // ---- Helpers ----
+
+// Round a rotation/bearing value to 2 decimal places for display.
+function fmtAngle(deg) {
+  return String(Math.round((deg ?? 0) * 100) / 100)
+}
 
 // Always display radius in the base unit (km / nm / mi) so that
 // parseDistanceToMeters round-trips cleanly: "0.50 km" → 0.5 × 1000 = 500 m.
@@ -103,12 +112,30 @@ function syncGeometryRefs(feature) {
       startAngleStr.value = String(p.startAngle ?? 0)
       endAngleStr.value   = String(p.endAngle ?? 90)
       break
+    case 'ellipse':
+      coordVal.value       = p.center ? [...p.center] : null
+      radiusMajorStr.value = fmtRadius(p.radiusMajor ?? 0)
+      radiusMinorStr.value = fmtRadius(p.radiusMinor ?? 0)
+      rotationStr.value    = fmtAngle(p.rotation)
+      break
     case 'box': {
-      const ring = g.coordinates[0]
-      const lngs = ring.map(c => c[0])
-      const lats  = ring.map(c => c[1])
-      swVal.value = [Math.min(...lngs), Math.min(...lats)]
-      neVal.value = [Math.max(...lngs), Math.max(...lats)]
+      // Use stored sw/ne when available (set on creation or after first edit);
+      // fall back to deriving from polygon vertices for older axis-aligned boxes.
+      if (p.sw && p.ne) {
+        swVal.value = [...p.sw]
+        neVal.value = [...p.ne]
+      } else {
+        const ring = g.coordinates[0]
+        const lngs = ring.map(c => c[0])
+        const lats  = ring.map(c => c[1])
+        swVal.value = [Math.min(...lngs), Math.min(...lats)]
+        neVal.value = [Math.max(...lngs), Math.max(...lats)]
+      }
+      rotationStr.value = fmtAngle(p.rotationDeg)
+      coordVal.value    = [
+        (swVal.value[0] + neVal.value[0]) / 2,
+        (swVal.value[1] + neVal.value[1]) / 2
+      ]
       break
     }
     case 'line':
@@ -117,6 +144,7 @@ function syncGeometryRefs(feature) {
     case 'polygon':
       // Exclude the closing vertex (ring repeats first point at end)
       vertexVals.value = g.coordinates[0].slice(0, -1).map(c => [...c])
+      coordVal.value   = ringCentroid(g.coordinates[0])
       break
   }
 }
@@ -141,6 +169,40 @@ watch(
   () => syncGeometryRefs(featuresStore.selectedFeature)
 )
 
+// Live-sync geometry fields while a handle drag is in progress. The drag loop
+// updates `draggingFeature` every mousemove frame without touching the store,
+// so only the geometry section of the panel needs refreshing.
+if (draggingFeature) {
+  watch(draggingFeature, (df) => {
+    if (df) syncGeometryRefs(df)
+  })
+}
+
+// Commit the color when the picker popover closes. Swatch clicks already
+// commit immediately and close the menu; this watcher covers the fine-tune
+// canvas / hex-input path where the menu stays open while the user adjusts.
+// Normalise to lowercase so storage is always consistent (#ff9800 not #FF9800).
+watch(colorMenu, async (open) => {
+  if (open) return
+  const feature = featuresStore.selectedFeature
+  if (!feature) return
+  const normalized = color.value.toLowerCase()
+  color.value = normalized
+  const stored = (feature.properties?.color ?? DEFAULT_FEATURE_COLOR).toLowerCase()
+  if (normalized !== stored) {
+    await featuresStore.updateFeatureProperties(feature.id, { color: normalized })
+  }
+})
+
+// Live-preview the color on the map while the picker is open, without
+// a DB write per frame. The commit-on-close watcher above persists it.
+watch(color, (newColor) => {
+  if (!colorMenu.value || !previewFeatureColor) return
+  const feature = featuresStore.selectedFeature
+  if (!feature) return
+  previewFeatureColor(feature.id, newColor)
+})
+
 async function commitName() {
   const feature = featuresStore.selectedFeature
   if (!feature) return
@@ -152,7 +214,6 @@ async function commitColor(value) {
   const feature = featuresStore.selectedFeature
   if (!feature) return
   color.value = value
-  colorMenu.value = false
   await featuresStore.updateFeatureProperties(feature.id, { color: value })
 }
 
@@ -265,9 +326,10 @@ async function commitSwCorner([lng, lat]) {
   if (feature?.type !== 'box') return
   const ne = neVal.value
   if (!ne) return
+  const rotDeg = feature.properties.rotationDeg ?? 0
   await featuresStore.updateFeature(feature.id,
-    boxPolygon([lng, lat], ne),
-    { ...feature.properties }
+    rotatedBoxPolygon([lng, lat], ne, rotDeg),
+    { ...feature.properties, sw: [lng, lat], ne }
   )
 }
 
@@ -276,9 +338,103 @@ async function commitNeCorner([lng, lat]) {
   if (feature?.type !== 'box') return
   const sw = swVal.value
   if (!sw) return
+  const rotDeg = feature.properties.rotationDeg ?? 0
   await featuresStore.updateFeature(feature.id,
-    boxPolygon(sw, [lng, lat]),
+    rotatedBoxPolygon(sw, [lng, lat], rotDeg),
+    { ...feature.properties, sw, ne: [lng, lat] }
+  )
+}
+
+async function commitRotation() {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'box') return
+  const angle = parseFloat(rotationStr.value)
+  if (!isFinite(angle)) { rotationStr.value = String(feature.properties.rotationDeg ?? 0); return }
+  const clamped = ((angle % 360) + 360) % 360
+  const sw = feature.properties.sw ?? swVal.value
+  const ne = feature.properties.ne ?? neVal.value
+  if (!sw || !ne) return
+  await featuresStore.updateFeature(feature.id,
+    rotatedBoxPolygon(sw, ne, clamped),
+    { ...feature.properties, sw, ne, rotationDeg: clamped }
+  )
+}
+
+async function commitEllipseCenter([lng, lat]) {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'ellipse') return
+  const props = feature.properties
+  await featuresStore.updateFeature(feature.id,
+    ellipsePolygon([lng, lat], props.radiusMajor, props.radiusMinor, props.rotation ?? 0),
+    { ...props, center: [lng, lat] }
+  )
+}
+
+async function commitEllipseMajor() {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'ellipse') return
+  const meters = parseDistanceToMeters(radiusMajorStr.value, settingsStore.distanceUnits)
+  if (meters == null || meters <= 0) { radiusMajorStr.value = fmtRadius(feature.properties.radiusMajor); return }
+  const props = feature.properties
+  await featuresStore.updateFeature(feature.id,
+    ellipsePolygon(props.center, meters, props.radiusMinor, props.rotation ?? 0),
+    { ...props, radiusMajor: meters }
+  )
+}
+
+async function commitEllipseMinor() {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'ellipse') return
+  const meters = parseDistanceToMeters(radiusMinorStr.value, settingsStore.distanceUnits)
+  if (meters == null || meters <= 0) { radiusMinorStr.value = fmtRadius(feature.properties.radiusMinor); return }
+  const props = feature.properties
+  await featuresStore.updateFeature(feature.id,
+    ellipsePolygon(props.center, props.radiusMajor, meters, props.rotation ?? 0),
+    { ...props, radiusMinor: meters }
+  )
+}
+
+async function commitEllipseRotation() {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'ellipse') return
+  const angle = parseFloat(rotationStr.value)
+  if (!isFinite(angle)) { rotationStr.value = String(feature.properties.rotation ?? 0); return }
+  const clamped = ((angle % 360) + 360) % 360
+  const props = feature.properties
+  await featuresStore.updateFeature(feature.id,
+    ellipsePolygon(props.center, props.radiusMajor, props.radiusMinor, clamped),
+    { ...props, rotation: clamped }
+  )
+}
+
+async function commitPolygonCenter([lng, lat]) {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'polygon') return
+  const ring = feature.geometry.coordinates[0]
+  const [clon, clat] = ringCentroid(ring)
+  const dLng = lng - clon
+  const dLat = lat - clat
+  const newRing = ring.map(([lo, la]) => [lo + dLng, la + dLat])
+  await featuresStore.updateFeature(feature.id,
+    { type: 'Polygon', coordinates: [newRing] },
     { ...feature.properties }
+  )
+}
+
+async function commitBoxCenter([lng, lat]) {
+  const feature = featuresStore.selectedFeature
+  if (feature?.type !== 'box') return
+  const sw = feature.properties.sw ? [...feature.properties.sw] : swVal.value ? [...swVal.value] : null
+  const ne = feature.properties.ne ? [...feature.properties.ne] : neVal.value ? [...neVal.value] : null
+  if (!sw || !ne) return
+  const dLng = lng - (sw[0] + ne[0]) / 2
+  const dLat = lat - (sw[1] + ne[1]) / 2
+  const newSw = [sw[0] + dLng, sw[1] + dLat]
+  const newNe = [ne[0] + dLng, ne[1] + dLat]
+  const rotDeg = feature.properties.rotationDeg ?? 0
+  await featuresStore.updateFeature(feature.id,
+    rotatedBoxPolygon(newSw, newNe, rotDeg),
+    { ...feature.properties, sw: newSw, ne: newNe }
   )
 }
 
@@ -366,18 +522,29 @@ onMounted(async () => {
           </v-btn>
         </template>
 
-        <v-card class="pa-2">
-          <div class="swatch-grid">
-            <button
-              v-for="swatch in SWATCHES"
-              :key="swatch"
-              type="button"
-              class="swatch-option"
-              :class="{ selected: swatch.toLowerCase() === color.toLowerCase() }"
-              :style="{ backgroundColor: swatch }"
-              @click="commitColor(swatch)"
-            />
+        <v-card class="color-picker-card">
+          <div class="pa-2">
+            <div class="swatch-grid">
+              <button
+                v-for="swatch in SWATCHES"
+                :key="swatch"
+                type="button"
+                class="swatch-option"
+                :class="{ selected: swatch.toLowerCase() === color.toLowerCase() }"
+                :style="{ backgroundColor: swatch }"
+                @click="commitColor(swatch)"
+              />
+            </div>
           </div>
+          <v-divider />
+          <v-color-picker
+            v-model="color"
+            :modes="['hex']"
+            hide-sliders
+            elevation="0"
+            width="220"
+            class="color-picker-fine"
+          />
         </v-card>
       </v-menu>
 
@@ -525,90 +692,188 @@ onMounted(async () => {
         </div>
       </template>
 
+      <!-- Ellipse -->
+      <template v-else-if="featuresStore.selectedFeature?.type === 'ellipse'">
+        <div class="geo-stack">
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">Center</span>
+              <CoordInput :model-value="coordVal" @commit="commitEllipseCenter" />
+            </div>
+          </div>
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">Major</span>
+              <v-text-field
+                v-model="radiusMajorStr"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                single-line
+                class="geo-input geo-input--short"
+                @blur="commitEllipseMajor"
+                @keydown.enter="commitEllipseMajor"
+              />
+            </div>
+            <div class="geo-field">
+              <span class="geo-label">Minor</span>
+              <v-text-field
+                v-model="radiusMinorStr"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                single-line
+                class="geo-input geo-input--short"
+                @blur="commitEllipseMinor"
+                @keydown.enter="commitEllipseMinor"
+              />
+            </div>
+            <div class="geo-field">
+              <span class="geo-label">Rot°</span>
+              <v-text-field
+                v-model="rotationStr"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                single-line
+                class="geo-input geo-input--angle"
+                @blur="commitEllipseRotation"
+                @keydown.enter="commitEllipseRotation"
+              />
+            </div>
+          </div>
+        </div>
+      </template>
+
       <!-- Sector -->
       <template v-else-if="featuresStore.selectedFeature?.type === 'sector'">
-        <div class="geo-field">
-          <span class="geo-label">Center</span>
-          <CoordInput :model-value="coordVal" @commit="commitSectorCenter" />
-        </div>
-        <div class="geo-field">
-          <span class="geo-label">Radius</span>
-          <v-text-field
-            v-model="radiusStr"
-            density="compact"
-            variant="outlined"
-            rounded="sm"
-            hide-details
-            single-line
-            class="geo-input geo-input--short"
-            @blur="commitSectorRadius"
-            @keydown.enter="commitSectorRadius"
-          />
-        </div>
-        <div class="geo-field">
-          <span class="geo-label">Start°</span>
-          <v-text-field
-            v-model="startAngleStr"
-            density="compact"
-            variant="outlined"
-            rounded="sm"
-            hide-details
-            single-line
-            class="geo-input geo-input--angle"
-            @blur="commitSectorAngle('start')"
-            @keydown.enter="commitSectorAngle('start')"
-          />
-        </div>
-        <div class="geo-field">
-          <span class="geo-label">End°</span>
-          <v-text-field
-            v-model="endAngleStr"
-            density="compact"
-            variant="outlined"
-            rounded="sm"
-            hide-details
-            single-line
-            class="geo-input geo-input--angle"
-            @blur="commitSectorAngle('end')"
-            @keydown.enter="commitSectorAngle('end')"
-          />
+        <div class="geo-stack">
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">Center</span>
+              <CoordInput :model-value="coordVal" @commit="commitSectorCenter" />
+            </div>
+          </div>
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">Radius</span>
+              <v-text-field
+                v-model="radiusStr"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                single-line
+                class="geo-input geo-input--short"
+                @blur="commitSectorRadius"
+                @keydown.enter="commitSectorRadius"
+              />
+            </div>
+            <div class="geo-field">
+              <span class="geo-label">Start°</span>
+              <v-text-field
+                v-model="startAngleStr"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                single-line
+                class="geo-input geo-input--angle"
+                @blur="commitSectorAngle('start')"
+                @keydown.enter="commitSectorAngle('start')"
+              />
+            </div>
+            <div class="geo-field">
+              <span class="geo-label">End°</span>
+              <v-text-field
+                v-model="endAngleStr"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                single-line
+                class="geo-input geo-input--angle"
+                @blur="commitSectorAngle('end')"
+                @keydown.enter="commitSectorAngle('end')"
+              />
+            </div>
+          </div>
         </div>
       </template>
 
       <!-- Box -->
       <template v-else-if="featuresStore.selectedFeature?.type === 'box'">
-        <div class="geo-field">
-          <span class="geo-label">SW</span>
-          <CoordInput :model-value="swVal" @commit="commitSwCorner" />
-        </div>
-        <div class="geo-field">
-          <span class="geo-label">NE</span>
-          <CoordInput :model-value="neVal" @commit="commitNeCorner" />
+        <div class="geo-stack">
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">Center</span>
+              <CoordInput :model-value="coordVal" @commit="commitBoxCenter" />
+            </div>
+          </div>
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">SW</span>
+              <CoordInput :model-value="swVal" @commit="commitSwCorner" />
+            </div>
+            <div class="geo-field">
+              <span class="geo-label">NE</span>
+              <CoordInput :model-value="neVal" @commit="commitNeCorner" />
+            </div>
+          </div>
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">Rot°</span>
+              <v-text-field
+                v-model="rotationStr"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                single-line
+                class="geo-input geo-input--angle"
+                @blur="commitRotation"
+                @keydown.enter="commitRotation"
+              />
+            </div>
+          </div>
         </div>
       </template>
 
       <!-- Line -->
       <template v-else-if="featuresStore.selectedFeature?.type === 'line'">
-        <div class="vertex-header text-caption text-medium-emphasis">
-          {{ vertexVals.length }} pts · {{ lineLengthLabel }}
-        </div>
-        <div class="vertex-list">
-          <div v-for="(val, i) in vertexVals" :key="i" class="geo-field">
-            <span class="geo-label vertex-label">P{{ i + 1 }}</span>
-            <CoordInput :model-value="val" @commit="(lngLat) => commitVertex(i, lngLat)" />
+        <div class="geo-stack">
+          <div class="vertex-header text-caption text-medium-emphasis">
+            {{ vertexVals.length }} pts · {{ lineLengthLabel }}
+          </div>
+          <div class="vertex-list">
+            <div v-for="(val, i) in vertexVals" :key="i" class="geo-field">
+              <span class="geo-label vertex-label">P{{ i + 1 }}</span>
+              <CoordInput :model-value="val" @commit="(lngLat) => commitVertex(i, lngLat)" />
+            </div>
           </div>
         </div>
       </template>
 
       <!-- Polygon -->
       <template v-else-if="featuresStore.selectedFeature?.type === 'polygon'">
-        <div class="vertex-header text-caption text-medium-emphasis">
-          {{ vertexVals.length }} vertices
-        </div>
-        <div class="vertex-list">
-          <div v-for="(val, i) in vertexVals" :key="i" class="geo-field">
-            <span class="geo-label vertex-label">P{{ i + 1 }}</span>
-            <CoordInput :model-value="val" @commit="(lngLat) => commitVertex(i, lngLat)" />
+        <div class="geo-stack">
+          <div class="geo-subrow">
+            <div class="geo-field">
+              <span class="geo-label">Center</span>
+              <CoordInput :model-value="coordVal" @commit="commitPolygonCenter" />
+            </div>
+          </div>
+          <div class="vertex-header text-caption text-medium-emphasis">
+            {{ vertexVals.length }} vertices
+          </div>
+          <div class="vertex-list">
+            <div v-for="(val, i) in vertexVals" :key="i" class="geo-field">
+              <span class="geo-label vertex-label">P{{ i + 1 }}</span>
+              <CoordInput :model-value="val" @commit="(lngLat) => commitVertex(i, lngLat)" />
+            </div>
           </div>
         </div>
       </template>
@@ -674,9 +939,23 @@ onMounted(async () => {
   border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
+.color-picker-card {
+  overflow: hidden;
+}
+
+/* Strip the default background and padding Vuetify adds around the picker
+   canvas so it sits flush inside our popover card. */
+.color-picker-fine :deep(.v-color-picker__controls) {
+  padding: 8px 8px 4px;
+}
+
+.color-picker-fine :deep(.v-color-picker__canvas) {
+  border-radius: 0;
+}
+
 .swatch-grid {
   display: grid;
-  grid-template-columns: repeat(4, 24px);
+  grid-template-columns: repeat(7, 24px);
   gap: 6px;
 }
 
@@ -764,6 +1043,23 @@ onMounted(async () => {
   border-top: 1px solid rgb(var(--v-theme-surface-variant));
 }
 
+/* Column wrapper that stacks sub-rows vertically and sizes itself to its
+   widest child — avoids percentage-width issues inside an auto-width panel. */
+.geo-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Horizontal row of fields within a geo-stack. Width is driven by content,
+   not by the parent container, so the panel shrinks to fit cleanly. */
+.geo-subrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .geo-field {
   display: flex;
   align-items: center;
@@ -804,7 +1100,6 @@ onMounted(async () => {
 /* ---- Vertex list (line / polygon) ---- */
 
 .vertex-header {
-  width: 100%;
   padding-bottom: 2px;
 }
 
@@ -814,7 +1109,6 @@ onMounted(async () => {
   gap: 4px;
   max-height: 220px;
   overflow-y: auto;
-  width: 100%;
   padding-right: 2px;
 }
 

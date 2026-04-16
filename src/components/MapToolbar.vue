@@ -1,9 +1,10 @@
 <script setup>
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-measure', 'toggle-range', 'toggle-route', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-range', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io'])
 
 defineProps({
   drawPanelOpen: Boolean,
   layersPanelOpen: Boolean,
+  overlaysDialogOpen: Boolean,
   measuring: Boolean,
   ranging: Boolean,
   routing: Boolean,
@@ -64,6 +65,57 @@ defineProps({
         </template>
       </v-tooltip>
 
+      <v-tooltip text="Route" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-routes"
+            size="small"
+            :color="routing ? 'primary' : undefined"
+            :class="[routing ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-route')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Overlays" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-shape-outline"
+            size="small"
+            class="text-medium-emphasis"
+            @click="emit('toggle-overlays')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Track Drop" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-map-marker-account"
+            size="small"
+            :color="trackDropPanelOpen ? 'primary' : undefined"
+            :class="[trackDropPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-track-drop')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Track List" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-format-list-bulleted"
+            size="small"
+            :color="trackListOpen ? 'primary' : undefined"
+            :class="[trackListOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+            @click="emit('toggle-track-list')"
+          />
+        </template>
+      </v-tooltip>
+
       <v-divider vertical class="mx-2 toolbar-divider" />
 
       <!-- Analysis -->
@@ -93,48 +145,9 @@ defineProps({
         </template>
       </v-tooltip>
 
-      <v-tooltip text="Route" location="bottom">
-        <template #activator="{ props }">
-          <v-btn
-            v-bind="props"
-            icon="mdi-routes"
-            size="small"
-            :color="routing ? 'primary' : undefined"
-            :class="[routing ? 'toolbar-active' : 'text-medium-emphasis']"
-            @click="emit('toggle-route')"
-          />
-        </template>
-      </v-tooltip>
-
       <v-divider vertical class="mx-2 toolbar-divider" />
 
-      <!-- Tracks -->
-      <v-tooltip text="Track Drop" location="bottom">
-        <template #activator="{ props }">
-          <v-btn
-            v-bind="props"
-            icon="mdi-map-marker-account"
-            size="small"
-            :color="trackDropPanelOpen ? 'primary' : undefined"
-            :class="[trackDropPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
-            @click="emit('toggle-track-drop')"
-          />
-        </template>
-      </v-tooltip>
-
-      <v-tooltip text="Track List" location="bottom">
-        <template #activator="{ props }">
-          <v-btn
-            v-bind="props"
-            icon="mdi-format-list-bulleted"
-            size="small"
-            :color="trackListOpen ? 'primary' : undefined"
-            :class="[trackListOpen ? 'toolbar-active' : 'text-medium-emphasis']"
-            @click="emit('toggle-track-list')"
-          />
-        </template>
-      </v-tooltip>
-
+      <!-- Operations -->
       <v-tooltip text="Ghosts" location="bottom">
         <template #activator="{ props }">
           <v-btn
@@ -181,6 +194,20 @@ defineProps({
     <v-spacer />
 
     <div class="d-flex align-center ga-1 px-2">
+      <v-tooltip text="Import / Export" location="bottom">
+        <template #activator="{ props }">
+          <v-btn
+            v-bind="props"
+            icon="mdi-swap-vertical"
+            size="small"
+            class="text-medium-emphasis"
+            @click="emit('toggle-io')"
+          />
+        </template>
+      </v-tooltip>
+
+      <v-divider vertical class="mx-2 toolbar-divider" />
+
       <v-tooltip text="Listeners" location="bottom">
         <template #activator="{ props }">
           <v-btn

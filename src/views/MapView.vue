@@ -38,6 +38,8 @@ import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import MapFooter from '@/components/MapFooter.vue'
+import ImportExportDialog from '@/components/ImportExportDialog.vue'
+import OverlaysDialog from '@/components/OverlaysDialog.vue'
 
 const props = defineProps({
   missionId: { type: Number, required: true }
@@ -56,6 +58,8 @@ const drawPanelOpen = ref(false)
 const layersPanelOpen = ref(false)
 const listenersDialogOpen = ref(false)
 const settingsDialogOpen = ref(false)
+const ioDialogOpen = ref(false)
+const overlaysDialogOpen = ref(false)
 const trackDropPanelOpen = ref(false)
 const trackListOpen      = ref(false)
 const ghostPanelOpen     = ref(false)
@@ -66,7 +70,7 @@ const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
-const { setTool, cancel, initLayers, flyToGeometry, moveFeature } = useMapDraw(() => map)
+const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const { ranging, toggleRange } = useMapRange(() => map)
 const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers } = useMapRoute(() => map)
@@ -81,6 +85,8 @@ const { initLayers: initAisLayers }   = useMapAis(() => map)
 // AttributesPanel, etc.) without prop-drilling through DrawPanel.
 provide('flyToGeometry', flyToGeometry)
 provide('moveFeature', (id) => moveFeature(id))
+provide('draggingFeature', draggingFeature)
+provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 
 provide('setInterceptMarker', (lon, lat) => {
@@ -171,6 +177,7 @@ function onToolSelect(toolId) {
 function exitMission() {
   router.push({ name: 'home' })
 }
+
 
 onMounted(async () => {
   // Resolve the mission from the URL before the map starts loading tiles.
@@ -325,6 +332,7 @@ onUnmounted(async () => {
     <MapToolbar
       :draw-panel-open="drawPanelOpen"
       :layers-panel-open="layersPanelOpen"
+      :overlays-dialog-open="overlaysDialogOpen"
       :measuring="measuring"
       :ranging="ranging"
       :routing="routing"
@@ -344,9 +352,11 @@ onUnmounted(async () => {
       @toggle-ghost="toggleGhostPanel"
       @toggle-intercept="toggleInterceptPanel"
       @toggle-ais="toggleAisPanel"
+      @toggle-overlays="overlaysDialogOpen = true"
       @toggle-listeners="listenersDialogOpen = true"
       @toggle-settings="settingsDialogOpen = true"
       @exit-mission="exitMission"
+      @toggle-io="ioDialogOpen = true"
     />
     <div class="map-body">
       <div ref="mapContainer" class="map-container">
@@ -400,6 +410,8 @@ onUnmounted(async () => {
           :focused-id="manualFocusedId"
           @close="closeManualTrackPanel(id)"
         />
+        <ImportExportDialog v-model="ioDialogOpen" />
+        <OverlaysDialog v-model="overlaysDialogOpen" />
         <ListenersDialog v-model="listenersDialogOpen" />
         <SettingsDialog v-model="settingsDialogOpen" />
         <MapContextMenu
