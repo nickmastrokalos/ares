@@ -33,13 +33,14 @@
 ---
 
 ## Workflow Rules
-- Always create and checkout a new branch before starting work.
+- Always create and checkout a new branch **from the `development` branch** before starting work. Never branch from `main` — `main` is release-only; `development` is the integration branch.
 - Do not begin implementation immediately.
 - First:
   1. Review relevant documentation in /docs
   2. Understand existing architecture and patterns
   3. Propose a plan
 - Only proceed with implementation after the plan is clear and aligned.
+- **Close the loop on docs before finishing a task.** As part of completing any task that changes behavior, architecture, or patterns, update the relevant `/docs` files in the same branch. A task is not complete until the docs match reality.
 
 ---
 
@@ -52,7 +53,9 @@
   - /docs/database.md
 - These documents are the source of truth for system design decisions.
 - AGENTS.md must reference and reinforce these documents.
-- Any change in behavior, architecture, or patterns must be reflected in the appropriate doc.
+- Any change in behavior, architecture, or patterns must be reflected in the appropriate doc — in the same branch as the change, not as a follow-up.
+- **Keep doc files focused and scannable.** Do not let any single doc balloon into a dumping ground. When a topic in an existing doc grows beyond ~50–80 lines, extract it into its own `/docs/{topic}.md` and leave a short pointer (one paragraph + link) in the parent doc. Example: manual-track internals live in `/docs/tracks.md`; `frontend.md` only references it.
+- New top-level topics (significant feature areas, subsystems) get their own doc from the start rather than being inlined into `frontend.md` or `backend.md`.
 
 ---
 
