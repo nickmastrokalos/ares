@@ -369,7 +369,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_create_track',
-      description: 'Place a manual track (unit, contact, or position) on the map at a coordinate. When the user says "a friendly track", "a hostile contact", etc., extract the affiliation word into the `affiliation` field — do NOT include it in the callsign.',
+      description: 'Place a manual track (unit, contact, or position) on the map at a coordinate. Infer affiliation from user phrasing: "friendly track" → affiliation="friendly"; "hostile contact" → affiliation="hostile"; "neutral" → affiliation="neutral"; "unknown contact" → affiliation="unknown". Omit affiliation (or use "generic") when the user has not specified one.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -378,25 +378,27 @@ export function mapTools({ featuresStore, flyToGeometry }) {
             type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
             description: '[longitude, latitude]'
           },
-          callsign: { type: 'string', description: 'Short label or callsign. Do not include the affiliation word (friendly/hostile/neutral/unknown) here.' },
+          callsign: { type: 'string', description: 'Short label or callsign. Do not include the affiliation word here.' },
           affiliation: {
             type: 'string',
-            enum: ['friendly', 'hostile', 'neutral', 'unknown'],
-            description: 'Tactical affiliation. Infer from user phrasing: "friendly track" → "friendly", "hostile contact" → "hostile". If the user did not specify, use "unknown".'
+            enum: ['friendly', 'hostile', 'neutral', 'unknown', 'generic'],
+            description: 'Tactical affiliation. Use "generic" (or omit) when the user has not indicated a military affiliation.'
           },
           course: { type: 'number', description: 'Heading in degrees (0–360). Defaults to 0.' },
           speed: { type: 'number', description: 'Speed in knots. Defaults to 0.' }
         },
-        required: ['coordinate', 'callsign', 'affiliation']
+        required: ['coordinate', 'callsign']
       },
       previewRender({ coordinate, callsign, affiliation }) {
         const [lon, lat] = coordinate
-        const aff = affiliation ?? 'unknown'
+        const aff = affiliation ?? 'generic'
         return `Track "${callsign}" (${aff}) at ${lat.toFixed(4)}, ${lon.toFixed(4)}`
       },
-      async handler({ coordinate, callsign, affiliation = 'unknown', course = 0, speed = 0 }) {
+      async handler({ coordinate, callsign, affiliation, course = 0, speed = 0 }) {
+        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u', generic: 'g' }
+        const affilCode = AFFIL_MAP[affiliation] ?? 'g'
         const geometry = { type: 'Point', coordinates: coordinate }
-        const id = await featuresStore.addFeature('manual-track', geometry, { callsign, affiliation, course, speed, hae: 0 })
+        const id = await featuresStore.addFeature('manual-track', geometry, { callsign, affiliation: affilCode, course, speed, hae: 0 })
         return { id, success: true }
       }
     },

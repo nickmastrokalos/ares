@@ -31,8 +31,8 @@ const showTypePicker = ref(false)
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
 
-const AFFIL_LABELS = { f: 'Friendly', h: 'Hostile', n: 'Civilian', u: 'Unknown' }
-const AFFIL_COLORS = { f: '#4a9ade', h: '#f44336', n: '#4caf50', u: '#ffeb3b' }
+const AFFIL_LABELS = { f: 'Friendly', h: 'Hostile', n: 'Civilian', u: 'Unknown', g: 'Track' }
+const AFFIL_COLORS = { f: '#4a9ade', h: '#f44336', n: '#4caf50', u: '#ffeb3b', g: '#9e9e9e' }
 
 // ---- Derived data ----
 
