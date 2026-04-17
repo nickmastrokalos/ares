@@ -382,12 +382,12 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           affiliation: {
             type: 'string',
             enum: ['friendly', 'hostile', 'neutral', 'unknown'],
-            description: 'Tactical affiliation inferred from the user\'s phrasing ("a friendly track" → "friendly", "hostile contact" → "hostile"). Defaults to "unknown".'
+            description: 'Tactical affiliation. Infer from user phrasing: "friendly track" → "friendly", "hostile contact" → "hostile". If the user did not specify, use "unknown".'
           },
           course: { type: 'number', description: 'Heading in degrees (0–360). Defaults to 0.' },
           speed: { type: 'number', description: 'Speed in knots. Defaults to 0.' }
         },
-        required: ['coordinate', 'callsign']
+        required: ['coordinate', 'callsign', 'affiliation']
       },
       previewRender({ coordinate, callsign, affiliation }) {
         const [lon, lat] = coordinate
