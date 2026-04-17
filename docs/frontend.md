@@ -25,17 +25,42 @@ src/
     vuetify.js     # Vuetify configuration (theme, defaults)
     database.js    # SQLite database singleton (getDb)
     store.js       # Key-value store singleton (getStore)
-  views/           # Page-level components (one per route)
-    HomeView.vue   # Mission picker — the app's landing page
-    MapView.vue    # Map page, mounted at /map/:missionId
-  stores/          # Pinia stores (one file per domain)
-    app.js         # Global app state
-    tracks.js      # CoT track state and Tauri event listener
+  views/                  # Page-level components (one per route)
+    HomeView.vue          # Mission picker — the app's landing page
+    MapView.vue           # Map page, mounted at /map/:missionId
+    ControlHubView.vue    # Control Hub — containers/sessions management (stub)
+    ConfigurationView.vue # Connector configuration pages (stub)
+    ScenesView.vue        # Scenes dashboard composer (stub)
+  stores/                 # Pinia stores (one file per domain)
+    app.js                # Global app state (loading counter)
+    navigation.js         # Active mission persistence for sidebar
+    tracks.js             # CoT track state and Tauri event listener
   composables/     # Reusable composition functions (useX.js)
   services/        # Pure modules (geometry, parsers, etc.) with no Vue deps
   components/      # Reusable Vue components
   assets/          # Static assets (images, fonts, etc.)
 ```
+
+## Shell and navigation
+
+Ares uses Vue Router 4 in `createWebHistory` mode. Two original routes plus four added for the Athena integration:
+
+| Route                  | Name     | View                     | Scope          |
+|------------------------|----------|--------------------------|----------------|
+| `/`                    | `home`   | `HomeView.vue`           | —              |
+| `/map/:missionId`      | `map`    | `MapView.vue`            | Mission-scoped |
+| `/hub`                 | `hub`    | `ControlHubView.vue`     | Global         |
+| `/configuration`       | `config` | `ConfigurationView.vue`  | Global         |
+| `/scenes`              | `scenes` | `ScenesView.vue`         | Global         |
+| `/scenes/:sceneId`     | `scene`  | `ScenesView.vue`         | Global         |
+
+**Rule: Map is mission-scoped; Hub/Config/Scenes are global peers.** The Hub, Configuration, and Scenes surfaces are not children of a mission — they apply to the full app and contain globally-configured connectors, vendor settings, and composed dashboards.
+
+**Active mission persistence.** `useNavigationStore` (`src/stores/navigation.js`) holds `activeMissionId`. `MapView` sets it on successful mission load and clears it on `exitMission`. The sidebar reads it to build the Map nav target so that clicking Map from any global page returns to the same mission.
+
+**Sidebar visibility.** `AppSidebar` is conditionally rendered in `App.vue` — hidden on `route.name === 'home'` to keep the mission picker a clean landing surface. It appears as an icon rail on all other routes.
+
+**Adding a new top-level route:** add the route in `src/router/index.js`, create a view in `src/views/`, and add a nav item to `AppSidebar.vue`. If the new destination is mission-scoped, read `navStore.activeMissionId` and validate like `MapView` does.
 
 ## State Management
 - Use Pinia for all shared state.

@@ -23,6 +23,7 @@ import { useMapAis } from '@/composables/useMapAis'
 import { getBasemap } from '@/services/basemaps'
 import { usePluginRegistry } from '@/composables/usePluginRegistry'
 import { loadPlugins } from '@/services/pluginLoader'
+import { useNavigationStore } from '@/stores/navigation'
 import neCountries from '@/assets/ne-countries-110m.json'
 import MapToolbar from '@/components/MapToolbar.vue'
 import DrawPanel from '@/components/DrawPanel.vue'
@@ -58,6 +59,7 @@ const tracksStore = useTracksStore()
 const ghostsStore = useGhostsStore()
 const aisStore          = useAisStore()
 const tileserverStore   = useTileserverStore()
+const navStore          = useNavigationStore()
 const drawPanelOpen = ref(false)
 const layersPanelOpen = ref(false)
 const listenersDialogOpen = ref(false)
@@ -184,6 +186,7 @@ function onToolSelect(toolId) {
 }
 
 function exitMission() {
+  navStore.clearActiveMission()
   router.push({ name: 'home' })
 }
 
@@ -202,6 +205,7 @@ onMounted(async () => {
     router.replace({ name: 'home' })
     return
   }
+  navStore.setActiveMission(props.missionId)
 
   await settingsStore.load()
   loadPlugins(pluginRegistry)
