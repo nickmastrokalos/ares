@@ -157,6 +157,11 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
 
     const use2525 = settingsStore.milStdSymbology
 
+    // Register icons for any manual tracks that already exist when the layer
+    // is (re)initialized. Without this, re-entering the map view renders
+    // labels but no symbols until the feature list next changes.
+    if (use2525) ensureMilStdIcons(map, manualTrackCollection.value.features)
+
     map.addSource(MANUAL_TRACKS_SOURCE, {
       type: 'geojson',
       data: manualTrackCollection.value

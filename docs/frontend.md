@@ -348,6 +348,10 @@ The Scenes dashboard engine is documented in [scenes.md](./scenes.md). Key conce
 - The **sceneData fabric** (`src/stores/sceneData.js`) coalesces subscriptions, batches Rust fetches, and delivers push invalidations via Tauri events.
 - Scenes are global — not mission-scoped.
 
+## Bloodhound
+
+Live-tracking range lines between tracks, vessels, shapes, or raw coordinates are documented in [bloodhound.md](./bloodhound.md). Toolbar entry is the `mdi-map-marker-distance` button in the Analysis group; the `BloodhoundPanel` manages add / remove / clear. The line and its distance label follow both endpoints as sources move.
+
 ## Assistant
 
 The in-app AI assistant is documented in [assistant.md](./assistant.md). Key concepts:

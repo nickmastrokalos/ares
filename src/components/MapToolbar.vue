@@ -3,14 +3,14 @@ import { useDisplay } from 'vuetify'
 
 const { mdAndUp, smAndDown } = useDisplay()
 
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-range', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io'])
 
 const props = defineProps({
   drawPanelOpen: Boolean,
   layersPanelOpen: Boolean,
   overlaysDialogOpen: Boolean,
   measuring: Boolean,
-  ranging: Boolean,
+  bloodhoundPanelOpen: Boolean,
   routing: Boolean,
   trackDropPanelOpen: Boolean,
   trackListOpen: Boolean,
@@ -23,7 +23,7 @@ const props = defineProps({
 
 // True when any button in that group is active — used to highlight the group activator in collapsed mode.
 const annotationActive = () => props.drawPanelOpen || props.layersPanelOpen || props.routing || props.trackDropPanelOpen || props.trackListOpen
-const analysisActive   = () => props.measuring || props.ranging
+const analysisActive   = () => props.measuring || props.bloodhoundPanelOpen
 const operationsActive = () => props.ghostPanelOpen || props.interceptPanelOpen
 const feedsActive      = () => props.aisPanelOpen
 </script>
@@ -122,12 +122,12 @@ const feedsActive      = () => props.aisPanelOpen
           </template>
         </v-tooltip>
 
-        <v-tooltip text="Range" location="bottom">
+        <v-tooltip text="Bloodhound" location="bottom">
           <template #activator="{ props: tip }">
             <v-btn v-bind="tip" icon="mdi-map-marker-distance" size="small"
-              :color="ranging ? 'primary' : undefined"
-              :class="[ranging ? 'toolbar-active' : 'text-medium-emphasis']"
-              @click="emit('toggle-range')" />
+              :color="bloodhoundPanelOpen ? 'primary' : undefined"
+              :class="[bloodhoundPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+              @click="emit('toggle-bloodhound')" />
           </template>
         </v-tooltip>
 
@@ -212,9 +212,9 @@ const feedsActive      = () => props.aisPanelOpen
             <v-list-item prepend-icon="mdi-ruler" title="Measure"
               :active="measuring" active-color="primary"
               @click="emit('toggle-measure')" />
-            <v-list-item prepend-icon="mdi-map-marker-distance" title="Range"
-              :active="ranging" active-color="primary"
-              @click="emit('toggle-range')" />
+            <v-list-item prepend-icon="mdi-map-marker-distance" title="Bloodhound"
+              :active="bloodhoundPanelOpen" active-color="primary"
+              @click="emit('toggle-bloodhound')" />
           </v-list>
         </v-menu>
 

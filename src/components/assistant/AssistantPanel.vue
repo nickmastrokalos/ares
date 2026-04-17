@@ -1,15 +1,31 @@
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { useAssistantStore } from '@/stores/assistant'
 import { useZIndex } from '@/composables/useZIndex'
+import { useDraggable } from '@/composables/useDraggable'
 import AssistantMessage from './AssistantMessage.vue'
 import AssistantConfirmCard from './AssistantConfirmCard.vue'
 
 const store = useAssistantStore()
 const { zIndex, bringToFront } = useZIndex()
+const { pos, onPointerDown } = useDraggable()
+const positioned = ref(false)
 
 const inputText = ref('')
 const logRef    = ref(null)
+
+// Start docked bottom-right, matching the previous fixed position, then let
+// the user drag from there. Recomputed each time the panel is (re)opened
+// because v-if unmounts the component when closed.
+onMounted(() => {
+  const width  = 360
+  const height = Math.min(window.innerHeight * 0.6, 520)
+  pos.value = {
+    x: Math.max(12, window.innerWidth  - width  - 12),
+    y: Math.max(12, window.innerHeight - height - 40)
+  }
+  positioned.value = true
+})
 
 function onKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -25,9 +41,9 @@ function submit() {
   store.send(text)
 }
 
-// Scroll to bottom when messages change
+// Scroll to bottom when messages or pending confirm cards change
 watch(
-  () => store.messages.length,
+  () => [store.messages.length, store.pendingCalls.length],
   async () => {
     await nextTick()
     if (logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight
@@ -39,11 +55,16 @@ watch(
   <div
     v-if="store.open"
     class="assistant-panel"
-    :style="{ zIndex }"
+    :style="{
+      left: pos.x + 'px',
+      top:  pos.y + 'px',
+      zIndex,
+      visibility: positioned ? 'visible' : 'hidden'
+    }"
     @pointerdown="bringToFront"
   >
-    <!-- Header -->
-    <div class="panel-header">
+    <!-- Header (drag handle) -->
+    <div class="panel-header" @pointerdown="onPointerDown">
       <v-icon size="14" class="text-medium-emphasis" style="flex-shrink:0">mdi-robot-outline</v-icon>
       <span class="panel-title">{{ store.contextLabel }}</span>
       <v-spacer />
@@ -65,13 +86,6 @@ watch(
 
     <!-- Body -->
     <div v-show="!store.minimized" class="panel-body">
-      <!-- Confirm cards for pending writes -->
-      <AssistantConfirmCard
-        v-for="call in store.pendingCalls"
-        :key="call.id"
-        :call="call"
-      />
-
       <!-- Message log -->
       <div ref="logRef" class="message-log">
         <div v-if="!store.messages.length && !store.error" class="log-empty">
@@ -81,6 +95,12 @@ watch(
           v-for="msg in store.messages"
           :key="msg.id"
           :message="msg"
+        />
+        <!-- Inline confirm cards for pending writes (after the latest assistant turn) -->
+        <AssistantConfirmCard
+          v-for="call in store.pendingCalls"
+          :key="call.id"
+          :call="call"
         />
         <div v-if="store.busy" class="typing-indicator">
           <span /><span /><span />
@@ -122,8 +142,6 @@ watch(
 <style scoped>
 .assistant-panel {
   position: fixed;
-  bottom: 40px;
-  right: 12px;
   width: 360px;
   max-height: min(60vh, 520px);
   background: rgba(var(--v-theme-surface), 0.97);
@@ -142,6 +160,11 @@ watch(
   padding: 4px 2px 4px 8px;
   border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
   flex-shrink: 0;
+  cursor: grab;
+}
+
+.panel-header:active {
+  cursor: grabbing;
 }
 
 .panel-title {

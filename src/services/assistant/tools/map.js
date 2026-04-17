@@ -3,11 +3,54 @@ import {
   ellipsePolygon,
   sectorPolygon,
   rotatedBoxPolygon,
+  destinationPoint,
+  distanceBetween,
+  bearingBetween,
+  geometryBounds,
+  pointInPolygon,
 } from '@/services/geometry'
 import { DEFAULT_FEATURE_COLOR } from '@/stores/features'
 import { parseCoordinate } from '@/services/coordinates'
+import { BASEMAPS } from '@/services/basemaps'
 
-export function mapTools({ featuresStore, flyToGeometry }) {
+// Mirrors the track builder UI (ManualTrackPanel / useMapManualTracks).
+const AFFIL_ENUM   = ['friendly', 'hostile', 'civilian', 'unknown']
+const AFFIL_MAP    = { friendly: 'f', hostile: 'h', civilian: 'n', unknown: 'u' }
+const DEFAULT_AFFIL_CODE = 'f'
+
+// Mirrors TRACK_TYPE_CATALOG in src/services/trackTypes.js.
+const ENTITY_SUFFIX = {
+  // Ground
+  ground:            'G',
+  infantry:          'G-U-C-I',
+  armor:             'G-U-C-A',
+  artillery:         'G-U-C-F',
+  engineer:          'G-U-C-E',
+  recon:             'G-U-C-R',
+  hq:                'G-U-H',
+  support:           'G-U-S',
+  unmanned_ground:   'G-U-C-V-U',
+  // Air
+  air:               'A',
+  fixed_wing:        'A-M-F',
+  uav:               'A-M-F-Q',
+  helicopter:        'A-M-H',
+  attack_helicopter: 'A-M-H-H',
+  // Sea
+  surface:           'S',
+  combatant:         'S-C',
+  unmanned_surface:  'S-C-U',
+  submarine:         'U',
+  // SOF
+  sof:               'F',
+}
+const ENTITY_ENUM = Object.keys(ENTITY_SUFFIX)
+
+// Inverse of AFFIL_MAP — converts the single-letter code stored on a track
+// back into the word the agent reasons with ("friendly", "hostile", …).
+const AFFIL_WORD = Object.fromEntries(Object.entries(AFFIL_MAP).map(([w, c]) => [c, w]))
+
+export function mapTools({ featuresStore, tracksStore, settingsStore, flyToGeometry, flyTo, switchBasemap }) {
   return [
 
     // ── Read ─────────────────────────────────────────────────────────────────
@@ -29,18 +72,23 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_list_features',
-      description: 'List all features on the current mission map (shapes, routes, tracks, etc.).',
+      description: 'List mission-owned features on the map — shapes, routes, points, and MANUAL tracks. Manual tracks expose "affiliation" (friendly / hostile / civilian / unknown). IMPORTANT: this does NOT include live CoT tracks received from listeners — call cot_list_tracks for those. When the user says "tracks" without qualification, consider consulting both tools. For containment questions ("what is inside the box?"), prefer map_features_in_area, which checks both sources in one call.',
       readonly: true,
       inputSchema: { type: 'object', properties: {}, required: [] },
       async handler() {
         return featuresStore.features.map(f => {
           const props = JSON.parse(f.properties)
-          return {
+          const summary = {
             id: f.id,
             type: f.type,
             name: props.name ?? props.callsign ?? f.type,
             color: props.color ?? DEFAULT_FEATURE_COLOR
           }
+          if (f.type === 'manual-track') {
+            summary.affiliation = AFFIL_WORD[props.affiliation] ?? 'unknown'
+            if (props.cotType) summary.cotType = props.cotType
+          }
+          return summary
         })
       }
     },
@@ -89,6 +137,208 @@ export function mapTools({ featuresStore, flyToGeometry }) {
         if (!result) return { error: `Could not parse "${coordinate}" as ${format}.` }
         const [lng, lat] = result
         return { longitude: lng, latitude: lat }
+      }
+    },
+
+    {
+      name: 'map_offset_coordinate',
+      description: 'Compute a new [longitude, latitude] offset from a starting point by a bearing and distance. Use this whenever the user wants to place, draw, or reference a location relative to an existing feature or coordinate (e.g. "1 mile west of FRND-1", "500 m north of the circle"). This is the correct first step for "place a new X near Y" — do NOT use map_move_feature, which would relocate the reference feature. Convert the user\'s units to meters (1 mi = 1609.344 m, 1 nm = 1852 m, 1 km = 1000 m) and direction to a compass bearing (N=0, E=90, S=180, W=270).',
+      readonly: true,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          fromFeatureId:  { type: 'integer', description: 'Feature id whose representative point is the origin.' },
+          fromCoordinate: {
+            type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
+            description: 'Origin [longitude, latitude]. Provide this OR fromFeatureId.'
+          },
+          bearing:        { type: 'number', description: 'Compass bearing in degrees (0=N, 90=E, 180=S, 270=W).' },
+          distanceMeters: { type: 'number', description: 'Distance in meters. Always convert from the user\'s units.' }
+        },
+        required: ['bearing', 'distanceMeters']
+      },
+      async handler({ fromFeatureId, fromCoordinate, bearing, distanceMeters }) {
+        let origin = fromCoordinate
+        if (!origin) {
+          if (fromFeatureId == null) return { error: 'Provide either fromFeatureId or fromCoordinate.' }
+          const row = featuresStore.features.find(f => f.id === fromFeatureId)
+          if (!row) return { error: `Feature ${fromFeatureId} not found.` }
+          const props = JSON.parse(row.properties)
+          if (props.center) origin = props.center
+          else if (row.type === 'box' && props.sw && props.ne) {
+            origin = [(props.sw[0] + props.ne[0]) / 2, (props.sw[1] + props.ne[1]) / 2]
+          } else {
+            const geom = JSON.parse(row.geometry)
+            if (geom.type === 'Point') origin = geom.coordinates
+            else {
+              const bounds = geometryBounds(geom)
+              if (!bounds) return { error: `Feature ${fromFeatureId} has no usable geometry.` }
+              origin = [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2]
+            }
+          }
+        }
+        const [lng, lat] = destinationPoint(origin, distanceMeters, bearing)
+        return { longitude: lng, latitude: lat, coordinate: [lng, lat], origin }
+      }
+    },
+
+    {
+      name: 'map_measure_distance',
+      description: 'Compute the great-circle distance and initial bearing between two points on the map. Use this whenever the user asks "how far", "distance", "bearing", or similar — do NOT draw a line or create any feature to answer these questions. Supply either a feature id or a raw [longitude, latitude] for each endpoint (but not both for the same endpoint).',
+      readonly: true,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          fromFeatureId:  { type: 'integer', description: 'Feature id for the starting point.' },
+          fromCoordinate: {
+            type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
+            description: 'Starting [longitude, latitude].'
+          },
+          toFeatureId:    { type: 'integer', description: 'Feature id for the ending point.' },
+          toCoordinate:   {
+            type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
+            description: 'Ending [longitude, latitude].'
+          }
+        },
+        required: []
+      },
+      async handler({ fromFeatureId, fromCoordinate, toFeatureId, toCoordinate }) {
+        const resolve = (id, coord, label) => {
+          if (coord) return { ok: true, point: coord }
+          if (id == null) return { ok: false, error: `Provide either ${label}FeatureId or ${label}Coordinate.` }
+          const row = featuresStore.features.find(f => f.id === id)
+          if (!row) return { ok: false, error: `Feature ${id} not found.` }
+          const props = JSON.parse(row.properties)
+          // Centered shapes expose a canonical center in props; otherwise use
+          // the geometry's bbox midpoint (works for lines / polygons / routes).
+          if (props.center) return { ok: true, point: props.center }
+          if (row.type === 'box' && props.sw && props.ne) {
+            return { ok: true, point: [(props.sw[0] + props.ne[0]) / 2, (props.sw[1] + props.ne[1]) / 2] }
+          }
+          const geom = JSON.parse(row.geometry)
+          if (geom.type === 'Point') return { ok: true, point: geom.coordinates }
+          const bounds = geometryBounds(geom)
+          if (!bounds) return { ok: false, error: `Feature ${id} has no usable geometry.` }
+          const [[w, s], [e, n]] = bounds
+          return { ok: true, point: [(w + e) / 2, (s + n) / 2] }
+        }
+
+        const from = resolve(fromFeatureId, fromCoordinate, 'from')
+        if (!from.ok) return { error: from.error }
+        const to = resolve(toFeatureId, toCoordinate, 'to')
+        if (!to.ok) return { error: to.error }
+
+        const meters  = distanceBetween(from.point, to.point)
+        const bearing = bearingBetween(from.point, to.point)
+        return {
+          distanceMeters: meters,
+          distanceKm:     meters / 1000,
+          distanceNm:     meters / 1852,
+          distanceMi:     meters / 1609.344,
+          bearingDeg:     bearing,
+          from: from.point,
+          to:   to.point
+        }
+      }
+    },
+
+    {
+      name: 'map_features_in_area',
+      description: 'Find every map feature (points, tracks, routes — both manual tracks AND live CoT tracks) that lies inside a given shape (circle, ellipse, sector, box, polygon). Use this whenever the user asks "what is inside X", "any tracks in X", "which features are inside the Xray box" — it is the right tool for containment questions, and it covers CoT tracks that manual-feature listing misses. By default all feature kinds and CoT tracks are included; narrow with the optional filters.',
+      readonly: true,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          shapeId: {
+            type: 'integer',
+            description: 'Feature id of the enclosing shape (must be a circle, ellipse, sector, box, or polygon).'
+          },
+          includeCotTracks: {
+            type: 'boolean',
+            description: 'Include live CoT tracks from listeners. Default true.'
+          },
+          affiliation: {
+            type: 'string',
+            enum: ['friendly', 'hostile', 'civilian', 'unknown'],
+            description: 'Keep only tracks (manual + CoT) with this affiliation. Does not filter non-track features.'
+          },
+          featureTypes: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional whitelist of feature.type values to keep (e.g. ["manual-track","point"]). Omit to include all.'
+          }
+        },
+        required: ['shapeId']
+      },
+      async handler({ shapeId, includeCotTracks = true, affiliation, featureTypes }) {
+        const shape = featuresStore.features.find(f => f.id === shapeId)
+        if (!shape) return { error: `Feature ${shapeId} not found.` }
+        const geom = JSON.parse(shape.geometry)
+        if (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon') {
+          return { error: `Feature ${shapeId} is type "${shape.type}" with geometry "${geom.type}" — not an enclosing area. Use a circle, ellipse, sector, box, or polygon.` }
+        }
+
+        const typeAllowed = featureTypes?.length ? new Set(featureTypes) : null
+
+        // Point for a feature's containment test. Tracks / points → their coord;
+        // multi-vertex features → representative centroid (bbox mid).
+        function pointFor(row) {
+          const rgeom = JSON.parse(row.geometry)
+          if (rgeom.type === 'Point') return rgeom.coordinates
+          const b = geometryBounds(rgeom)
+          if (!b) return null
+          return [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2]
+        }
+
+        const AFFIL_WORD = { f: 'friendly', h: 'hostile', n: 'civilian', u: 'unknown' }
+
+        const features = []
+        for (const row of featuresStore.features) {
+          if (row.id === shapeId) continue
+          if (typeAllowed && !typeAllowed.has(row.type)) continue
+          const props = JSON.parse(row.properties)
+          const isTrack = row.type === 'manual-track'
+          const affil = isTrack ? (AFFIL_WORD[props.affiliation] ?? 'unknown') : null
+          if (affiliation && isTrack && affil !== affiliation) continue
+          const pt = pointFor(row)
+          if (!pt) continue
+          if (!pointInPolygon(pt, geom)) continue
+          const entry = {
+            source: 'feature',
+            id: row.id,
+            type: row.type,
+            name: props.name ?? props.callsign ?? row.type,
+            coordinate: pt
+          }
+          if (isTrack) entry.affiliation = affil
+          features.push(entry)
+        }
+
+        const cotTracks = []
+        if (includeCotTracks && tracksStore) {
+          for (const t of tracksStore.tracks.values()) {
+            const affil = AFFIL_WORD[t.cotType?.[2]] ?? 'unknown'
+            if (affiliation && affil !== affiliation) continue
+            const pt = [t.lon, t.lat]
+            if (!pointInPolygon(pt, geom)) continue
+            cotTracks.push({
+              source: 'cot',
+              uid: t.uid,
+              callsign: t.callsign ?? t.uid,
+              cotType: t.cotType ?? null,
+              affiliation: affil,
+              coordinate: pt
+            })
+          }
+        }
+
+        return {
+          shapeId,
+          shapeName: JSON.parse(shape.properties).name ?? shape.type,
+          featureMatches: features,
+          cotTrackMatches: cotTracks,
+          totalCount: features.length + cotTracks.length
+        }
       }
     },
 
@@ -286,7 +536,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_draw_box',
-      description: 'Draw a rectangular box on the map defined by southwest and northeast corners, with optional rotation.',
+      description: 'Draw a rectangular box on the map defined by southwest and northeast corners, with optional rotation. When the user asks to box/wrap/enclose existing features, prefer map_draw_box_around_features instead.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -313,6 +563,69 @@ export function mapTools({ featuresStore, flyToGeometry }) {
       async handler({ sw, ne, rotationDeg = 0, name = 'Box', color = DEFAULT_FEATURE_COLOR }) {
         const geometry = rotatedBoxPolygon(sw, ne, rotationDeg)
         const id = await featuresStore.addFeature('box', geometry, { name, sw, ne, rotationDeg, color })
+        return { id, success: true }
+      }
+    },
+
+    {
+      name: 'map_draw_box_around_features',
+      description: 'Draw an axis-aligned bounding box around one or more existing features. Use this whenever the user asks to box / wrap / enclose / surround existing features — do NOT compute the bounding box yourself and call map_draw_box. Padding defaults to 500 m so the box is always clearly visible even when features are close together.',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          featureIds: {
+            type: 'array', items: { type: 'integer' }, minItems: 1,
+            description: 'IDs of features from map_list_features to enclose.'
+          },
+          paddingMeters: {
+            type: 'number',
+            description: 'Margin (in meters) added around the tightest bounding box so the box stays visible. Defaults to 500.'
+          },
+          name: { type: 'string' },
+          color: { type: 'string' }
+        },
+        required: ['featureIds']
+      },
+      previewRender({ featureIds, paddingMeters = 500, name }) {
+        const label = name ? `"${name}" · ` : ''
+        const ids = featureIds.map(i => `#${i}`).join(', ')
+        return `${label}Box around ${ids} · +${paddingMeters} m`
+      },
+      async handler({ featureIds, paddingMeters = 500, name = 'Box', color = DEFAULT_FEATURE_COLOR }) {
+        const rows = featureIds
+          .map(id => featuresStore.features.find(f => f.id === id))
+          .filter(Boolean)
+        if (!rows.length) return { error: 'No matching features found.' }
+
+        let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity
+        const visit = ([lng, lat]) => {
+          if (lng < minLng) minLng = lng
+          if (lat < minLat) minLat = lat
+          if (lng > maxLng) maxLng = lng
+          if (lat > maxLat) maxLat = lat
+        }
+        const walk = (geom) => {
+          if (!geom) return
+          if (geom.type === 'Point') visit(geom.coordinates)
+          else if (geom.type === 'LineString') geom.coordinates.forEach(visit)
+          else if (geom.type === 'Polygon') geom.coordinates.forEach(ring => ring.forEach(visit))
+          else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(ring => ring.forEach(visit)))
+        }
+        for (const row of rows) walk(JSON.parse(row.geometry))
+        if (!Number.isFinite(minLng)) return { error: 'Selected features have no usable geometry.' }
+
+        // Convert padding in meters to degree offsets at the bbox's middle latitude.
+        const midLat = (minLat + maxLat) / 2
+        const metersPerDegLat = 111_320
+        const metersPerDegLng = 111_320 * Math.cos(midLat * Math.PI / 180)
+        const dLat = paddingMeters / metersPerDegLat
+        const dLng = paddingMeters / metersPerDegLng
+
+        const sw = [minLng - dLng, minLat - dLat]
+        const ne = [maxLng + dLng, maxLat + dLat]
+        const geometry = rotatedBoxPolygon(sw, ne, 0)
+        const id = await featuresStore.addFeature('box', geometry, { name, sw, ne, rotationDeg: 0, color })
         return { id, success: true }
       }
     },
@@ -369,7 +682,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_create_track',
-      description: 'Place a manual track on the map. Infer affiliation from user phrasing ("friendly" → "friendly", "hostile" → "hostile", etc.). Always supply entity_type — infer it from context ("tank" → "armor", "helo" → "helicopter", "ship" → "surface_vessel"); use "ground" when the user says just "track" or "contact" without specifying an entity type.',
+      description: 'Place a manual track on the map. Infer affiliation from user phrasing ("friendly" → "friendly", "hostile" → "hostile", "civilian" or "neutral" → "civilian"). Always supply entity_type — infer it from context ("tank" → "armor", "helo" → "helicopter", "ship" → "surface", "unmanned ship/boat" → "unmanned_surface", "drone" → "uav"); use "ground" when the user says just "track" or "contact" without specifying an entity type.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -381,56 +694,33 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           callsign: { type: 'string', description: 'Short label or callsign. Do not include the affiliation word here.' },
           affiliation: {
             type: 'string',
-            enum: ['friendly', 'hostile', 'neutral', 'unknown'],
-            description: 'Tactical affiliation. Infer from user phrasing ("friendly track" → "friendly", "hostile contact" → "hostile"). Use "friendly" when the user has not specified an affiliation.'
+            enum: AFFIL_ENUM,
+            description: 'Tactical affiliation. Infer from user phrasing ("friendly track" → "friendly", "hostile contact" → "hostile", "neutral/civilian" → "civilian"). Use "friendly" when the user has not specified an affiliation.'
           },
           entity_type: {
             type: 'string',
-            enum: [
-              'ground', 'infantry', 'armor', 'artillery', 'engineer', 'recon', 'hq', 'support',
-              'helicopter', 'attack_helicopter', 'fixed_wing', 'uav',
-              'surface_vessel', 'combatant', 'submarine',
-              'sof'
-            ],
-            description: 'MIL-STD-2525 entity type. Infer from context: "tank"→"armor", "helo"→"helicopter", "fighter"→"fixed_wing", "ship"→"surface_vessel", "sub"→"submarine". Use "ground" as the default when the user has not specified an entity type.'
+            enum: ENTITY_ENUM,
+            description: 'MIL-STD-2525 entity type. Infer from context: "tank"→"armor", "helo"→"helicopter", "atk helo"→"attack_helicopter", "fighter/jet"→"fixed_wing", "drone"→"uav", "ship/boat"→"surface", "warship"→"combatant", "unmanned ship/usv"→"unmanned_surface", "ugv"→"unmanned_ground", "sub"→"submarine", "sof"→"sof". Use "ground" (generic ground) as the default when the user has not specified an entity type.'
           },
           course: { type: 'number', description: 'Heading in degrees (0–360). Defaults to 0.' },
-          speed:  { type: 'number', description: 'Speed in knots. Defaults to 0.' }
+          speed:  { type: 'number', description: 'Speed in knots. Defaults to 0.' },
+          hae:    { type: 'number', description: 'Height above ellipsoid (altitude) in meters. Defaults to 0.' }
         },
         required: ['coordinate', 'callsign', 'entity_type']
       },
       previewRender({ coordinate, callsign, affiliation, entity_type }) {
         const [lon, lat] = coordinate
-        const aff  = affiliation ?? 'generic'
+        const aff  = affiliation ?? 'friendly'
         const type = entity_type ? ` · ${entity_type}` : ''
         return `Track "${callsign}" (${aff}${type}) at ${lat.toFixed(4)}, ${lon.toFixed(4)}`
       },
-      async handler({ coordinate, callsign, affiliation, entity_type, course = 0, speed = 0 }) {
-        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u' }
-        const DEFAULT_AFFIL = 'f'
-        const ENTITY_SUFFIX = {
-          ground:            'G',
-          infantry:          'G-U-C-I',
-          armor:             'G-U-C-A',
-          artillery:         'G-U-C-F',
-          engineer:          'G-U-C-E',
-          recon:             'G-U-C-R',
-          hq:                'G-U-H',
-          support:           'G-U-S',
-          helicopter:        'A-M-H',
-          attack_helicopter: 'A-M-H-H',
-          fixed_wing:        'A-M-F',
-          uav:               'A-M-F-Q',
-          surface_vessel:    'S',
-          combatant:         'S-C',
-          submarine:         'U',
-          sof:               'F',
-        }
-        const affilCode = AFFIL_MAP[affiliation] ?? DEFAULT_AFFIL
-        const cotType   = entity_type ? `a-${affilCode}-${ENTITY_SUFFIX[entity_type]}` : null
+      async handler({ coordinate, callsign, affiliation, entity_type, course = 0, speed = 0, hae = 0 }) {
+        const affilCode = AFFIL_MAP[affiliation] ?? DEFAULT_AFFIL_CODE
+        const suffix    = ENTITY_SUFFIX[entity_type]
+        const cotType   = suffix ? `a-${affilCode}-${suffix}` : null
         const geometry  = { type: 'Point', coordinates: coordinate }
         const id = await featuresStore.addFeature('manual-track', geometry, {
-          callsign, affiliation: affilCode, cotType, course, speed, hae: 0
+          callsign, affiliation: affilCode, cotType, course, speed, hae
         })
         return { id, success: true }
       }
@@ -484,7 +774,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_update_track',
-      description: 'Update an existing manual track — callsign, affiliation, entity type, course, or speed. Supply only the fields that are changing.',
+      description: 'Update an existing manual track — callsign, affiliation, entity type, course, speed, or altitude. Supply only the fields that are changing.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -493,61 +783,41 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           callsign: { type: 'string' },
           affiliation: {
             type: 'string',
-            enum: ['friendly', 'hostile', 'neutral', 'unknown']
+            enum: AFFIL_ENUM
           },
           entity_type: {
             type: 'string',
-            enum: [
-              'ground', 'infantry', 'armor', 'artillery', 'engineer', 'recon', 'hq', 'support',
-              'helicopter', 'attack_helicopter', 'fixed_wing', 'uav',
-              'surface_vessel', 'combatant', 'submarine',
-              'sof'
-            ],
+            enum: ENTITY_ENUM,
             description: 'Change the entity type / MIL-STD-2525 symbol.'
           },
-          course: { type: 'number' },
-          speed:  { type: 'number' }
+          course: { type: 'number', description: 'Heading in degrees (0–360).' },
+          speed:  { type: 'number', description: 'Speed in knots.' },
+          hae:    { type: 'number', description: 'Height above ellipsoid (altitude) in meters.' }
         },
         required: ['id']
       },
-      previewRender({ id, callsign, affiliation, entity_type }) {
+      previewRender({ id, callsign, affiliation, entity_type, course, speed, hae }) {
         const parts = [`Track #${id}`]
-        if (callsign)    parts.push(`callsign → "${callsign}"`)
-        if (affiliation) parts.push(`affiliation → ${affiliation}`)
-        if (entity_type) parts.push(`type → ${entity_type}`)
+        if (callsign)         parts.push(`callsign → "${callsign}"`)
+        if (affiliation)      parts.push(`affiliation → ${affiliation}`)
+        if (entity_type)      parts.push(`type → ${entity_type}`)
+        if (course !== undefined) parts.push(`course → ${course}°`)
+        if (speed  !== undefined) parts.push(`speed → ${speed} kt`)
+        if (hae    !== undefined) parts.push(`alt → ${hae} m`)
         return parts.join(' · ')
       },
-      async handler({ id, callsign, affiliation, entity_type, course, speed }) {
-        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u' }
-        const ENTITY_SUFFIX = {
-          ground:            'G',
-          infantry:          'G-U-C-I',
-          armor:             'G-U-C-A',
-          artillery:         'G-U-C-F',
-          engineer:          'G-U-C-E',
-          recon:             'G-U-C-R',
-          hq:                'G-U-H',
-          support:           'G-U-S',
-          helicopter:        'A-M-H',
-          attack_helicopter: 'A-M-H-H',
-          fixed_wing:        'A-M-F',
-          uav:               'A-M-F-Q',
-          surface_vessel:    'S',
-          combatant:         'S-C',
-          submarine:         'U',
-          sof:               'F',
-        }
-
+      async handler({ id, callsign, affiliation, entity_type, course, speed, hae }) {
         const row = featuresStore.features.find(f => f.id === id)
         const existing = row ? JSON.parse(row.properties) : {}
 
         const patch = {}
-        if (callsign  !== undefined) patch.callsign = callsign
-        if (course    !== undefined) patch.course   = course
-        if (speed     !== undefined) patch.speed    = speed
+        if (callsign !== undefined) patch.callsign = callsign
+        if (course   !== undefined) patch.course   = course
+        if (speed    !== undefined) patch.speed    = speed
+        if (hae      !== undefined) patch.hae      = hae
 
         // Resolve affiliation — translate word → single char, fall back to existing.
-        let affilCode = existing.affiliation ?? 'g'
+        let affilCode = existing.affiliation ?? DEFAULT_AFFIL_CODE
         if (affiliation !== undefined) {
           affilCode = AFFIL_MAP[affiliation] ?? affilCode
           patch.affiliation = affilCode
@@ -560,6 +830,187 @@ export function mapTools({ featuresStore, flyToGeometry }) {
         }
 
         await featuresStore.updateFeatureProperties(id, patch)
+        return { success: true }
+      }
+    },
+
+    {
+      name: 'map_update_shape',
+      description: 'Update shape-specific geometric fields on an existing shape (circle, ellipse, sector, box) and/or common rendering fields (opacity). The tool validates fields against the shape type and rebuilds the geometry from the helpers — supply only the fields that are changing. Use map_move_feature for translation, map_update_feature_color for color, and map_rename_feature for name.',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', description: 'Feature id from map_list_features.' },
+          opacity:      { type: 'number', minimum: 0, maximum: 1, description: 'Fill opacity 0–1. Applies to any fillable shape.' },
+          radius:       { type: 'number', description: 'Radius in meters. Circle & sector only.' },
+          radiusMajor:  { type: 'number', description: 'Semi-major-axis radius in meters. Ellipse only.' },
+          radiusMinor:  { type: 'number', description: 'Semi-minor-axis radius in meters. Ellipse only.' },
+          rotationDeg:  { type: 'number', description: 'Rotation in degrees. Ellipse (as "rotation") and box (as "rotationDeg").' },
+          startAngle:   { type: 'number', description: 'Start bearing in degrees (0=N, clockwise). Sector only.' },
+          endAngle:     { type: 'number', description: 'End bearing in degrees. Sector only.' }
+        },
+        required: ['id']
+      },
+      previewRender({ id, opacity, radius, radiusMajor, radiusMinor, rotationDeg, startAngle, endAngle }) {
+        const parts = [`Shape #${id}`]
+        if (radius       !== undefined) parts.push(`radius → ${radius} m`)
+        if (radiusMajor  !== undefined) parts.push(`major → ${radiusMajor} m`)
+        if (radiusMinor  !== undefined) parts.push(`minor → ${radiusMinor} m`)
+        if (rotationDeg  !== undefined) parts.push(`rot → ${rotationDeg}°`)
+        if (startAngle   !== undefined) parts.push(`start → ${startAngle}°`)
+        if (endAngle     !== undefined) parts.push(`end → ${endAngle}°`)
+        if (opacity      !== undefined) parts.push(`opacity → ${Math.round(opacity * 100)}%`)
+        return parts.join(' · ')
+      },
+      async handler({ id, opacity, radius, radiusMajor, radiusMinor, rotationDeg, startAngle, endAngle }) {
+        const row = featuresStore.features.find(f => f.id === id)
+        if (!row) return { error: `Feature ${id} not found.` }
+        const existing = JSON.parse(row.properties)
+
+        // Reject shape-specific fields that don't apply to this feature type.
+        const validators = {
+          circle:  ['radius'],
+          ellipse: ['radiusMajor', 'radiusMinor', 'rotationDeg'],
+          sector:  ['radius', 'startAngle', 'endAngle'],
+          box:     ['rotationDeg'],
+        }
+        const provided = { radius, radiusMajor, radiusMinor, rotationDeg, startAngle, endAngle }
+        const allowed  = new Set(validators[row.type] ?? [])
+        for (const [field, val] of Object.entries(provided)) {
+          if (val !== undefined && !allowed.has(field)) {
+            return { error: `Field "${field}" does not apply to feature type "${row.type}". Allowed: ${[...allowed].join(', ') || '(none — use map_move_feature / map_update_feature_color / map_rename_feature)'}.` }
+          }
+        }
+
+        const nextProps = { ...existing }
+        if (opacity !== undefined) nextProps.opacity = opacity
+
+        let geometry = null
+        switch (row.type) {
+          case 'circle': {
+            if (radius !== undefined) nextProps.radius = radius
+            geometry = circlePolygon(nextProps.center, nextProps.radius)
+            break
+          }
+          case 'ellipse': {
+            if (radiusMajor !== undefined) nextProps.radiusMajor = radiusMajor
+            if (radiusMinor !== undefined) nextProps.radiusMinor = radiusMinor
+            if (rotationDeg !== undefined) nextProps.rotation    = rotationDeg
+            geometry = ellipsePolygon(
+              nextProps.center,
+              nextProps.radiusMajor,
+              nextProps.radiusMinor,
+              nextProps.rotation ?? 0
+            )
+            break
+          }
+          case 'sector': {
+            if (radius     !== undefined) nextProps.radius     = radius
+            if (startAngle !== undefined) nextProps.startAngle = startAngle
+            if (endAngle   !== undefined) nextProps.endAngle   = endAngle
+            geometry = sectorPolygon(
+              nextProps.center,
+              nextProps.radius,
+              nextProps.startAngle,
+              nextProps.endAngle
+            )
+            break
+          }
+          case 'box': {
+            if (rotationDeg !== undefined) nextProps.rotationDeg = rotationDeg
+            geometry = rotatedBoxPolygon(nextProps.sw, nextProps.ne, nextProps.rotationDeg ?? 0)
+            break
+          }
+          default: {
+            // Non-rebuilt types (point, line, polygon, route): only opacity is valid here.
+            if (opacity === undefined) {
+              return { error: `Feature type "${row.type}" has no shape-specific fields. Use map_move_feature, map_update_feature_color, or map_rename_feature.` }
+            }
+            await featuresStore.updateFeatureProperties(id, { opacity })
+            return { success: true }
+          }
+        }
+
+        await featuresStore.updateFeature(id, geometry, nextProps)
+        return { success: true }
+      }
+    },
+
+    {
+      name: 'map_move_feature',
+      description: 'Translate an EXISTING feature (point, track, shape, line, route) by a bearing and distance. Use this ONLY when the user explicitly asks to move, relocate, shift, or reposition a feature that is already on the map. Do NOT call this when the user asks to place, create, add, or draw a new feature near/west of/east of/etc. an existing one — for that, call map_offset_coordinate first to compute the new coordinate, then call the appropriate create/draw tool. Also do NOT create a new feature and delete the old one. Convert units to meters (1 mi = 1609.344 m, 1 nm = 1852 m, 1 km = 1000 m) and direction to a compass bearing (N=0, E=90, S=180, W=270, NE=45, etc.).',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', description: 'Feature id from map_list_features.' },
+          bearing: { type: 'number', description: 'Compass bearing in degrees (0=N, 90=E, 180=S, 270=W).' },
+          distanceMeters: { type: 'number', description: 'Distance to move, in meters. Always convert from the user\'s units.' }
+        },
+        required: ['id', 'bearing', 'distanceMeters']
+      },
+      previewRender({ id, bearing, distanceMeters }) {
+        return `Move feature #${id} · ${bearing}° · ${distanceMeters} m`
+      },
+      async handler({ id, bearing, distanceMeters }) {
+        const row = featuresStore.features.find(f => f.id === id)
+        if (!row) return { error: `Feature ${id} not found.` }
+
+        const props = JSON.parse(row.properties)
+        const shift = (pt) => destinationPoint(pt, distanceMeters, bearing)
+        let geometry
+        const nextProps = { ...props }
+
+        switch (row.type) {
+          case 'point':
+          case 'manual-track': {
+            const src = JSON.parse(row.geometry).coordinates
+            geometry = { type: 'Point', coordinates: shift(src) }
+            break
+          }
+          case 'circle': {
+            const newCenter = shift(props.center)
+            geometry = circlePolygon(newCenter, props.radius)
+            nextProps.center = newCenter
+            break
+          }
+          case 'ellipse': {
+            const newCenter = shift(props.center)
+            geometry = ellipsePolygon(newCenter, props.radiusMajor, props.radiusMinor, props.rotation ?? 0)
+            nextProps.center = newCenter
+            break
+          }
+          case 'sector': {
+            const newCenter = shift(props.center)
+            geometry = sectorPolygon(newCenter, props.radius, props.startAngle, props.endAngle)
+            nextProps.center = newCenter
+            break
+          }
+          case 'box': {
+            const newSw = shift(props.sw)
+            const newNe = shift(props.ne)
+            geometry = rotatedBoxPolygon(newSw, newNe, props.rotationDeg ?? 0)
+            nextProps.sw = newSw
+            nextProps.ne = newNe
+            break
+          }
+          case 'polygon': {
+            const src = JSON.parse(row.geometry)
+            geometry = { type: 'Polygon', coordinates: src.coordinates.map(ring => ring.map(shift)) }
+            break
+          }
+          case 'line':
+          case 'route': {
+            const src = JSON.parse(row.geometry)
+            geometry = { type: 'LineString', coordinates: src.coordinates.map(shift) }
+            break
+          }
+          default:
+            return { error: `Moving features of type "${row.type}" is not supported.` }
+        }
+
+        await featuresStore.updateFeature(id, geometry, nextProps)
         return { success: true }
       }
     },
@@ -605,6 +1056,78 @@ export function mapTools({ featuresStore, flyToGeometry }) {
         if (!row) return { error: `Feature ${id} not found.` }
         flyToGeometry(JSON.parse(row.geometry))
         return { success: true }
+      }
+    },
+
+    {
+      name: 'map_fly_to',
+      description: 'Pan and zoom the map to a named geographic location (city, state, country, landmark, region). Use your own geographic knowledge to resolve the name to [longitude, latitude] and pick a sensible zoom level: landmark/neighborhood ~14, city ~11, state/province ~6, country ~4, continent ~2. Call this whenever the user asks to go to / show / center / pan to / move to a named place.',
+      readonly: true,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          coordinate: {
+            type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
+            description: '[longitude, latitude] of the place.'
+          },
+          zoom: {
+            type: 'number',
+            description: 'MapLibre zoom level. Landmark ~14, city ~11, state ~6, country ~4, continent ~2. Defaults to 11.'
+          },
+          label: {
+            type: 'string',
+            description: 'Human-readable place name (for logging/context; not rendered on the map).'
+          }
+        },
+        required: ['coordinate']
+      },
+      async handler({ coordinate, zoom }) {
+        if (!flyTo) return { error: 'flyTo not available.' }
+        flyTo({ coordinate, zoom })
+        return { success: true }
+      }
+    },
+
+    // ── Basemap ──────────────────────────────────────────────────────────────
+
+    {
+      name: 'map_list_basemaps',
+      description: 'List the online basemap styles the user can switch to (e.g. Street, Dark, Light, Satellite). Also reports which one is currently active. Use this whenever the user says "change the map" without specifying which — present the available options and ask them to pick.',
+      readonly: true,
+      inputSchema: { type: 'object', properties: {}, required: [] },
+      async handler() {
+        const activeId = settingsStore?.selectedBasemap ?? null
+        return {
+          activeId,
+          basemaps: BASEMAPS.map(b => ({ id: b.id, name: b.name, active: b.id === activeId }))
+        }
+      }
+    },
+
+    {
+      name: 'map_set_basemap',
+      description: 'Switch the map to a specific online basemap. Accepts the basemap id (from map_list_basemaps) — e.g. "arcgis-satellite", "arcgis-dark", "arcgis-light", "osm". When the user names a style loosely ("satellite", "dark mode", "streets"), map it to the matching id.',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            enum: BASEMAPS.map(b => b.id),
+            description: 'Basemap id to activate.'
+          }
+        },
+        required: ['id']
+      },
+      previewRender({ id }) {
+        const match = BASEMAPS.find(b => b.id === id)
+        return `Basemap → ${match?.name ?? id}`
+      },
+      async handler({ id }) {
+        if (!switchBasemap) return { error: 'switchBasemap not available.' }
+        if (!BASEMAPS.some(b => b.id === id)) return { error: `Unknown basemap "${id}".` }
+        await switchBasemap(id)
+        return { success: true, id }
       }
     }
 

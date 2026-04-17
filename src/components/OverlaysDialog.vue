@@ -25,7 +25,6 @@ const open = computed({
 const SECTION_DEFS = [
   { label: 'Shapes', types: new Set(['point', 'line', 'polygon', 'box', 'circle', 'ellipse', 'sector', 'image']) },
   { label: 'Routes', types: new Set(['route']) },
-  { label: 'Tracks', types: new Set(['manual-track']) },
 ]
 
 const filteredItems = computed(() => {
@@ -61,12 +60,15 @@ watch(open, (isOpen) => {
   selected.value    = []
   filterQuery.value = ''
   // Pre-parse properties once on open so display helpers don't re-parse
-  // on every render / filter keystroke.
-  items.value = featuresStore.features.map(row => {
-    let parsedProps = {}
-    try { parsedProps = JSON.parse(row.properties) } catch {}
-    return { ...row, parsedProps }
-  })
+  // on every render / filter keystroke. Manual tracks are managed via the
+  // dedicated track list, not this overlay manager.
+  items.value = featuresStore.features
+    .filter(row => row.type !== 'manual-track')
+    .map(row => {
+      let parsedProps = {}
+      try { parsedProps = JSON.parse(row.properties) } catch {}
+      return { ...row, parsedProps }
+    })
 })
 
 // ── Actions ───────────────────────────────────────────────────────────────────
