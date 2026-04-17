@@ -17,18 +17,25 @@ pub fn list_plugin_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         return Ok(vec![]);
     }
 
-    let mut files: Vec<String> = std::fs::read_dir(&plugins_dir)
+    let mut files: Vec<String> = vec![];
+
+    for entry in std::fs::read_dir(&plugins_dir)
         .map_err(|e| format!("Failed to read plugins directory: {e}"))?
         .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("js") {
-                Some(path.to_string_lossy().into_owned())
-            } else {
-                None
+    {
+        let path = entry.path();
+        if path.is_dir() {
+            // Directory-based plugin: must contain an index.js entry point.
+            let index = path.join("index.js");
+            if index.exists() {
+                files.push(index.to_string_lossy().into_owned());
             }
-        })
-        .collect();
+        } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("js") {
+            // Single-file plugin at the top level.
+            files.push(path.to_string_lossy().into_owned());
+        }
+    }
+
     files.sort();
     Ok(files)
 }

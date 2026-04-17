@@ -4,12 +4,15 @@
 
 ## Quick start
 
-1. Write a `.js` file following the **Plugin contract** below.
-2. Drop it into the Ares plugins folder (see **Plugin directory** below).
-3. Launch (or restart) Ares.
-4. Open **Settings → Plugins**, find your plugin, and enable it.
+1. Create a directory named after your plugin (e.g. `my-plugin/`).
+2. Inside it, create `index.js` following the **Plugin contract** below. This is the entry point Ares loads.
+3. Drop the directory into the Ares plugins folder (see **Plugin directory** below).
+4. Launch (or restart) Ares.
+5. Open **Settings → Plugins**, find your plugin, and enable it.
 
 A toolbar button or other registered UI appears immediately on enable, and is torn down cleanly on disable — no restart needed for toggles.
+
+> **Single-file plugins** (a bare `.js` file directly in the plugins folder, no directory) are also supported as a convenience for simple scripts.
 
 ---
 
@@ -21,7 +24,20 @@ A toolbar button or other registered UI appears immediately on enable, and is to
 | Windows  | `%APPDATA%\com.ares.app\plugins\` |
 | Linux    | `~/.config/com.ares.app/plugins/` |
 
-The directory is created automatically on first launch. A `README.txt` is seeded there pointing to this document. Only `.js` files are scanned; other files are ignored.
+The directory is created automatically on first launch with a `README.txt` pointing to this document.
+
+**Expected layout:**
+```
+plugins/
+  my-plugin/          ← plugin directory
+    index.js          ← entry point (required)
+    helpers.js        ← any other files your index.js references*
+  another-plugin/
+    index.js
+  simple-script.js    ← single-file plugin (also supported)
+```
+
+\* See the **Self-contained requirement** below — `index.js` cannot use ES `import` to load sibling files at runtime. Bundle everything into `index.js` before dropping the directory into the plugins folder.
 
 ---
 
@@ -124,7 +140,7 @@ api.log(...args)
 
 ## Example plugin
 
-A working example lives at `examples/plugins/hello-world.js`. It adds a toolbar button that logs the current feature and track counts and flies to the first feature on the map.
+A working example lives at `examples/plugins/hello-world/index.js`. It adds a toolbar button that logs the current feature and track counts and flies to the first feature on the map. To install it, copy the `hello-world/` directory into your plugins folder.
 
 ```js
 export default {
