@@ -17,14 +17,9 @@ export const useScenesStore = defineStore('scenes', () => {
   }
 
   async function loadScenes() {
-    appStore.beginLoad()
-    try {
-      const db = await getDb()
-      const rows = await db.select('SELECT * FROM scenes ORDER BY order_idx, created_at')
-      scenes.value = rows.map(r => ({ ...r, cards: JSON.parse(r.cards || '[]') }))
-    } finally {
-      appStore.endLoad()
-    }
+    const db = await getDb()
+    const rows = await db.select('SELECT * FROM scenes ORDER BY order_idx, created_at')
+    scenes.value = rows.map(r => ({ ...r, cards: JSON.parse(r.cards || '[]') }))
   }
 
   async function createScene({ label, icon = 'mdi-view-dashboard-outline' }) {

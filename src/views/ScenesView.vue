@@ -21,10 +21,9 @@ async function createScene() {
   if (!label) return
   creating.value = true
   try {
-    const id = await scenesStore.createScene({ label })
+    await scenesStore.createScene({ label })
     newSceneDialog.value = false
     newSceneLabel.value = ''
-    router.push({ name: 'scene', params: { sceneId: id } })
   } finally {
     creating.value = false
   }
@@ -43,7 +42,7 @@ function cancelCreate() {
     <div class="scenes-header">
       <div class="d-flex align-center ga-2">
         <v-icon size="20" class="text-medium-emphasis">mdi-view-dashboard-outline</v-icon>
-        <span class="text-body-2 font-weight-medium">Scenes</span>
+        <span class="text-body-2 font-weight-medium">My Scenes</span>
       </div>
       <v-btn
         size="small"
