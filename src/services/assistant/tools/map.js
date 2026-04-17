@@ -369,7 +369,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_create_track',
-      description: 'Place a manual track (unit, contact, or position) on the map at a coordinate. Infer affiliation from user phrasing: "friendly track" → affiliation="friendly"; "hostile contact" → affiliation="hostile"; "neutral" → affiliation="neutral"; "unknown contact" → affiliation="unknown". Omit affiliation (or use "generic") when the user has not specified one.',
+      description: 'Place a manual track on the map. Infer affiliation from user phrasing ("friendly" → affiliation="friendly", "hostile" → "hostile", etc.). Infer entity_type from what the user describes ("tank" → "armor", "helicopter" → "helicopter", "ship" → "surface_vessel"). Omit entity_type if the user has not described a specific entity — the track will render as a plain circle.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -382,23 +382,55 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           affiliation: {
             type: 'string',
             enum: ['friendly', 'hostile', 'neutral', 'unknown', 'generic'],
-            description: 'Tactical affiliation. Use "generic" (or omit) when the user has not indicated a military affiliation.'
+            description: 'Tactical affiliation inferred from user phrasing. Use "generic" when not specified.'
+          },
+          entity_type: {
+            type: 'string',
+            enum: [
+              'ground', 'infantry', 'armor', 'artillery', 'engineer', 'recon', 'hq', 'support',
+              'helicopter', 'attack_helicopter', 'fixed_wing', 'uav',
+              'surface_vessel', 'combatant', 'submarine',
+              'sof'
+            ],
+            description: 'Entity type for MIL-STD-2525 symbology. Infer from context: "tank"→"armor", "helo"→"helicopter", "fighter jet"→"fixed_wing", "ship"→"surface_vessel", "sub"→"submarine". Omit if no entity type was specified.'
           },
           course: { type: 'number', description: 'Heading in degrees (0–360). Defaults to 0.' },
-          speed: { type: 'number', description: 'Speed in knots. Defaults to 0.' }
+          speed:  { type: 'number', description: 'Speed in knots. Defaults to 0.' }
         },
         required: ['coordinate', 'callsign']
       },
-      previewRender({ coordinate, callsign, affiliation }) {
+      previewRender({ coordinate, callsign, affiliation, entity_type }) {
         const [lon, lat] = coordinate
-        const aff = affiliation ?? 'generic'
-        return `Track "${callsign}" (${aff}) at ${lat.toFixed(4)}, ${lon.toFixed(4)}`
+        const aff  = affiliation ?? 'generic'
+        const type = entity_type ? ` · ${entity_type}` : ''
+        return `Track "${callsign}" (${aff}${type}) at ${lat.toFixed(4)}, ${lon.toFixed(4)}`
       },
-      async handler({ coordinate, callsign, affiliation, course = 0, speed = 0 }) {
+      async handler({ coordinate, callsign, affiliation, entity_type, course = 0, speed = 0 }) {
         const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u', generic: 'g' }
+        const ENTITY_SUFFIX = {
+          ground:            'G',
+          infantry:          'G-U-C-I',
+          armor:             'G-U-C-A',
+          artillery:         'G-U-C-F',
+          engineer:          'G-U-C-E',
+          recon:             'G-U-C-R',
+          hq:                'G-U-H',
+          support:           'G-U-S',
+          helicopter:        'A-M-H',
+          attack_helicopter: 'A-M-H-H',
+          fixed_wing:        'A-M-F',
+          uav:               'A-M-F-Q',
+          surface_vessel:    'S',
+          combatant:         'S-C',
+          submarine:         'U',
+          sof:               'F',
+        }
         const affilCode = AFFIL_MAP[affiliation] ?? 'g'
-        const geometry = { type: 'Point', coordinates: coordinate }
-        const id = await featuresStore.addFeature('manual-track', geometry, { callsign, affiliation: affilCode, course, speed, hae: 0 })
+        const cotType   = entity_type ? `a-${affilCode}-${ENTITY_SUFFIX[entity_type]}` : null
+        const geometry  = { type: 'Point', coordinates: coordinate }
+        const id = await featuresStore.addFeature('manual-track', geometry, {
+          callsign, affiliation: affilCode, cotType, course, speed, hae: 0
+        })
         return { id, success: true }
       }
     },
