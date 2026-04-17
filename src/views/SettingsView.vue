@@ -14,7 +14,7 @@ const activeTab = ref(TABS[0].id)
 
 const ASSISTANT_PROVIDERS = [
   { title: 'Anthropic', value: 'anthropic' },
-  { title: 'OpenAI (coming soon)', value: 'openai', props: { disabled: true } }
+  { title: 'OpenAI', value: 'openai' }
 ]
 
 const assistantProvider = computed({
@@ -96,7 +96,11 @@ const showApiKey = ref(false)
             <div class="setting-row">
               <div class="setting-info">
                 <div class="text-body-2">Model</div>
-                <div class="text-caption text-medium-emphasis">Model identifier sent to the provider API.</div>
+                <div class="text-caption text-medium-emphasis">
+                  Model identifier sent to the provider API.
+                  <span v-if="assistantProvider === 'anthropic'">e.g. claude-sonnet-4-6, claude-opus-4-7</span>
+                  <span v-else-if="assistantProvider === 'openai'">e.g. gpt-4o, gpt-4o-mini</span>
+                </div>
               </div>
               <v-text-field
                 v-model="assistantModel"
