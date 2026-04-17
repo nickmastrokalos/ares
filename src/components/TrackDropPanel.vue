@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
+import TrackTypePicker from './TrackTypePicker.vue'
 
 const props = defineProps({
-  placing: { type: String, default: null }
+  placing: { default: null }
 })
 
 const emit = defineEmits(['close', 'set-placing'])
@@ -19,6 +20,31 @@ const AFFILIATIONS = [
   { key: 'u', label: 'Unknown',  color: '#ffeb3b' },
   { key: 'h', label: 'Hostile',  color: '#f44336' }
 ]
+
+const selectedAffil   = ref(null)
+const selectedCotType = ref(null)
+
+// Reset local state when placement is cancelled externally (e.g. Escape key).
+watch(() => props.placing, (val) => {
+  if (!val) {
+    selectedAffil.value   = null
+    selectedCotType.value = null
+  }
+})
+
+function selectAffil(key) {
+  if (selectedAffil.value !== key) {
+    // Switching affiliation cancels any active placement.
+    if (props.placing) emit('set-placing', null)
+    selectedCotType.value = null
+  }
+  selectedAffil.value = key
+}
+
+function onTypeSelected(cotType) {
+  selectedCotType.value = cotType
+  emit('set-placing', { affiliation: selectedAffil.value, cotType })
+}
 
 onMounted(() => {
   pos.value = { x: 12, y: 80 }
@@ -54,16 +80,34 @@ onMounted(() => {
 
     <!-- Affiliation list -->
     <div class="panel-body">
+      <div class="section-label">Affiliation</div>
+
       <div
         v-for="affil in AFFILIATIONS"
         :key="affil.key"
         class="affil-row"
-        :class="{ 'affil-row--active': placing === affil.key }"
-        @click="emit('set-placing', affil.key)"
+        :class="{ 'affil-row--active': selectedAffil === affil.key }"
+        @click="selectAffil(affil.key)"
       >
         <span class="affil-dot" :style="{ backgroundColor: affil.color }" />
         <span class="affil-label">{{ affil.label }}</span>
       </div>
+
+      <div class="divider" />
+
+      <!-- Type picker -->
+      <div class="section-label">
+        Type
+        <span v-if="!selectedAffil" class="section-hint">— select affiliation first</span>
+      </div>
+
+      <TrackTypePicker
+        :affiliation="selectedAffil ?? 'u'"
+        :model-value="selectedCotType"
+        :disabled="!selectedAffil"
+        @update:model-value="onTypeSelected"
+        @pointerdown.stop
+      />
 
       <div v-if="placing" class="hint">Click map to place…</div>
     </div>
@@ -73,7 +117,7 @@ onMounted(() => {
 <style scoped>
 .track-drop-panel {
   position: absolute;
-  width: 180px;
+  width: 240px;
   background: rgba(var(--v-theme-surface), 0.95);
   border: 1px solid rgb(var(--v-theme-surface-variant));
   border-radius: 4px;
@@ -105,15 +149,36 @@ onMounted(() => {
 }
 
 .panel-body {
-  padding: 4px 0;
+  padding: 6px 8px 8px;
+}
+
+.section-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(var(--v-theme-on-surface), 0.38);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.section-hint {
+  font-size: 8px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: rgba(var(--v-theme-on-surface), 0.28);
 }
 
 .affil-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 5px 6px;
+  border-radius: 3px;
   cursor: pointer;
+  margin-bottom: 2px;
 }
 
 .affil-row:hover {
@@ -138,12 +203,18 @@ onMounted(() => {
   color: rgba(var(--v-theme-on-surface), 0.87);
 }
 
+.divider {
+  height: 1px;
+  background: rgb(var(--v-theme-surface-variant));
+  margin: 6px 0;
+}
+
 .hint {
   font-size: 10px;
   color: rgba(var(--v-theme-on-surface), 0.45);
-  padding: 2px 10px 4px;
+  padding: 5px 0 0;
   letter-spacing: 0.02em;
   border-top: 1px solid rgb(var(--v-theme-surface-variant));
-  margin-top: 2px;
+  margin-top: 6px;
 }
 </style>

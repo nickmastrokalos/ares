@@ -14,7 +14,12 @@ const DEFAULTS = {
   coordinateFormat: 'dd',
   trackBreadcrumbs: false,
   trackBreadcrumbLength: 30,  // seconds
-  basemapOpacity: 1.0
+  milStdSymbology: false,
+  basemapOpacity: 1.0,
+  enabledPlugins: [],         // plugin ids the operator has opted into
+  assistantProvider: 'anthropic',
+  assistantModel: 'claude-sonnet-4-6',
+  assistantApiKey: ''
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -27,7 +32,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const coordinateFormat = ref(DEFAULTS.coordinateFormat)
   const trackBreadcrumbs = ref(DEFAULTS.trackBreadcrumbs)
   const trackBreadcrumbLength = ref(DEFAULTS.trackBreadcrumbLength)
+  const milStdSymbology = ref(DEFAULTS.milStdSymbology)
   const basemapOpacity = ref(DEFAULTS.basemapOpacity)
+  const enabledPlugins = ref([...DEFAULTS.enabledPlugins])
+  const assistantProvider = ref(DEFAULTS.assistantProvider)
+  const assistantModel = ref(DEFAULTS.assistantModel)
+  const assistantApiKey = ref(DEFAULTS.assistantApiKey)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
   // without a growing switch statement as we add more settings.
@@ -39,7 +49,12 @@ export const useSettingsStore = defineStore('settings', () => {
     coordinateFormat,
     trackBreadcrumbs,
     trackBreadcrumbLength,
-    basemapOpacity
+    milStdSymbology,
+    basemapOpacity,
+    enabledPlugins,
+    assistantProvider,
+    assistantModel,
+    assistantApiKey
   }
 
   // Promise cache: `load()` may be called from multiple places during boot
@@ -108,7 +123,12 @@ export const useSettingsStore = defineStore('settings', () => {
     coordinateFormat,
     trackBreadcrumbs,
     trackBreadcrumbLength,
+    milStdSymbology,
     basemapOpacity,
+    enabledPlugins,
+    assistantProvider,
+    assistantModel,
+    assistantApiKey,
     load,
     setSetting,
     addCotListener,

@@ -16,6 +16,32 @@ const routes = [
     name: 'map',
     component: MapView,
     props: route => ({ missionId: Number(route.params.missionId) })
+  },
+  {
+    path: '/hub',
+    name: 'hub',
+    component: () => import('@/views/ControlHubView.vue')
+  },
+  {
+    path: '/configuration',
+    name: 'config',
+    component: () => import('@/views/ConfigurationView.vue')
+  },
+  {
+    path: '/scenes',
+    name: 'scenes',
+    component: () => import('@/views/ScenesView.vue')
+  },
+  {
+    path: '/scenes/:sceneId',
+    name: 'scene',
+    component: () => import('@/views/SceneEditorView.vue'),
+    props: route => ({ sceneId: String(route.params.sceneId) })
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/SettingsView.vue')
   }
 ]
 

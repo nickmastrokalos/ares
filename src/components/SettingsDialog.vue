@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, inject } from 'vue'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settings'
 import { useTileserverStore } from '@/stores/tileserver'
@@ -20,8 +20,11 @@ const open = computed({
 const TABS = [
   { id: 'display', label: 'Display', icon: 'mdi-monitor-eye' },
   { id: 'tracks',  label: 'Tracks',  icon: 'mdi-radar' },
-  { id: 'maps',    label: 'Maps',    icon: 'mdi-map-outline' }
+  { id: 'maps',    label: 'Maps',    icon: 'mdi-map-outline' },
+  { id: 'plugins', label: 'Plugins', icon: 'mdi-puzzle-outline' }
 ]
+
+const pluginRegistry = inject('pluginRegistry', null)
 const activeTab = ref(TABS[0].id)
 
 // ---- Display settings ----
@@ -67,6 +70,11 @@ function opacityLabel(v) {
 const trackBreadcrumbs = computed({
   get: () => settingsStore.trackBreadcrumbs,
   set: (v) => settingsStore.setSetting('trackBreadcrumbs', v)
+})
+
+const milStdSymbology = computed({
+  get: () => settingsStore.milStdSymbology,
+  set: (v) => settingsStore.setSetting('milStdSymbology', v)
 })
 
 const trackBreadcrumbLength = computed({
@@ -147,9 +155,9 @@ function formatBadge(ts) {
           <div class="pa-4">
             <div class="d-flex align-center">
               <div class="flex-grow-1">
-                <div class="text-body-2">Show feature names on map</div>
+                <div class="text-body-2">Show labels on map</div>
                 <div class="text-caption text-medium-emphasis">
-                  Render each drawing's name as a label on the map.
+                  Render name labels for shapes, routes, tracks, and AIS vessels.
                 </div>
               </div>
               <v-switch
@@ -284,6 +292,24 @@ function formatBadge(ts) {
                 <span>1 min</span>
               </div>
             </div>
+
+            <v-divider class="my-3" />
+
+            <div class="d-flex align-center">
+              <div class="flex-grow-1">
+                <div class="text-body-2">MIL-STD-2525 symbology</div>
+                <div class="text-caption text-medium-emphasis">
+                  Replace track dots with military symbology icons based on CoT type.
+                </div>
+              </div>
+              <v-switch
+                v-model="milStdSymbology"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+              />
+            </div>
           </div>
         </v-window-item>
 
@@ -356,6 +382,44 @@ function formatBadge(ts) {
                   </span>
                 </div>
               </div>
+            </div>
+
+          </div>
+        </v-window-item>
+
+        <!-- ---- Plugins ---- -->
+        <v-window-item value="plugins">
+          <div class="pa-4">
+
+            <div class="d-flex align-center ga-2 mb-3">
+              <v-icon size="14" class="text-medium-emphasis">mdi-alert-outline</v-icon>
+              <span class="text-caption text-medium-emphasis">
+                Only enable plugins from sources you trust. Plugins run with full app permissions.
+              </span>
+            </div>
+
+            <div v-if="!pluginRegistry || pluginRegistry.discoveredPlugins.value.length === 0" class="empty-paths text-caption text-medium-emphasis">
+              No plugins found. Drop <code>.js</code> files into the plugins folder in your app data directory, then restart.
+            </div>
+
+            <div
+              v-for="plugin in pluginRegistry?.discoveredPlugins.value ?? []"
+              :key="plugin.id"
+              class="plugin-row"
+            >
+              <div class="plugin-info">
+                <span class="plugin-name text-body-2">{{ plugin.name }}</span>
+                <span class="plugin-version text-caption text-medium-emphasis">v{{ plugin.version }}</span>
+                <span v-if="plugin.error" class="plugin-error text-caption">{{ plugin.error }}</span>
+              </div>
+              <v-switch
+                :model-value="plugin.active"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+                @update:model-value="(v) => v ? pluginRegistry.enablePlugin(plugin.id) : pluginRegistry.disablePlugin(plugin.id)"
+              />
             </div>
 
           </div>
@@ -434,5 +498,44 @@ function formatBadge(ts) {
 
 .zoom-range {
   margin-left: auto;
+}
+
+/* ---- Plugins tab ---- */
+
+.plugin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+}
+
+.plugin-row:last-child {
+  border-bottom: none;
+}
+
+.plugin-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.plugin-name {
+  font-weight: 500;
+}
+
+.plugin-version {
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.plugin-error {
+  color: rgb(var(--v-theme-error));
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

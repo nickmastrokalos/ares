@@ -31,6 +31,7 @@ const editingName = ref(false)
 const nameInput   = ref('')
 const color      = ref(ROUTE_DEFAULT_COLOR)
 const colorMenu  = ref(false)
+const remarks    = ref('')
 
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
@@ -122,8 +123,21 @@ watch(color, (newColor) => {
 })
 
 watch(routeProps, (props) => {
-  if (props) color.value = (props.color ?? ROUTE_DEFAULT_COLOR).toLowerCase()
+  if (props) {
+    color.value   = (props.color   ?? ROUTE_DEFAULT_COLOR).toLowerCase()
+    remarks.value = props.remarks  ?? ''
+  }
 }, { immediate: true })
+
+async function commitRemarks() {
+  if (!routeRow.value) return
+  if (remarks.value === (routeProps.value?.remarks ?? '')) return
+  await featuresStore.updateFeature(
+    routeRow.value.id,
+    routeGeometry.value,
+    { ...routeProps.value, remarks: remarks.value }
+  )
+}
 
 // ---- Coord format ----
 
@@ -339,6 +353,24 @@ watch(routeRow, (row) => {
         <span class="attr-key">DISTANCE</span>
         <span class="attr-val">{{ totalDistanceLabel }}</span>
       </div>
+
+      <div class="divider" />
+
+      <!-- Remarks -->
+      <div class="section-label">Remarks</div>
+      <v-textarea
+        v-model="remarks"
+        placeholder="None"
+        density="compact"
+        variant="plain"
+        hide-details
+        auto-grow
+        rows="1"
+        max-rows="4"
+        class="remarks-field"
+        @blur="commitRemarks"
+        @pointerdown.stop
+      />
 
       <div class="divider" />
 
@@ -566,5 +598,12 @@ watch(routeRow, (row) => {
 .swatch-option.selected {
   outline: 2px solid rgb(var(--v-theme-primary));
   outline-offset: 2px;
+}
+
+.remarks-field :deep(.v-field__input) {
+  font-size: 11px;
+  min-height: unset;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 </style>

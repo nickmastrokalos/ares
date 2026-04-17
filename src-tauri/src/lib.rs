@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+mod assistant;
 mod cot;
 mod listeners;
 mod migrations;
+mod plugins;
+mod scenes;
 mod tileserver;
 
 use listeners::ListenerManager;
@@ -167,6 +170,10 @@ pub fn run() {
             add_tile_path,
             remove_tile_path,
             list_tilesets,
+            plugins::list_plugin_files,
+            plugins::read_plugin_file,
+            scenes::commands::scene_data_fetch_batch,
+            assistant::commands::assistant_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

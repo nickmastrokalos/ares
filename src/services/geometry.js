@@ -177,6 +177,42 @@ export function geometryBounds(geometry) {
   return [[west, south], [east, north]]
 }
 
+// Ray-casting point-in-ring test. Ring is an array of [lng, lat]; polygon
+// closure is handled implicitly (any closing duplicate coord is harmless).
+// Works in planar lon/lat space — adequate for features on a single continent
+// where rhumb vs great-circle differences are negligible at the scales the
+// app draws. Not correct across the antimeridian.
+export function pointInRing([x, y], ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]
+    const [xj, yj] = ring[j]
+    const intersects =
+      ((yi > y) !== (yj > y)) &&
+      (x < ((xj - xi) * (y - yi)) / (yj - yi || Number.EPSILON) + xi)
+    if (intersects) inside = !inside
+  }
+  return inside
+}
+
+// Point-in-polygon for GeoJSON Polygon / MultiPolygon. Honors holes.
+export function pointInPolygon(point, geometry) {
+  if (!geometry) return false
+  if (geometry.type === 'Polygon') {
+    const [outer, ...holes] = geometry.coordinates
+    if (!pointInRing(point, outer)) return false
+    return !holes.some(h => pointInRing(point, h))
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.some(poly => {
+      const [outer, ...holes] = poly
+      if (!pointInRing(point, outer)) return false
+      return !holes.some(h => pointInRing(point, h))
+    })
+  }
+  return false
+}
+
 function collectCoords(geometry) {
   if (!geometry?.coordinates) return []
   switch (geometry.type) {

@@ -35,27 +35,72 @@ impl ListenerManager {
             // Detect IPv4 multicast (224.0.0.0/4) and handle separately.
             let socket = match address.parse::<std::net::Ipv4Addr>() {
                 Ok(group) if group.is_multicast() => {
-                    // Bind to 0.0.0.0:port — binding to the multicast address
-                    // itself is not portable and not required.
-                    let std_sock = match std::net::UdpSocket::bind(
-                        std::net::SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, port),
+                    // Build socket via socket2 so we can set SO_REUSEADDR
+                    // *before* bind — required on macOS for multicast, harmless
+                    // elsewhere.
+                    let sock2 = match socket2::Socket::new(
+                        socket2::Domain::IPV4,
+                        socket2::Type::DGRAM,
+                        Some(socket2::Protocol::UDP),
                     ) {
                         Ok(s) => s,
                         Err(e) => {
-                            eprintln!("[cot] UDP bind 0.0.0.0:{port} failed: {e}");
+                            eprintln!("[cot] UDP socket create failed: {e}");
                             return;
                         }
                     };
-                    if let Err(e) = std_sock.set_nonblocking(true) {
-                        eprintln!("[cot] UDP set_nonblocking failed: {e}");
+                    if let Err(e) = sock2.set_reuse_address(true) {
+                        eprintln!("[cot] UDP set_reuse_address failed: {e}");
                         return;
                     }
-                    if let Err(e) =
-                        std_sock.join_multicast_v4(&group, &std::net::Ipv4Addr::UNSPECIFIED)
-                    {
-                        eprintln!("[cot] UDP join_multicast_v4 {group} failed: {e}");
+                    // macOS also needs SO_REUSEPORT for multicast.
+                    #[cfg(not(windows))]
+                    if let Err(e) = sock2.set_reuse_port(true) {
+                        eprintln!("[cot] UDP set_reuse_port failed (non-fatal): {e}");
+                    }
+                    let bind_addr: socket2::SockAddr =
+                        std::net::SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, port).into();
+                    if let Err(e) = sock2.bind(&bind_addr) {
+                        eprintln!("[cot] UDP bind 0.0.0.0:{port} failed: {e}");
                         return;
                     }
+                    sock2.set_nonblocking(true).ok();
+
+                    // Join the multicast group on every local IPv4 interface so
+                    // traffic arriving on any NIC is received. Fall back to
+                    // UNSPECIFIED (OS default) if enumeration fails.
+                    let local_v4: Vec<std::net::Ipv4Addr> = if_addrs::get_if_addrs()
+                        .map(|ifaces| {
+                            ifaces
+                                .into_iter()
+                                .filter_map(|iface| match iface.addr.ip() {
+                                    std::net::IpAddr::V4(v4) if !v4.is_loopback() => Some(v4),
+                                    _ => None,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    if local_v4.is_empty() {
+                        // Fallback: let the OS pick the default interface.
+                        if let Err(e) = sock2.join_multicast_v4(
+                            &group,
+                            &std::net::Ipv4Addr::UNSPECIFIED,
+                        ) {
+                            eprintln!("[cot] UDP join_multicast_v4 {group} on default failed: {e}");
+                            return;
+                        }
+                        eprintln!("[cot] joined multicast {group} on default interface");
+                    } else {
+                        for iface in &local_v4 {
+                            match sock2.join_multicast_v4(&group, iface) {
+                                Ok(()) => eprintln!("[cot] joined multicast {group} on {iface}"),
+                                Err(e) => eprintln!("[cot] join_multicast_v4 {group} on {iface} failed (non-fatal): {e}"),
+                            }
+                        }
+                    }
+
+                    let std_sock: std::net::UdpSocket = sock2.into();
                     match tokio::net::UdpSocket::from_std(std_sock) {
                         Ok(s) => {
                             eprintln!(

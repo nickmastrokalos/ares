@@ -1,6 +1,7 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { useFeaturesStore } from '@/stores/features'
+import { useSettingsStore } from '@/stores/settings'
 
 const PREVIEW_SOURCE  = 'route-preview'
 const PREVIEW_LAYER   = 'route-preview-line'
@@ -23,8 +24,9 @@ function wpLabel(index, total) {
   return `WP ${index}`
 }
 
-export function useMapRoute(getMap) {
+export function useMapRoute(getMap, dispatcher = null) {
   const featuresStore = useFeaturesStore()
+  const settingsStore = useSettingsStore()
 
   // ---- State ----
 
@@ -143,7 +145,8 @@ export function useMapRoute(getMap) {
         'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
         'text-size': 10,
         'text-anchor': 'top',
-        'text-offset': [0, 0.8]
+        'text-offset': [0, 0.8],
+        'visibility': settingsStore.showFeatureLabels ? 'visible' : 'none'
       },
       paint: {
         'text-color': '#e0e0e0',
@@ -478,16 +481,30 @@ export function useMapRoute(getMap) {
     ensureRouteSource(map)
     syncSources()
 
-    // Click on route line or waypoint dot → open panel.
-    routeClickHandler = (e) => {
-      if (routing.value || appending.value) return
-      const hits = map.queryRenderedFeatures(e.point, { layers: [LINE_LAYER, DOT_LAYER] })
-      if (hits.length > 0) {
-        const id = hits[0].properties._dbId
-        openRoutePanel(id)
+    // Register with the central click dispatcher for overlap disambiguation.
+    if (dispatcher) {
+      dispatcher.register('routes', {
+        layers: [LINE_LAYER, DOT_LAYER],
+        action: (f) => openRoutePanel(f.properties._dbId),
+        suppress: () => routing.value || appending.value,
+        label: (f) => ({
+          text: f.properties.name || 'Route',
+          subtitle: 'Route',
+          icon: 'mdi-routes'
+        }),
+        dedupeKey: (f) => f.properties._dbId
+      })
+    } else {
+      routeClickHandler = (e) => {
+        if (routing.value || appending.value) return
+        const hits = map.queryRenderedFeatures(e.point, { layers: [LINE_LAYER, DOT_LAYER] })
+        if (hits.length > 0) {
+          const id = hits[0].properties._dbId
+          openRoutePanel(id)
+        }
       }
+      map.on('click', routeClickHandler)
     }
-    map.on('click', routeClickHandler)
 
     // Pointer cursor on hover.
     map.on('mouseenter', LINE_LAYER, () => {
@@ -518,6 +535,17 @@ export function useMapRoute(getMap) {
       const existingIds = new Set(features.filter(f => f.type === 'route').map(f => f.id))
       const next = new Set([...openRouteIds.value].filter(id => existingIds.has(id)))
       if (next.size !== openRouteIds.value.size) openRouteIds.value = next
+    }
+  )
+
+  // ---- Label visibility ----
+
+  watch(
+    () => settingsStore.showFeatureLabels,
+    (show) => {
+      const map = getMap()
+      if (!map?.getLayer(LABEL_LAYER)) return
+      map.setLayoutProperty(LABEL_LAYER, 'visibility', show ? 'visible' : 'none')
     }
   )
 
@@ -557,6 +585,7 @@ export function useMapRoute(getMap) {
   // ---- Cleanup ----
 
   onUnmounted(() => {
+    if (dispatcher) dispatcher.unregister('routes')
     removeHandlers()
     cancelAppend()
     removeBuildMarkers()

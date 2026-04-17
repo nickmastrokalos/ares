@@ -25,17 +25,70 @@ src/
     vuetify.js     # Vuetify configuration (theme, defaults)
     database.js    # SQLite database singleton (getDb)
     store.js       # Key-value store singleton (getStore)
-  views/           # Page-level components (one per route)
-    HomeView.vue   # Mission picker — the app's landing page
-    MapView.vue    # Map page, mounted at /map/:missionId
-  stores/          # Pinia stores (one file per domain)
-    app.js         # Global app state
-    tracks.js      # CoT track state and Tauri event listener
-  composables/     # Reusable composition functions (useX.js)
-  services/        # Pure modules (geometry, parsers, etc.) with no Vue deps
-  components/      # Reusable Vue components
+  views/                  # Page-level components (one per route)
+    HomeView.vue          # Mission picker — the app's landing page
+    MapView.vue           # Map page, mounted at /map/:missionId
+    ControlHubView.vue    # Control Hub — containers/sessions management (stub)
+    ConfigurationView.vue # Connector configuration pages (stub)
+    ScenesView.vue        # Scene list — create/open scenes
+    SceneEditorView.vue   # Scene editor — canvas, toolbar, card picker
+  stores/                 # Pinia stores (one file per domain)
+    app.js                # Global app state (loading counter)
+    navigation.js         # Active mission persistence for sidebar
+    tracks.js             # CoT track state and Tauri event listener
+    cardTypes.js          # Static card type registry + Pinia getters
+    scenes.js             # CRUD for scenes SQLite table
+    sceneData.js          # sceneData subscription fabric (batched Rust queries + push)
+  utils/
+    sceneSerialization.js # stableSerialize, buildSceneDataKey
+  components/scenes/      # Scene engine components
+    sceneLayout.js        # clampLayout, detectCollision, placeNewCard
+    SceneCanvas.vue       # 12-col grid canvas, drag/resize (controlled)
+    SceneCard.vue         # Card shell — header, resize handles, minimize
+    SceneCardHost.vue     # Resolves card component, wires sceneData subscription
+    ScenePicker.vue       # Add-card menu listing registry entries
+    cards/
+      SceneNotesCard.vue  # Freeform text notes (selfManaged)
+  composables/
+    useAssistantTools.js  # Per-route tool registration + context label helper
+  services/
+    assistant/
+      client.js           # Thin invoke wrapper for assistant_chat command
+      toolRegistry.js     # MCP-shaped register/unregister/list module
+      tools/
+        map.js            # Map surface tool bundle
+        scenes.js         # Scenes surface tool bundle
+  stores/
+    assistant.js          # Turn loop, pendingCalls, message list
+  components/
+    AppFooter.vue         # Global footer (all non-home routes)
+    assistant/
+      AssistantPanel.vue      # Docked chat card
+      AssistantMessage.vue    # Single message renderer
+      AssistantConfirmCard.vue # Confirm/cancel card for pending writes
   assets/          # Static assets (images, fonts, etc.)
 ```
+
+## Shell and navigation
+
+Ares uses Vue Router 4 in `createWebHistory` mode. Two original routes plus four added for the Athena integration:
+
+| Route                  | Name     | View                     | Scope          |
+|------------------------|----------|--------------------------|----------------|
+| `/`                    | `home`   | `HomeView.vue`           | —              |
+| `/map/:missionId`      | `map`    | `MapView.vue`            | Mission-scoped |
+| `/hub`                 | `hub`    | `ControlHubView.vue`     | Global         |
+| `/configuration`       | `config` | `ConfigurationView.vue`  | Global         |
+| `/scenes`              | `scenes` | `ScenesView.vue`         | Global         |
+| `/scenes/:sceneId`     | `scene`  | `SceneEditorView.vue`    | Global         |
+
+**Rule: Map is mission-scoped; Hub/Config/Scenes are global peers.** The Hub, Configuration, and Scenes surfaces are not children of a mission — they apply to the full app and contain globally-configured connectors, vendor settings, and composed dashboards.
+
+**Active mission persistence.** `useNavigationStore` (`src/stores/navigation.js`) holds `activeMissionId`. `MapView` sets it on successful mission load and clears it on `exitMission`. The sidebar reads it to build the Map nav target so that clicking Map from any global page returns to the same mission.
+
+**Sidebar visibility.** `AppSidebar` is conditionally rendered in `App.vue` — hidden on `route.name === 'home'` to keep the mission picker a clean landing surface. It appears as an icon rail on all other routes.
+
+**Adding a new top-level route:** add the route in `src/router/index.js`, create a view in `src/views/`, and add a nav item to `AppSidebar.vue`. If the new destination is mission-scoped, read `navStore.activeMissionId` and validate like `MapView` does.
 
 ## State Management
 - Use Pinia for all shared state.
@@ -66,6 +119,7 @@ const theme = await store.get('theme')
   - **Display → Show feature names on map** (`showFeatureLabels`, default `true`) — toggles the `draw-features-labels` symbol layer in `useMapDraw`. Label rendering needs a `glyphs` URL on the MapLibre style; see `MapView.vue` (`glyphs:` field). TODO: self-host glyphs so labels work offline.
   - **Display → Distance units** (`distanceUnits`, default `'metric'`) — controls how distances are formatted throughout the app. Options: `'metric'` (m/km), `'statute'` (ft/mi), `'nautical'` (m/nm). `formatDistance(meters, units)` in `src/services/geometry.js` is the single conversion point.
   - **Display → Coordinate format** (`coordinateFormat`, default `'dd'`) — controls how map coordinates are displayed in `MapFooter`. Options: `'dd'` (decimal degrees), `'dms'` (degrees/minutes/seconds), `'mgrs'` (MGRS via the `mgrs` npm package). `formatCoordinate(lng, lat, format)` in `src/services/coordinates.js` is the single conversion point.
+  - **Display → Use MIL-STD-2525 symbology** (`milStdSymbology`, default `false`) — when enabled, typed manual tracks render as MIL-STD-2525 icons; untyped tracks keep the affiliation-colored circle. See [tracks.md](./tracks.md) for layer mechanics.
 
 ## Routing
 - Define all routes in `src/router/index.js`.
@@ -146,7 +200,9 @@ Every drawn or imported feature has a `type` string stored in the `features` tab
 | `sector` | `Polygon` | `name`, `color`, `opacity`, `center` [lng,lat], `radius` (m), `startAngle` (°), `endAngle` (°) | Three clicks: center → start bearing → end bearing |
 | `route` | `LineString` | `name`, `color`, `waypoints` array of `{ label, role }` where role is `'SP'`/`'WP'`/`'EP'` | Click waypoints, double-click to finish |
 | `image` | `Point` (center) | `name`, `src` (base64 data URL), `naturalWidth`, `naturalHeight`, `widthMeters` | File picker then single map click |
-| `manual-track` | `Point` | `name`, `color`, `speed` (m/s), `course` (°), `callsign`, `cotType` | Created via Manual Track panel, not drawn |
+| `manual-track` | `Point` | `callsign`, `affiliation`, `cotType` (optional), `hae` (m), `course` (°), `speed` (kts) | Created via Manual Track panel, not drawn |
+
+Manual track placement, editing, listing, and rendering are fully documented in [tracks.md](./tracks.md) — including the `TrackDropPanel` two-step placement flow, `ManualTrackPanel`, `TrackTypePicker`, and the MIL-STD-2525 dual-layer pipeline. `cotType` is optional; tracks without one render as affiliation-colored circles regardless of the 2525 symbology setting.
 
 Geometry for parametric shapes (`box`, `circle`, `ellipse`, `sector`) is stored **both** as a pre-computed polygon (for rendering) and as canonical parameters in `properties` (for editing and re-export). When a user edits parameters, the polygon geometry is recalculated and both are written back to SQLite atomically.
 
@@ -268,34 +324,51 @@ Currently provided:
 - **Wiring to the backend:** `ListenersDialog` calls `invoke('start_listener', ...)` / `invoke('stop_listener', ...)` on toggle and remove. `MapView` starts all enabled listeners on map load and calls `invoke('stop_all_listeners')` on unmount.
 - `useTracksStore.startListening()` wires the `cot-event` Tauri event to the track map and starts a 30-second stale-track pruning interval.
 
-## Track Plotting
+## Toolbar layout
 
-### `useTracksStore` (`src/stores/tracks.js`)
-- Pinia store keyed by CoT `uid`. Each entry: `{ uid, cotType, lat, lon, hae, speed, course, callsign, time, stale, updatedAt }`.
-- `trackCollection` computed — GeoJSON `FeatureCollection` of Point features with all track fields as properties plus `affiliation` derived from `cotType[2]` (`f`/`h`/`n`/`u`).
-- `startListening()` — calls `listen('cot-event', ...)`, upserts tracks, starts stale pruning.
-- `stopListening()` — unregisters the listener, stops pruning.
-- `clearTracks()` — empties the Map.
-- Reactivity note: Vue's reactive system does not track internal `Map` mutations. The store reassigns `tracks.value = new Map(tracks.value)` after each update to trigger computed re-evaluation.
+`MapToolbar.vue` uses an adaptive two-mode layout driven by Vuetify's `useDisplay()` composable:
 
-### `useMapTracks` (`src/composables/useMapTracks.js`)
-- Composable following the same pattern as `useMapDraw`. Takes `getMap` (getter returning the live MapLibre instance).
-- `initLayers()` — adds GeoJSON source `cot-tracks`, circle layer `cot-tracks-points`, and symbol layer `cot-tracks-labels`. Called from `MapView`'s `map.on('load', ...)` handler alongside `initLayers()`.
-- Circle color is data-driven via a `match` expression on the `affiliation` property: `f`→`#4a9ade`, `h`→`#f44336`, `n`→`#4caf50`, `u`→`#ffeb3b`.
-- Watches `tracksStore.trackCollection` and calls `setData` on the map source whenever it changes.
-- Removes layers and source on `onUnmounted`.
+- **Wide (`mdAndUp`, ≥960px):** flat buttons per group with vertical dividers — the default look. Four groups left-to-right: Annotation, Analysis, Operations, Feeds.
+- **Narrow (<960px):** each group collapses into a single icon button that opens a `v-menu` dropdown listing the group's tools. The group activator inherits the `toolbar-active` / `primary` colour when any of its tools is currently open, so state is still visible without opening the menu.
+- **Plugin buttons:** always rendered as a single `mdi-puzzle-outline` dropdown regardless of viewport width. Because plugins are unbounded in number, inlining them is never safe.
+- **Right cluster** (Import/Export, Listeners, Settings) and the **mission chevron** are always pinned and never collapse.
+- The mission name is hidden on `smAndDown` (<600px) to reclaim horizontal space.
 
-## CoT Test Harness (`scripts/cot-sender.mjs`)
-Node.js script (no external dependencies) that generates synthetic CoT traffic for development.
+When adding a new core tool, place it in the appropriate group in *both* the `v-if="mdAndUp"` flat section and the `v-else` collapsed `v-list` for that group.
 
-```sh
-pnpm cot:send                        # 5 tracks, UDP, 127.0.0.1:4242, 3s interval
-pnpm cot:send -- --tracks 10         # 10 tracks
-pnpm cot:send -- --port 8087         # different port
-pnpm cot:send -- --protocol tcp      # TCP instead of UDP
-pnpm cot:send -- --interval 1000     # 1s interval
-```
+## Plugins
 
-Each track has a stable `uid` (`ARES-TEST-N`), a NATO phonetic callsign, a CoT affiliation cycling through `f/h/n/u`, and a random-walk position starting near Washington DC. The script reconnects automatically on TCP disconnection.
+Third-party plugins extend the app with new toolbar buttons and mission data automation. The full authoring guide — including the plugin contract, `api` surface, lifecycle, and trust model — is in [plugins.md](./plugins.md). Relevant implementation files: `src/composables/usePluginRegistry.js`, `src/services/pluginLoader.js`, `src-tauri/src/plugins.rs`, `src/components/MapToolbar.vue` (plugin-buttons slot), `src/components/SettingsDialog.vue` (Plugins tab).
 
-Consumers must tolerate `null` (the injected helper is absent if the component is ever reused outside `MapView`). Keep these helpers pure "do the map thing" functions — no reactive state, no UI concerns.
+## Scenes
+
+The Scenes dashboard engine is documented in [scenes.md](./scenes.md). Key concepts:
+- A **scene** is a user-authored grid of draggable/resizable cards, persisted in the `scenes` SQLite table.
+- The **card registry** (`src/stores/cardTypes.js`) defines available card types; `SceneCardHost.vue` resolves a card to its Vue component.
+- The **sceneData fabric** (`src/stores/sceneData.js`) coalesces subscriptions, batches Rust fetches, and delivers push invalidations via Tauri events.
+- Scenes are global — not mission-scoped.
+
+## Bloodhound
+
+Live-tracking range lines between tracks, vessels, shapes, or raw coordinates are documented in [bloodhound.md](./bloodhound.md). Toolbar entry is the `mdi-map-marker-distance` button in the Analysis group; the `BloodhoundPanel` manages add / remove / clear. The line and its distance label follow both endpoints as sources move.
+
+## Assistant
+
+The in-app AI assistant is documented in [assistant.md](./assistant.md). Key concepts:
+- A **global footer** (`AppFooter.vue`) is rendered on all non-home routes. It hosts the assistant toggle button and a reserved left slot for future status indicators.
+- The **assistant panel** (`AssistantPanel.vue`) is a docked card (bottom-right, RoutePanel-styled) that shows the chat log, pending confirms, and an input row.
+- The **tool registry** (`src/services/assistant/toolRegistry.js`) is an MCP-shaped register/unregister surface. Each route registers its tool bundle on mount and unregisters on unmount via `useAssistantTools`.
+- The **assistant store** (`src/stores/assistant.js`) owns the turn loop, pendingCalls, and message list.
+- Transport is via a Rust command (`assistant_chat`) that calls the Anthropic API — no direct HTTPS from the webview.
+- API key, provider, and model are configured in Settings → Assistant tab.
+
+## Tracks
+
+The project has two track systems — ephemeral CoT-feed tracks and persistent user-placed manual tracks. Both are documented together in [tracks.md](./tracks.md), including:
+
+- `useTracksStore` and `useMapTracks` (CoT-feed tracks, `cot-tracks` source/layers)
+- Manual track placement (`TrackDropPanel`), editing (`ManualTrackPanel`), and listing (`TrackListPanel`)
+- `TrackTypePicker` + `src/services/trackTypes.js` catalog
+- MIL-STD-2525 symbology toggle and dual-layer rendering pipeline
+- `src/services/sidc.js` — `cotTypeToSidc`, `getOrCreateIcon`, `sidcToDataUrl`
+- CoT test harness script (`scripts/cot-sender.mjs`)

@@ -13,6 +13,7 @@ const ghostsStore   = useGhostsStore()
 const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
 
+const minimized  = ref(false)
 const positioned = ref(false)
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
@@ -216,6 +217,14 @@ onMounted(() => {
         @click.stop="openCreate"
       />
       <v-btn
+        :icon="minimized ? 'mdi-chevron-down' : 'mdi-chevron-up'"
+        size="x-small"
+        variant="text"
+        class="text-medium-emphasis header-btn"
+        @pointerdown.stop
+        @click.stop="minimized = !minimized"
+      />
+      <v-btn
         icon="mdi-close"
         size="x-small"
         variant="text"
@@ -226,7 +235,7 @@ onMounted(() => {
     </div>
 
     <!-- Ghost list -->
-    <div class="ghost-list">
+    <div v-show="!minimized" class="ghost-list">
       <div v-if="ghostsStore.ghosts.length === 0" class="empty-state">
         No ghosts — click + to create one
       </div>
@@ -311,7 +320,7 @@ onMounted(() => {
     </div>
 
     <!-- Create form -->
-    <div v-show="creating" class="create-form" @pointerdown.stop>
+    <div v-show="!minimized && creating" class="create-form" @pointerdown.stop>
       <div class="divider" />
       <div class="section-label">NEW GHOST</div>
 
