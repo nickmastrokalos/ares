@@ -481,29 +481,82 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_update_track',
-      description: 'Update the callsign, affiliation, course, or speed of an existing manual track.',
+      description: 'Update an existing manual track — callsign, affiliation, entity type, course, or speed. Supply only the fields that are changing.',
       readonly: false,
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'integer', description: 'Track feature id.' },
           callsign: { type: 'string' },
-          affiliation: { type: 'string', enum: ['friendly', 'hostile', 'neutral', 'unknown'] },
+          affiliation: {
+            type: 'string',
+            enum: ['friendly', 'hostile', 'neutral', 'unknown', 'generic']
+          },
+          entity_type: {
+            type: 'string',
+            enum: [
+              'ground', 'infantry', 'armor', 'artillery', 'engineer', 'recon', 'hq', 'support',
+              'helicopter', 'attack_helicopter', 'fixed_wing', 'uav',
+              'surface_vessel', 'combatant', 'submarine',
+              'sof'
+            ],
+            description: 'Change the entity type / MIL-STD-2525 symbol.'
+          },
           course: { type: 'number' },
-          speed: { type: 'number' }
+          speed:  { type: 'number' }
         },
         required: ['id']
       },
-      previewRender({ id, callsign, affiliation }) {
+      previewRender({ id, callsign, affiliation, entity_type }) {
         const parts = [`Track #${id}`]
-        if (callsign) parts.push(`callsign → "${callsign}"`)
+        if (callsign)    parts.push(`callsign → "${callsign}"`)
         if (affiliation) parts.push(`affiliation → ${affiliation}`)
+        if (entity_type) parts.push(`type → ${entity_type}`)
         return parts.join(' · ')
       },
-      async handler({ id, ...patch }) {
-        const allowed = ['callsign', 'affiliation', 'course', 'speed']
-        const filtered = Object.fromEntries(Object.entries(patch).filter(([k]) => allowed.includes(k)))
-        await featuresStore.updateFeatureProperties(id, filtered)
+      async handler({ id, callsign, affiliation, entity_type, course, speed }) {
+        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u', generic: 'g' }
+        const ENTITY_SUFFIX = {
+          ground:            'G',
+          infantry:          'G-U-C-I',
+          armor:             'G-U-C-A',
+          artillery:         'G-U-C-F',
+          engineer:          'G-U-C-E',
+          recon:             'G-U-C-R',
+          hq:                'G-U-H',
+          support:           'G-U-S',
+          helicopter:        'A-M-H',
+          attack_helicopter: 'A-M-H-H',
+          fixed_wing:        'A-M-F',
+          uav:               'A-M-F-Q',
+          surface_vessel:    'S',
+          combatant:         'S-C',
+          submarine:         'U',
+          sof:               'F',
+        }
+
+        const row = featuresStore.features.find(f => f.id === id)
+        const existing = row ? JSON.parse(row.properties) : {}
+
+        const patch = {}
+        if (callsign  !== undefined) patch.callsign = callsign
+        if (course    !== undefined) patch.course   = course
+        if (speed     !== undefined) patch.speed    = speed
+
+        // Resolve affiliation — translate word → single char, fall back to existing.
+        let affilCode = existing.affiliation ?? 'g'
+        if (affiliation !== undefined) {
+          affilCode = AFFIL_MAP[affiliation] ?? affilCode
+          patch.affiliation = affilCode
+        }
+
+        // Rebuild cotType whenever entity_type changes (uses updated affilCode).
+        if (entity_type !== undefined) {
+          const suffix = ENTITY_SUFFIX[entity_type]
+          patch.cotType = suffix ? `a-${affilCode}-${suffix}` : null
+        }
+
+        await featuresStore.updateFeatureProperties(id, patch)
         return { success: true }
       }
     },
