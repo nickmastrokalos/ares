@@ -8,6 +8,10 @@ export const useAppStore = defineStore('app', () => {
 
   const loading = computed(() => _count.value > 0)
 
+  // Per-view status string rendered on the left of AppFooter (e.g. the map's
+  // cursor coordinate). Views set this on mount / update and clear on unmount.
+  const footerInfo = ref(null)
+
   function beginLoad() {
     _count.value++
   }
@@ -16,5 +20,5 @@ export const useAppStore = defineStore('app', () => {
     if (_count.value > 0) _count.value--
   }
 
-  return { loading, beginLoad, endLoad }
+  return { loading, beginLoad, endLoad, footerInfo }
 })

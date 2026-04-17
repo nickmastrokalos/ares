@@ -11,15 +11,21 @@ import { useTracksStore } from '@/stores/tracks'
 import { useGhostsStore } from '@/stores/ghosts'
 import { useAisStore } from '@/stores/ais'
 import { useTileserverStore } from '@/stores/tileserver'
+import { useClickDispatcher } from '@/composables/useClickDispatcher'
 import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
-import { useMapRange } from '@/composables/useMapRange'
+import { useMapBloodhound } from '@/composables/useMapBloodhound'
 import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
 import { useMapGhosts } from '@/composables/useMapGhosts'
 import { useMapAis } from '@/composables/useMapAis'
 import { getBasemap } from '@/services/basemaps'
+import { usePluginRegistry } from '@/composables/usePluginRegistry'
+import { loadPlugins } from '@/services/pluginLoader'
+import { useNavigationStore } from '@/stores/navigation'
+import { useAppStore } from '@/stores/app'
+import { formatCoordinate } from '@/services/coordinates'
 import neCountries from '@/assets/ne-countries-110m.json'
 import MapToolbar from '@/components/MapToolbar.vue'
 import DrawPanel from '@/components/DrawPanel.vue'
@@ -28,6 +34,7 @@ import LayersPanel from '@/components/LayersPanel.vue'
 import ListenersDialog from '@/components/ListenersDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import MapContextMenu from '@/components/MapContextMenu.vue'
+import MapFeaturePicker from '@/components/MapFeaturePicker.vue'
 import TrackPanel from '@/components/TrackPanel.vue'
 import RoutePanel from '@/components/RoutePanel.vue'
 import TrackDropPanel from '@/components/TrackDropPanel.vue'
@@ -35,11 +42,18 @@ import ManualTrackPanel from '@/components/ManualTrackPanel.vue'
 import TrackListPanel from '@/components/TrackListPanel.vue'
 import GhostPanel from '@/components/GhostPanel.vue'
 import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
+import BloodhoundPanel from '@/components/BloodhoundPanel.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
-import MapFooter from '@/components/MapFooter.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
+import { useAssistantTools } from '@/composables/useAssistantTools'
+import { mapTools } from '@/services/assistant/tools/map'
+import { aisTools } from '@/services/assistant/tools/ais'
+import { routeTools } from '@/services/assistant/tools/routes'
+import { bloodhoundTools } from '@/services/assistant/tools/bloodhound'
+import { ghostTools } from '@/services/assistant/tools/ghosts'
+import { cotTools } from '@/services/assistant/tools/cot'
 
 const props = defineProps({
   missionId: { type: Number, required: true }
@@ -50,10 +64,16 @@ const mapContainer = ref(null)
 const mapStore = useMapStore()
 const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
+function flyTo({ coordinate, zoom }) {
+  if (!map || !coordinate) return
+  map.flyTo({ center: coordinate, zoom: zoom ?? 11, duration: 800 })
+}
 const tracksStore = useTracksStore()
 const ghostsStore = useGhostsStore()
 const aisStore          = useAisStore()
 const tileserverStore   = useTileserverStore()
+const navStore          = useNavigationStore()
+const appStore          = useAppStore()
 const drawPanelOpen = ref(false)
 const layersPanelOpen = ref(false)
 const listenersDialogOpen = ref(false)
@@ -65,21 +85,39 @@ const trackListOpen      = ref(false)
 const ghostPanelOpen     = ref(false)
 const interceptPanelOpen = ref(false)
 const aisPanelOpen       = ref(false)
+const bloodhoundPanelOpen = ref(false)
 let interceptMarker = null
 const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
-const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map)
+const dispatcher = useClickDispatcher()
+const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
-const { ranging, toggleRange } = useMapRange(() => map)
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map)
-const externalSuppress = computed(() => ranging.value || routing.value)
-const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress)
-const suppressTrackPanel = computed(() => ranging.value || routing.value || placing.value != null)
-const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel)
+const bloodhoundApi = useMapBloodhound(() => map)
+const { bloodhounding } = bloodhoundApi
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher)
+const externalSuppress = computed(() => bloodhounding.value || routing.value)
+const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress, dispatcher)
+const pluginRegistry = usePluginRegistry({ flyToGeometry })
+const suppressTrackPanel = computed(() => bloodhounding.value || routing.value || placing.value != null)
+const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
-const { initLayers: initAisLayers }   = useMapAis(() => map)
+const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher)
+
+// Register assistant tool bundles. Factories run once on mount, after the
+// stores above are created — so the closures capture live store instances.
+useAssistantTools(
+  () => [
+    ...mapTools({ featuresStore, tracksStore, aisStore, settingsStore, flyToGeometry, flyTo, switchBasemap }),
+    ...routeTools({ featuresStore }),
+    ...aisTools({ aisStore, featuresStore }),
+    ...cotTools({ tracksStore, featuresStore }),
+    ...bloodhoundTools({ featuresStore, tracksStore, aisStore, bloodhoundApi }),
+    ...ghostTools({ featuresStore, ghostsStore })
+  ],
+  'Map assistant'
+)
 
 // Expose map-centric helpers to descendant components (OverlaysDialog,
 // AttributesPanel, etc.) without prop-drilling through DrawPanel.
@@ -89,6 +127,9 @@ provide('draggingFeature', draggingFeature)
 provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
+provide('bloodhoundApi', bloodhoundApi)
+
+provide('pluginRegistry', pluginRegistry)
 
 provide('setInterceptMarker', (lon, lat) => {
   if (!map) return
@@ -163,6 +204,10 @@ function toggleAisPanel() {
   aisPanelOpen.value = !aisPanelOpen.value
 }
 
+function toggleBloodhoundPanel() {
+  bloodhoundPanelOpen.value = !bloodhoundPanelOpen.value
+}
+
 function toggleInterceptPanel() {
   interceptPanelOpen.value = !interceptPanelOpen.value
   if (!interceptPanelOpen.value && interceptMarker) {
@@ -176,6 +221,7 @@ function onToolSelect(toolId) {
 }
 
 function exitMission() {
+  navStore.clearActiveMission()
   router.push({ name: 'home' })
 }
 
@@ -194,8 +240,10 @@ onMounted(async () => {
     router.replace({ name: 'home' })
     return
   }
+  navStore.setActiveMission(props.missionId)
 
   await settingsStore.load()
+  loadPlugins(pluginRegistry)
   await tileserverStore.load()
   await aisStore.load()
   const basemap = resolveBasemapTiles(settingsStore.selectedBasemap)
@@ -261,6 +309,14 @@ onMounted(async () => {
   map.on('mousemove', (e) => { mouseCoord.value = e.lngLat })
   map.on('mouseout', () => { mouseCoord.value = null })
 
+  // Mirror the cursor coordinate into the global footer info.
+  watch(
+    [mouseCoord, () => settingsStore.coordinateFormat],
+    ([coord, fmt]) => {
+      appStore.footerInfo = coord ? formatCoordinate(coord.lng, coord.lat, fmt) : null
+    }
+  )
+
   map.on('contextmenu', (e) => {
     e.originalEvent.preventDefault()
     // Clamp so the menu doesn't overflow the right or bottom edge.
@@ -272,10 +328,11 @@ onMounted(async () => {
     contextMenu.value = { x, y, lngLat: e.lngLat }
   })
 
-  map.on('movestart', () => { contextMenu.value = null })
+  map.on('movestart', () => { contextMenu.value = null; dispatcher.dismiss() })
   map.on('click', () => { contextMenu.value = null })
 
   map.on('load', async () => {
+    dispatcher.install(map)
     initLayers()
     initRouteLayers()
     initGhostLayers()
@@ -325,6 +382,7 @@ onUnmounted(async () => {
     map.remove()
     map = null
   }
+  appStore.footerInfo = null
 })
 </script>
 
@@ -335,7 +393,7 @@ onUnmounted(async () => {
       :layers-panel-open="layersPanelOpen"
       :overlays-dialog-open="overlaysDialogOpen"
       :measuring="measuring"
-      :ranging="ranging"
+      :bloodhound-panel-open="bloodhoundPanelOpen"
       :routing="routing"
       :track-drop-panel-open="trackDropPanelOpen"
       :track-list-open="trackListOpen"
@@ -343,10 +401,11 @@ onUnmounted(async () => {
       :intercept-panel-open="interceptPanelOpen"
       :ais-panel-open="aisPanelOpen"
       :mission-name="featuresStore.activeMission?.name || ''"
+      :plugin-buttons="pluginRegistry.allToolbarButtons.value"
       @toggle-draw="toggleDrawPanel"
       @toggle-layers="toggleLayersPanel"
       @toggle-measure="toggleMeasure"
-      @toggle-range="toggleRange"
+      @toggle-bloodhound="toggleBloodhoundPanel"
       @toggle-route="toggleRoute"
       @toggle-track-drop="toggleTrackDrop"
       @toggle-track-list="toggleTrackList"
@@ -393,6 +452,10 @@ onUnmounted(async () => {
           v-if="aisPanelOpen"
           @close="aisPanelOpen = false"
         />
+        <BloodhoundPanel
+          v-if="bloodhoundPanelOpen"
+          @close="bloodhoundPanelOpen = false"
+        />
         <AisTrackPanel
           v-for="mmsi in aisStore.openPanelList"
           :key="mmsi"
@@ -422,7 +485,14 @@ onUnmounted(async () => {
           :lng-lat="contextMenu.lngLat"
           @close="contextMenu = null"
         />
-        <MapFooter :coord="mouseCoord" />
+        <MapFeaturePicker
+          v-if="dispatcher.pickerState.value"
+          :x="dispatcher.pickerState.value.x"
+          :y="dispatcher.pickerState.value.y"
+          :items="dispatcher.pickerState.value.items"
+          @select="dispatcher.selectItem($event)"
+          @close="dispatcher.dismiss()"
+        />
       </div>
     </div>
   </div>

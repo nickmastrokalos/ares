@@ -1,9 +1,12 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useFeaturesStore } from '@/stores/features'
+import { useSettingsStore } from '@/stores/settings'
+import { cotTypeToSidc, getOrCreateIcon } from '@/services/sidc'
 
-const MANUAL_TRACKS_SOURCE = 'manual-tracks'
-const MANUAL_TRACKS_LAYER  = 'manual-tracks-points'
-const MANUAL_TRACKS_LABELS = 'manual-tracks-labels'
+const MANUAL_TRACKS_SOURCE  = 'manual-tracks'
+const MANUAL_TRACKS_LAYER   = 'manual-tracks-points'
+const MANUAL_TRACKS_SYMBOLS = 'manual-tracks-symbols'
+const MANUAL_TRACKS_LABELS  = 'manual-tracks-labels'
 
 export const AFFIL_CONFIG = {
   f: { label: 'Friendly', color: '#4a9ade', prefix: 'FRND' },
@@ -21,10 +24,16 @@ const AFFIL_MATCH = [
   '#ffeb3b'
 ]
 
-export function useMapManualTracks(getMap, suppress = { value: false }) {
-  const featuresStore = useFeaturesStore()
+// Filter expressions keyed by milStd mode.
+const FILTER_CIRCLE_MILSTD = ['==', ['get', 'sidc'], '']   // only untyped tracks
+const FILTER_SYMBOL_MILSTD = ['!=', ['get', 'sidc'], '']   // only typed tracks
 
-  const placing      = ref(null)   // null | 'f' | 'n' | 'u' | 'h'
+export function useMapManualTracks(getMap, suppress = { value: false }, dispatcher = null) {
+  const featuresStore = useFeaturesStore()
+  const settingsStore = useSettingsStore()
+
+  // placing: null | { affiliation: string, cotType: string|null }
+  const placing      = ref(null)
   const openPanelIds = ref(new Set())
   const focusedId    = ref(null)
 
@@ -39,13 +48,17 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
       .filter(f => f.type === 'manual-track')
       .map(f => {
         const props = JSON.parse(f.properties)
+        const cotType = props.cotType ?? null
+        const sidc    = cotType ? cotTypeToSidc(cotType) : ''
         return {
           type: 'Feature',
           geometry: JSON.parse(f.geometry),
           properties: {
             _dbId:       f.id,
             callsign:    props.callsign,
-            affiliation: props.affiliation
+            affiliation: props.affiliation,
+            cotType,
+            sidc
           }
         }
       })
@@ -56,7 +69,7 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
   // ---- Panel management ----
 
   function openPanel(id) {
-    focusedId.value = id  // always signal focus, even if panel is already open
+    focusedId.value = id
     openPanelIds.value = new Set([...openPanelIds.value, id])
   }
 
@@ -82,6 +95,19 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
     return `${prefix}-${max + 1}`
   }
 
+  // ---- MIL-STD-2525 icon registration ----
+
+  function ensureMilStdIcons(map, features) {
+    for (const f of features) {
+      const sidc = f.properties.sidc
+      if (!sidc) continue
+      if (!map.hasImage(sidc)) {
+        const { image } = getOrCreateIcon(sidc)
+        map.addImage(sidc, image, { pixelRatio: 2 })
+      }
+    }
+  }
+
   // ---- Placement handlers ----
 
   function removePlaceHandlers() {
@@ -98,15 +124,15 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
     map.getCanvasContainer().style.cursor = 'crosshair'
 
     placeClickHandler = async (e) => {
-      const affiliation = placing.value
+      const { affiliation, cotType } = placing.value ?? {}
       if (!affiliation) return
       const callsign = nextName(affiliation)
       await featuresStore.addFeature(
         'manual-track',
         { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] },
-        { callsign, affiliation }
+        { callsign, affiliation, cotType: cotType ?? null }
       )
-      // Stay in placing mode — allows rapid sequential drops
+      // Stay in placing mode — allows rapid sequential drops.
     }
 
     keyHandler = (e) => {
@@ -117,15 +143,10 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
     window.addEventListener('keydown', keyHandler)
   }
 
-  function setPlacing(key) {
+  function setPlacing(payload) {  // null | { affiliation, cotType }
     removePlaceHandlers()
-    if (key && key === placing.value) {
-      // Toggle off — same key clicked again
-      placing.value = null
-    } else {
-      placing.value = key
-      if (key) activatePlacement()
-    }
+    placing.value = payload ?? null
+    if (placing.value) activatePlacement()
   }
 
   // ---- Map layers ----
@@ -134,17 +155,22 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
     const map = getMap()
     if (!map || map.getSource(MANUAL_TRACKS_SOURCE)) return
 
-    // Use current collection as initial data — features may already be loaded
-    // from the DB before the map was ready, so we can't rely on the watcher
-    // to fire for data that arrived before initLayers() was called.
+    const use2525 = settingsStore.milStdSymbology
+
+    // Register icons for any manual tracks that already exist when the layer
+    // is (re)initialized. Without this, re-entering the map view renders
+    // labels but no symbols until the feature list next changes.
+    if (use2525) ensureMilStdIcons(map, manualTrackCollection.value.features)
+
     map.addSource(MANUAL_TRACKS_SOURCE, {
       type: 'geojson',
       data: manualTrackCollection.value
     })
 
-    map.addLayer({
-      id: MANUAL_TRACKS_LAYER,
-      type: 'circle',
+    // Circle layer — shown for all tracks when milStd off; only untyped tracks when milStd on.
+    const circleSpec = {
+      id:     MANUAL_TRACKS_LAYER,
+      type:   'circle',
       source: MANUAL_TRACKS_SOURCE,
       paint: {
         'circle-radius': 6,
@@ -152,57 +178,110 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
         'circle-stroke-width': 1,
         'circle-stroke-color': '#000000'
       }
-    })
+    }
+    if (use2525) circleSpec.filter = FILTER_CIRCLE_MILSTD
+    map.addLayer(circleSpec)
 
+    // Symbol layer — only visible when milStd is on, only for typed tracks.
     map.addLayer({
-      id: MANUAL_TRACKS_LABELS,
-      type: 'symbol',
+      id:     MANUAL_TRACKS_SYMBOLS,
+      type:   'symbol',
       source: MANUAL_TRACKS_SOURCE,
+      filter: FILTER_SYMBOL_MILSTD,
       layout: {
-        'text-field': ['get', 'callsign'],
-        'text-size': 11,
-        'text-offset': [0, 1.5],
-        'text-anchor': 'top',
-        'text-allow-overlap': false
-      },
-      paint: {
-        'text-color': '#ffffff',
-        'text-halo-color': '#000000',
-        'text-halo-width': 1
+        'icon-image':            ['get', 'sidc'],
+        'icon-allow-overlap':    true,
+        'icon-ignore-placement': true,
+        'visibility':            use2525 ? 'visible' : 'none'
       }
     })
 
-    // Click a track dot → open its detail panel.
-    // Suppressed while in placement mode (click lands as a drop, not a selection)
-    // and while other suppress conditions are active (ranging, routing, etc.).
-    map.on('click', MANUAL_TRACKS_LAYER, (e) => {
-      if (suppress.value || placing.value) return
-      const id = e.features?.[0]?.properties?._dbId
-      if (id != null) openPanel(id)
+    map.addLayer({
+      id:     MANUAL_TRACKS_LABELS,
+      type:   'symbol',
+      source: MANUAL_TRACKS_SOURCE,
+      layout: {
+        'text-field':          ['get', 'callsign'],
+        'text-size':           11,
+        'text-offset':         use2525 ? [0, 2.5] : [0, 1.5],
+        'text-anchor':         'top',
+        'text-allow-overlap':  false
+      },
+      paint: {
+        'text-color':       '#ffffff',
+        'text-halo-color':  '#000000',
+        'text-halo-width':  1
+      }
     })
 
-    map.on('mouseenter', MANUAL_TRACKS_LAYER, () => {
-      if (placing.value) return
-      map.getCanvasContainer().style.cursor = 'pointer'
-    })
-    map.on('mouseleave', MANUAL_TRACKS_LAYER, () => {
-      if (placing.value) return
-      map.getCanvasContainer().style.cursor = ''
-    })
+    const clickLayers = [MANUAL_TRACKS_LAYER, MANUAL_TRACKS_SYMBOLS]
+
+    if (dispatcher) {
+      dispatcher.register('manual-tracks', {
+        layers:     clickLayers,
+        action:     (f) => { const id = f.properties._dbId; if (id != null) openPanel(id) },
+        suppress:   () => suppress.value || Boolean(placing.value),
+        label:      (f) => ({
+          text:     f.properties.callsign || 'Manual Track',
+          subtitle: 'Manual Track',
+          icon:     'mdi-map-marker-account'
+        }),
+        dedupeKey:  (f) => f.properties._dbId
+      })
+    } else {
+      map.on('click', MANUAL_TRACKS_LAYER, (e) => {
+        if (suppress.value || placing.value) return
+        const id = e.features?.[0]?.properties?._dbId
+        if (id != null) openPanel(id)
+      })
+      map.on('click', MANUAL_TRACKS_SYMBOLS, (e) => {
+        if (suppress.value || placing.value) return
+        const id = e.features?.[0]?.properties?._dbId
+        if (id != null) openPanel(id)
+      })
+    }
+
+    const onEnter = () => { if (!placing.value) map.getCanvasContainer().style.cursor = 'pointer' }
+    const onLeave = () => { if (!placing.value) map.getCanvasContainer().style.cursor = '' }
+    for (const layer of clickLayers) {
+      map.on('mouseenter', layer, onEnter)
+      map.on('mouseleave', layer, onLeave)
+    }
   }
 
   // ---- Watchers ----
 
-  // Push store changes to the map source.
   const stopDataWatch = watch(
     manualTrackCollection,
     (collection) => {
-      getMap()?.getSource(MANUAL_TRACKS_SOURCE)?.setData(collection)
+      const map = getMap()
+      if (!map) return
+      if (settingsStore.milStdSymbology) {
+        ensureMilStdIcons(map, collection.features)
+      }
+      map.getSource(MANUAL_TRACKS_SOURCE)?.setData(collection)
     },
     { deep: false }
   )
 
-  // Close panels when their backing feature is deleted.
+  watch(
+    () => settingsStore.milStdSymbology,
+    (use2525) => {
+      const map = getMap()
+      if (!map?.getLayer(MANUAL_TRACKS_LAYER)) return
+      if (use2525) {
+        ensureMilStdIcons(map, manualTrackCollection.value.features)
+        map.getSource(MANUAL_TRACKS_SOURCE)?.setData(manualTrackCollection.value)
+        map.setFilter(MANUAL_TRACKS_LAYER, FILTER_CIRCLE_MILSTD)
+        map.setLayoutProperty(MANUAL_TRACKS_SYMBOLS, 'visibility', 'visible')
+      } else {
+        map.setFilter(MANUAL_TRACKS_LAYER, null)
+        map.setLayoutProperty(MANUAL_TRACKS_SYMBOLS, 'visibility', 'none')
+      }
+      map.setLayoutProperty(MANUAL_TRACKS_LABELS, 'text-offset', use2525 ? [0, 2.5] : [0, 1.5])
+    }
+  )
+
   const stopDeleteWatch = watch(
     () => featuresStore.features,
     (features) => {
@@ -217,14 +296,16 @@ export function useMapManualTracks(getMap, suppress = { value: false }) {
   )
 
   onUnmounted(() => {
+    if (dispatcher) dispatcher.unregister('manual-tracks')
     stopDataWatch()
     stopDeleteWatch()
     removePlaceHandlers()
     placing.value = null
     const map = getMap()
     if (!map) return
-    if (map.getLayer(MANUAL_TRACKS_LABELS)) map.removeLayer(MANUAL_TRACKS_LABELS)
-    if (map.getLayer(MANUAL_TRACKS_LAYER))  map.removeLayer(MANUAL_TRACKS_LAYER)
+    if (map.getLayer(MANUAL_TRACKS_LABELS))  map.removeLayer(MANUAL_TRACKS_LABELS)
+    if (map.getLayer(MANUAL_TRACKS_SYMBOLS)) map.removeLayer(MANUAL_TRACKS_SYMBOLS)
+    if (map.getLayer(MANUAL_TRACKS_LAYER))   map.removeLayer(MANUAL_TRACKS_LAYER)
     if (map.getSource(MANUAL_TRACKS_SOURCE)) map.removeSource(MANUAL_TRACKS_SOURCE)
   })
 

@@ -31,7 +31,18 @@ const VERTEX_HANDLES_LAYER = 'draw-vertex-handles-layer'
 const featureColor = ['coalesce', ['get', 'color'], DEFAULT_FEATURE_COLOR]
 const featureFillOpacity = ['coalesce', ['get', 'opacity'], DEFAULT_FEATURE_OPACITY]
 
-export function useMapDraw(getMap) {
+const SHAPE_ICONS = {
+  point:   'mdi-map-marker',
+  line:    'mdi-vector-polyline',
+  polygon: 'mdi-vector-polygon',
+  circle:  'mdi-circle-outline',
+  ellipse: 'mdi-ellipse-outline',
+  sector:  'mdi-angle-acute',
+  box:     'mdi-rectangle-outline',
+  image:   'mdi-image-outline'
+}
+
+export function useMapDraw(getMap, dispatcher = null) {
   const activeTool = ref(null)
   const featuresStore = useFeaturesStore()
   const settingsStore = useSettingsStore()
@@ -796,14 +807,32 @@ export function useMapDraw(getMap) {
   }
 
   function setupSelection(map) {
-    if (selectionClickHandler) return
-
-    selectionClickHandler = (e) => {
-      if (activeTool.value || isMovingFeature) return
-      const hits = map.queryRenderedFeatures(e.point, { layers: SELECTABLE_LAYERS })
-      featuresStore.selectFeature(hits.length ? hits[0].properties._dbId : null)
+    if (dispatcher) {
+      // Register with the central click dispatcher for overlap disambiguation.
+      dispatcher.register('draw-features', {
+        layers: SELECTABLE_LAYERS,
+        action: (f) => featuresStore.selectFeature(f.properties._dbId),
+        suppress: () => Boolean(activeTool.value) || isMovingFeature,
+        label: (f) => {
+          const type = f.properties._type
+          return {
+            text: f.properties.name || (type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Shape'),
+            subtitle: type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Shape',
+            icon: SHAPE_ICONS[type] || 'mdi-shape-outline'
+          }
+        },
+        dedupeKey: (f) => f.properties._dbId,
+        onMiss: () => featuresStore.selectFeature(null)
+      })
+    } else {
+      if (selectionClickHandler) return
+      selectionClickHandler = (e) => {
+        if (activeTool.value || isMovingFeature) return
+        const hits = map.queryRenderedFeatures(e.point, { layers: SELECTABLE_LAYERS })
+        featuresStore.selectFeature(hits.length ? hits[0].properties._dbId : null)
+      }
+      map.on('click', selectionClickHandler)
     }
-    map.on('click', selectionClickHandler)
 
     // Pointer cursor feedback when hovering a selectable feature, but only
     // while no drawing tool is active.
@@ -1210,6 +1239,7 @@ export function useMapDraw(getMap) {
   }
 
   onUnmounted(() => {
+    if (dispatcher) dispatcher.unregister('draw-features')
     cleanup()
     const map = getMap()
     if (!map) return

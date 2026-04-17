@@ -5,6 +5,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
 import { formatCoordinate } from '@/services/coordinates'
+import { labelFromCotType } from '@/services/trackTypes'
+import TrackTypePicker from './TrackTypePicker.vue'
 
 const props = defineProps({
   featureId: { type: Number, required: true },
@@ -22,8 +24,9 @@ const editingName = ref(false)
 const nameInput   = ref('')
 
 // Single ref tracks which attribute field is being edited (null = none).
-const editingField = ref(null)   // null | 'hae' | 'course' | 'speed'
-const editInput    = ref('')
+const editingField   = ref(null)   // null | 'hae' | 'course' | 'speed'
+const editInput      = ref('')
+const showTypePicker = ref(false)
 
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
@@ -51,6 +54,8 @@ const callsign    = computed(() => featureProps.value?.callsign    ?? '—')
 const affiliation = computed(() => featureProps.value?.affiliation ?? 'u')
 const affilColor  = computed(() => AFFIL_COLORS[affiliation.value] ?? '#ffeb3b')
 const affilLabel  = computed(() => AFFIL_LABELS[affiliation.value] ?? 'Unknown')
+const cotType     = computed(() => featureProps.value?.cotType     ?? null)
+const typeLabel   = computed(() => labelFromCotType(cotType.value) ?? '—')
 
 const coordLabel = computed(() => {
   const coords = featureGeometry.value?.coordinates
@@ -126,6 +131,18 @@ async function saveField() {
     featureRow.value.id,
     featureGeometry.value,
     { ...featureProps.value, [field]: value }
+  )
+}
+
+// ---- Type ----
+
+async function saveType(newCotType) {
+  showTypePicker.value = false
+  if (!featureRow.value) return
+  await featuresStore.updateFeature(
+    featureRow.value.id,
+    featureGeometry.value,
+    { ...featureProps.value, cotType: newCotType }
   )
 }
 
@@ -218,6 +235,22 @@ watch(() => props.focusedId, (id) => {
           <span class="affil-dot affil-dot--inline" :style="{ backgroundColor: affilColor }" />
           {{ affilLabel }}
         </span>
+
+        <span class="attr-key">TYPE</span>
+        <span
+          class="attr-val attr-val--editable"
+          title="Click to change type"
+          @pointerdown.stop
+          @click.stop="showTypePicker = !showTypePicker"
+        >{{ typeLabel }}</span>
+      </div>
+
+      <div v-if="showTypePicker" class="type-picker-wrap" @pointerdown.stop>
+        <TrackTypePicker
+          :affiliation="affiliation"
+          :model-value="cotType"
+          @update:model-value="saveType"
+        />
       </div>
 
       <div class="divider" />
@@ -462,6 +495,14 @@ watch(() => props.focusedId, (id) => {
 .attr-input::-webkit-outer-spin-button,
 .attr-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
+}
+
+.type-picker-wrap {
+  margin-top: 4px;
+  padding: 6px;
+  background: rgba(var(--v-theme-surface-variant), 0.15);
+  border-radius: 3px;
+  border: 1px solid rgb(var(--v-theme-surface-variant));
 }
 
 .divider {

@@ -138,8 +138,8 @@ const NATO = [
   'Uniform', 'Victor', 'Whiskey', 'Xray', 'Yankee', 'Zulu'
 ]
 
-// CoT type: friendly sea surface unmanned surface vehicle
-const COT_TYPE = 'a-f-S-X-M'
+// CoT type: friendly surface combatant
+const COT_TYPE = 'a-f-S-C'
 
 // Speed in m/s — distance advanced each 1-second tick.
 const SPEED_MS = opts.speed * (1852 / 3600)
