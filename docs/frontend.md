@@ -49,9 +49,23 @@ src/
     ScenePicker.vue       # Add-card menu listing registry entries
     cards/
       SceneNotesCard.vue  # Freeform text notes (selfManaged)
-  composables/     # Reusable composition functions (useX.js)
-  services/        # Pure modules (geometry, parsers, etc.) with no Vue deps
-  components/      # Reusable Vue components
+  composables/
+    useAssistantTools.js  # Per-route tool registration + context label helper
+  services/
+    assistant/
+      client.js           # Thin invoke wrapper for assistant_chat command
+      toolRegistry.js     # MCP-shaped register/unregister/list module
+      tools/
+        map.js            # Map surface tool bundle
+        scenes.js         # Scenes surface tool bundle
+  stores/
+    assistant.js          # Turn loop, pendingCalls, message list
+  components/
+    AppFooter.vue         # Global footer (all non-home routes)
+    assistant/
+      AssistantPanel.vue      # Docked chat card
+      AssistantMessage.vue    # Single message renderer
+      AssistantConfirmCard.vue # Confirm/cancel card for pending writes
   assets/          # Static assets (images, fonts, etc.)
 ```
 
@@ -333,6 +347,16 @@ The Scenes dashboard engine is documented in [scenes.md](./scenes.md). Key conce
 - The **card registry** (`src/stores/cardTypes.js`) defines available card types; `SceneCardHost.vue` resolves a card to its Vue component.
 - The **sceneData fabric** (`src/stores/sceneData.js`) coalesces subscriptions, batches Rust fetches, and delivers push invalidations via Tauri events.
 - Scenes are global — not mission-scoped.
+
+## Assistant
+
+The in-app AI assistant is documented in [assistant.md](./assistant.md). Key concepts:
+- A **global footer** (`AppFooter.vue`) is rendered on all non-home routes. It hosts the assistant toggle button and a reserved left slot for future status indicators.
+- The **assistant panel** (`AssistantPanel.vue`) is a docked card (bottom-right, RoutePanel-styled) that shows the chat log, pending confirms, and an input row.
+- The **tool registry** (`src/services/assistant/toolRegistry.js`) is an MCP-shaped register/unregister surface. Each route registers its tool bundle on mount and unregisters on unmount via `useAssistantTools`.
+- The **assistant store** (`src/stores/assistant.js`) owns the turn loop, pendingCalls, and message list.
+- Transport is via a Rust command (`assistant_chat`) that calls the Anthropic API — no direct HTTPS from the webview.
+- API key, provider, and model are configured in Settings → Assistant tab.
 
 ## Tracks
 

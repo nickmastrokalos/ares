@@ -82,3 +82,32 @@ Payload shape (snake_case, serialized from `CotEvent`):
 
 ### Managed State
 `ListenerState(Mutex<ListenerManager>)` is registered via `.manage()` in `run()` and injected into each command handler via Tauri's state extractor.
+
+## Assistant Command
+
+`src-tauri/src/assistant/` — Rust-side transport for the in-app AI assistant. See [assistant.md](./assistant.md) for full context.
+
+### `assistant_chat`
+
+```rust
+#[tauri::command]
+pub async fn assistant_chat(
+    provider: String,
+    model: String,
+    api_key: String,
+    system: Option<String>,
+    messages: Vec<Value>,
+    tools: Vec<Value>,
+) -> Result<Value, String>
+```
+
+Dispatches to the appropriate provider:
+
+| Provider | Endpoint | Auth header | Notes |
+|----------|----------|-------------|-------|
+| `anthropic` | `https://api.anthropic.com/v1/messages` | `x-api-key` + `anthropic-version: 2023-06-01` | `max_tokens` hard-coded to 4096 |
+| any other | — | — | Returns `Err("provider not yet supported")` |
+
+Returns the raw provider response JSON on success, or an error string. The frontend turn loop in `useAssistantStore` reads `response.content`, `response.stop_reason`, and tool_use blocks directly from the raw JSON — no transformation on the Rust side.
+
+The API key is read from the frontend's `settingsStore.assistantApiKey` and forwarded in the command payload. It is used only as a request header value and is never logged.

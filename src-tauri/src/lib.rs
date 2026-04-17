@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+mod assistant;
 mod cot;
 mod listeners;
 mod migrations;
@@ -172,6 +173,7 @@ pub fn run() {
             plugins::list_plugin_files,
             plugins::read_plugin_file,
             scenes::commands::scene_data_fetch_batch,
+            assistant::commands::assistant_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

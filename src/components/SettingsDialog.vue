@@ -18,10 +18,11 @@ const open = computed({
 })
 
 const TABS = [
-  { id: 'display', label: 'Display', icon: 'mdi-monitor-eye' },
-  { id: 'tracks',  label: 'Tracks',  icon: 'mdi-radar' },
-  { id: 'maps',    label: 'Maps',    icon: 'mdi-map-outline' },
-  { id: 'plugins', label: 'Plugins', icon: 'mdi-puzzle-outline' }
+  { id: 'display',   label: 'Display',   icon: 'mdi-monitor-eye' },
+  { id: 'tracks',    label: 'Tracks',    icon: 'mdi-radar' },
+  { id: 'maps',      label: 'Maps',      icon: 'mdi-map-outline' },
+  { id: 'plugins',   label: 'Plugins',   icon: 'mdi-puzzle-outline' },
+  { id: 'assistant', label: 'Assistant', icon: 'mdi-robot-outline' }
 ]
 
 const pluginRegistry = inject('pluginRegistry', null)
@@ -85,6 +86,30 @@ const trackBreadcrumbLength = computed({
 function breadcrumbLengthLabel(secs) {
   return secs === 60 ? '1 min' : `${secs}s`
 }
+
+// ---- Assistant settings ----
+
+const ASSISTANT_PROVIDERS = [
+  { title: 'Anthropic', value: 'anthropic' },
+  { title: 'OpenAI (coming soon)', value: 'openai', props: { disabled: true } }
+]
+
+const assistantProvider = computed({
+  get: () => settingsStore.assistantProvider,
+  set: (v) => settingsStore.setSetting('assistantProvider', v)
+})
+
+const assistantModel = computed({
+  get: () => settingsStore.assistantModel,
+  set: (v) => settingsStore.setSetting('assistantModel', v)
+})
+
+const assistantApiKey = computed({
+  get: () => settingsStore.assistantApiKey,
+  set: (v) => settingsStore.setSetting('assistantApiKey', v)
+})
+
+const showApiKey = ref(false)
 
 // ---- Offline maps ----
 
@@ -422,6 +447,75 @@ function formatBadge(ts) {
               />
             </div>
 
+          </div>
+        </v-window-item>
+
+        <!-- ---- Assistant ---- -->
+        <v-window-item value="assistant">
+          <div class="pa-4">
+            <div class="d-flex align-center">
+              <div class="flex-grow-1">
+                <div class="text-body-2">Provider</div>
+                <div class="text-caption text-medium-emphasis">
+                  Cloud LLM provider for the in-app assistant.
+                </div>
+              </div>
+              <v-select
+                v-model="assistantProvider"
+                :items="ASSISTANT_PROVIDERS"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                style="max-width: 200px"
+              />
+            </div>
+
+            <v-divider class="my-3" />
+
+            <div class="d-flex align-center">
+              <div class="flex-grow-1">
+                <div class="text-body-2">Model</div>
+                <div class="text-caption text-medium-emphasis">
+                  Model identifier sent to the provider API.
+                </div>
+              </div>
+              <v-text-field
+                v-model="assistantModel"
+                density="compact"
+                variant="outlined"
+                rounded="sm"
+                hide-details
+                style="max-width: 220px"
+              />
+            </div>
+
+            <v-divider class="my-3" />
+
+            <div>
+              <div class="d-flex align-center">
+                <div class="flex-grow-1">
+                  <div class="text-body-2">API key</div>
+                  <div class="text-caption text-medium-emphasis">
+                    Your personal API key for the selected provider.
+                  </div>
+                </div>
+                <v-text-field
+                  v-model="assistantApiKey"
+                  :type="showApiKey ? 'text' : 'password'"
+                  :append-inner-icon="showApiKey ? 'mdi-eye-off' : 'mdi-eye'"
+                  density="compact"
+                  variant="outlined"
+                  rounded="sm"
+                  hide-details
+                  style="max-width: 220px"
+                  @click:append-inner="showApiKey = !showApiKey"
+                />
+              </div>
+              <div class="text-caption text-disabled mt-2">
+                Stored locally in app data and sent only to the selected provider. Not encrypted on disk.
+              </div>
+            </div>
           </div>
         </v-window-item>
 

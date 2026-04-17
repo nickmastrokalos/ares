@@ -5,6 +5,8 @@ import { useScenesStore } from '@/stores/scenes'
 import { useSceneDataStore } from '@/stores/sceneData'
 import SceneCanvas from '@/components/scenes/SceneCanvas.vue'
 import ScenePicker from '@/components/scenes/ScenePicker.vue'
+import { useAssistantTools } from '@/composables/useAssistantTools'
+import { scenesTools } from '@/services/assistant/tools/scenes'
 
 const props = defineProps({
   sceneId: { type: String, required: true },
@@ -13,6 +15,7 @@ const props = defineProps({
 const router = useRouter()
 const scenesStore = useScenesStore()
 const sceneDataStore = useSceneDataStore()
+useAssistantTools(() => scenesTools({ scenesStore }), 'Scenes assistant')
 
 const canvasRef = ref(null)
 const pickerOpen = ref(false)

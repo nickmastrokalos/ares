@@ -2,9 +2,12 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScenesStore } from '@/stores/scenes'
+import { useAssistantTools } from '@/composables/useAssistantTools'
+import { scenesTools } from '@/services/assistant/tools/scenes'
 
 const router = useRouter()
 const scenesStore = useScenesStore()
+useAssistantTools(() => scenesTools({ scenesStore }), 'Scenes assistant')
 
 const newSceneDialog = ref(false)
 const newSceneLabel = ref('')

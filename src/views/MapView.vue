@@ -45,6 +45,8 @@ import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import MapFooter from '@/components/MapFooter.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
+import { useAssistantTools } from '@/composables/useAssistantTools'
+import { mapTools } from '@/services/assistant/tools/map'
 
 const props = defineProps({
   missionId: { type: Number, required: true }
@@ -55,6 +57,7 @@ const mapContainer = ref(null)
 const mapStore = useMapStore()
 const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
+useAssistantTools(() => mapTools({ featuresStore }), 'Map assistant')
 const tracksStore = useTracksStore()
 const ghostsStore = useGhostsStore()
 const aisStore          = useAisStore()

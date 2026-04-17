@@ -2,6 +2,8 @@
 import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
+import AppFooter from '@/components/AppFooter.vue'
+import AssistantPanel from '@/components/assistant/AssistantPanel.vue'
 import { useSettingsStore } from '@/stores/settings'
 
 const route        = useRoute()
@@ -17,8 +19,12 @@ onMounted(() => { settingsStore.load() })
 <template>
   <v-app>
     <AppSidebar v-if="route.name !== 'home'" />
-    <v-main>
+    <v-main :style="route.name !== 'home' ? 'padding-bottom: 28px' : undefined">
       <router-view />
     </v-main>
+    <template v-if="route.name !== 'home'">
+      <AppFooter />
+      <AssistantPanel />
+    </template>
   </v-app>
 </template>
