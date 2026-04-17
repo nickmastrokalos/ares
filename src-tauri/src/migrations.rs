@@ -60,5 +60,27 @@ pub fn migrations() -> Vec<Migration> {
             ",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "create_scenes_table",
+            // User-authored dashboards composed of draggable/resizable cards.
+            // Cards are stored as a JSON array in the `cards` column — card
+            // controls are card-type-specific so normalizing would require a
+            // per-type table or an EAV blob anyway.
+            sql: "
+                CREATE TABLE IF NOT EXISTS scenes (
+                    id          TEXT PRIMARY KEY,
+                    label       TEXT NOT NULL,
+                    description TEXT,
+                    icon        TEXT,
+                    order_idx   INTEGER NOT NULL DEFAULT 0,
+                    cards       TEXT NOT NULL DEFAULT '[]',
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_scenes_order ON scenes(order_idx);
+            ",
+            kind: MigrationKind::Up,
+        },
     ]
 }

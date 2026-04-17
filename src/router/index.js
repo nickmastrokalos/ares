@@ -35,8 +35,8 @@ const routes = [
   {
     path: '/scenes/:sceneId',
     name: 'scene',
-    component: () => import('@/views/ScenesView.vue'),
-    props: route => ({ sceneId: Number(route.params.sceneId) })
+    component: () => import('@/views/SceneEditorView.vue'),
+    props: route => ({ sceneId: String(route.params.sceneId) })
   }
 ]
 

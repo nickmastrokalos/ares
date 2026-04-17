@@ -30,11 +30,25 @@ src/
     MapView.vue           # Map page, mounted at /map/:missionId
     ControlHubView.vue    # Control Hub — containers/sessions management (stub)
     ConfigurationView.vue # Connector configuration pages (stub)
-    ScenesView.vue        # Scenes dashboard composer (stub)
+    ScenesView.vue        # Scene list — create/open scenes
+    SceneEditorView.vue   # Scene editor — canvas, toolbar, card picker
   stores/                 # Pinia stores (one file per domain)
     app.js                # Global app state (loading counter)
     navigation.js         # Active mission persistence for sidebar
     tracks.js             # CoT track state and Tauri event listener
+    cardTypes.js          # Static card type registry + Pinia getters
+    scenes.js             # CRUD for scenes SQLite table
+    sceneData.js          # sceneData subscription fabric (batched Rust queries + push)
+  utils/
+    sceneSerialization.js # stableSerialize, buildSceneDataKey
+  components/scenes/      # Scene engine components
+    sceneLayout.js        # clampLayout, detectCollision, placeNewCard
+    SceneCanvas.vue       # 12-col grid canvas, drag/resize (controlled)
+    SceneCard.vue         # Card shell — header, resize handles, minimize
+    SceneCardHost.vue     # Resolves card component, wires sceneData subscription
+    ScenePicker.vue       # Add-card menu listing registry entries
+    cards/
+      SceneNotesCard.vue  # Freeform text notes (selfManaged)
   composables/     # Reusable composition functions (useX.js)
   services/        # Pure modules (geometry, parsers, etc.) with no Vue deps
   components/      # Reusable Vue components
@@ -52,7 +66,7 @@ Ares uses Vue Router 4 in `createWebHistory` mode. Two original routes plus four
 | `/hub`                 | `hub`    | `ControlHubView.vue`     | Global         |
 | `/configuration`       | `config` | `ConfigurationView.vue`  | Global         |
 | `/scenes`              | `scenes` | `ScenesView.vue`         | Global         |
-| `/scenes/:sceneId`     | `scene`  | `ScenesView.vue`         | Global         |
+| `/scenes/:sceneId`     | `scene`  | `SceneEditorView.vue`    | Global         |
 
 **Rule: Map is mission-scoped; Hub/Config/Scenes are global peers.** The Hub, Configuration, and Scenes surfaces are not children of a mission — they apply to the full app and contain globally-configured connectors, vendor settings, and composed dashboards.
 
@@ -311,6 +325,14 @@ When adding a new core tool, place it in the appropriate group in *both* the `v-
 ## Plugins
 
 Third-party plugins extend the app with new toolbar buttons and mission data automation. The full authoring guide — including the plugin contract, `api` surface, lifecycle, and trust model — is in [plugins.md](./plugins.md). Relevant implementation files: `src/composables/usePluginRegistry.js`, `src/services/pluginLoader.js`, `src-tauri/src/plugins.rs`, `src/components/MapToolbar.vue` (plugin-buttons slot), `src/components/SettingsDialog.vue` (Plugins tab).
+
+## Scenes
+
+The Scenes dashboard engine is documented in [scenes.md](./scenes.md). Key concepts:
+- A **scene** is a user-authored grid of draggable/resizable cards, persisted in the `scenes` SQLite table.
+- The **card registry** (`src/stores/cardTypes.js`) defines available card types; `SceneCardHost.vue` resolves a card to its Vue component.
+- The **sceneData fabric** (`src/stores/sceneData.js`) coalesces subscriptions, batches Rust fetches, and delivers push invalidations via Tauri events.
+- Scenes are global — not mission-scoped.
 
 ## Tracks
 
