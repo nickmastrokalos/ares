@@ -5,6 +5,7 @@ import {
   rotatedBoxPolygon,
 } from '@/services/geometry'
 import { DEFAULT_FEATURE_COLOR } from '@/stores/features'
+import { parseCoordinate } from '@/services/coordinates'
 
 export function mapTools({ featuresStore, flyToGeometry }) {
   return [
@@ -64,6 +65,30 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           geometry: JSON.parse(row.geometry),
           properties: JSON.parse(row.properties)
         }
+      }
+    },
+
+    {
+      name: 'map_convert_coordinate',
+      description: 'Convert a coordinate string in MGRS, DMS, or decimal-degrees format to [longitude, latitude]. Call this whenever the user provides a coordinate that is not already in decimal degrees.',
+      readonly: true,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          coordinate: { type: 'string', description: 'Coordinate string, e.g. "18S UF 92912 87596", "36°57\'05"N 76°13\'22"W", or "36.95136, -76.22277".' },
+          format: {
+            type: 'string',
+            enum: ['mgrs', 'dms', 'dd'],
+            description: 'Format of the input string. Use "mgrs" for MGRS, "dms" for degrees/minutes/seconds, "dd" for decimal degrees.'
+          }
+        },
+        required: ['coordinate', 'format']
+      },
+      async handler({ coordinate, format }) {
+        const result = parseCoordinate(coordinate, format)
+        if (!result) return { error: `Could not parse "${coordinate}" as ${format}.` }
+        const [lng, lat] = result
+        return { longitude: lng, latitude: lat }
       }
     },
 
