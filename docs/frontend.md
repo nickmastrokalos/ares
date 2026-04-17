@@ -271,6 +271,18 @@ Currently provided:
 - **Wiring to the backend:** `ListenersDialog` calls `invoke('start_listener', ...)` / `invoke('stop_listener', ...)` on toggle and remove. `MapView` starts all enabled listeners on map load and calls `invoke('stop_all_listeners')` on unmount.
 - `useTracksStore.startListening()` wires the `cot-event` Tauri event to the track map and starts a 30-second stale-track pruning interval.
 
+## Toolbar layout
+
+`MapToolbar.vue` uses an adaptive two-mode layout driven by Vuetify's `useDisplay()` composable:
+
+- **Wide (`mdAndUp`, ≥960px):** flat buttons per group with vertical dividers — the default look. Four groups left-to-right: Annotation, Analysis, Operations, Feeds.
+- **Narrow (<960px):** each group collapses into a single icon button that opens a `v-menu` dropdown listing the group's tools. The group activator inherits the `toolbar-active` / `primary` colour when any of its tools is currently open, so state is still visible without opening the menu.
+- **Plugin buttons:** always rendered as a single `mdi-puzzle-outline` dropdown regardless of viewport width. Because plugins are unbounded in number, inlining them is never safe.
+- **Right cluster** (Import/Export, Listeners, Settings) and the **mission chevron** are always pinned and never collapse.
+- The mission name is hidden on `smAndDown` (<600px) to reclaim horizontal space.
+
+When adding a new core tool, place it in the appropriate group in *both* the `v-if="mdAndUp"` flat section and the `v-else` collapsed `v-list` for that group.
+
 ## Plugins
 
 Third-party plugins extend the app with new toolbar buttons and mission data automation. The full authoring guide — including the plugin contract, `api` surface, lifecycle, and trust model — is in [plugins.md](./plugins.md). Relevant implementation files: `src/composables/usePluginRegistry.js`, `src/services/pluginLoader.js`, `src-tauri/src/plugins.rs`, `src/components/MapToolbar.vue` (plugin-buttons slot), `src/components/SettingsDialog.vue` (Plugins tab).

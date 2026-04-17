@@ -10,6 +10,7 @@ const emit = defineEmits(['close'])
 const featuresStore = useFeaturesStore()
 const tracksStore   = useTracksStore()
 
+const minimized  = ref(false)
 const positioned = ref(false)
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
@@ -157,6 +158,14 @@ onMounted(() => {
       </v-tooltip>
       <v-spacer />
       <v-btn
+        :icon="minimized ? 'mdi-chevron-down' : 'mdi-chevron-up'"
+        size="x-small"
+        variant="text"
+        class="text-medium-emphasis header-btn"
+        @pointerdown.stop
+        @click.stop="minimized = !minimized"
+      />
+      <v-btn
         icon="mdi-close"
         size="x-small"
         variant="text"
@@ -167,7 +176,7 @@ onMounted(() => {
     </div>
 
     <!-- Filters -->
-    <div class="filter-bar" @pointerdown.stop>
+    <div v-show="!minimized" class="filter-bar" @pointerdown.stop>
       <!-- Kind -->
       <div class="filter-row">
         <span class="filter-label">Type</span>
@@ -221,7 +230,7 @@ onMounted(() => {
     </div>
 
     <!-- List -->
-    <div class="panel-body">
+    <div v-show="!minimized" class="panel-body">
       <div v-if="visibleTracks.length === 0" class="empty-state">
         {{ allTracks.length === 0 ? 'No tracks on map' : 'No tracks match filters' }}
       </div>
