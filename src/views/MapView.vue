@@ -109,7 +109,7 @@ const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher)
 // stores above are created — so the closures capture live store instances.
 useAssistantTools(
   () => [
-    ...mapTools({ featuresStore, tracksStore, settingsStore, flyToGeometry, flyTo, switchBasemap }),
+    ...mapTools({ featuresStore, tracksStore, aisStore, settingsStore, flyToGeometry, flyTo, switchBasemap }),
     ...routeTools({ featuresStore }),
     ...aisTools({ aisStore, featuresStore }),
     ...cotTools({ tracksStore, featuresStore }),

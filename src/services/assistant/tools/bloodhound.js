@@ -97,7 +97,7 @@ export function bloodhoundTools({ featuresStore, tracksStore, aisStore, bloodhou
 
     {
       name: 'bloodhound_add',
-      description: 'Add a bloodhound line between two endpoints. Each endpoint is specified by exactly one of: `*FeatureId` (mission feature), `*TrackUid` (CoT track), `*VesselMmsi` (AIS vessel), or `*Coordinate` ([longitude, latitude]). The rendered line follows both endpoints as they move and displays the great-circle distance in the user\'s distance units.',
+      description: 'Add a bloodhound line between two endpoints. Each endpoint is specified by exactly one of: `*FeatureId` (mission feature), `*TrackUid` (CoT track), `*VesselMmsi` (AIS vessel), or `*Coordinate` ([longitude, latitude]). The rendered line follows both endpoints as they move and displays the great-circle distance in the user\'s distance units.\n\nIMPORTANT — resolving named endpoints: if the user references an endpoint by name or callsign (e.g. "USV-Alpha", "Oceanus V"), you MUST call `map_find_entity` FIRST for each name, then pass the matching identifier field based on the returned "kind":\n  • kind="cot"     → pass as `fromTrackUid` / `toTrackUid`\n  • kind="ais"     → pass as `fromVesselMmsi` / `toVesselMmsi`\n  • kind="feature" → pass as `fromFeatureId` / `toFeatureId`\nDo NOT assume a name maps to a feature id without calling `map_find_entity`. Do NOT rely on `map_list_features` alone — it excludes CoT tracks and AIS vessels, which is a common cause of wrong-endpoint errors.',
       readonly: false,
       inputSchema: {
         type: 'object',

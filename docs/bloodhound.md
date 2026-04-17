@@ -105,6 +105,12 @@ Registered from `src/services/assistant/tools/bloodhound.js`. Each endpoint acce
 | `bloodhound_remove` | `id` | |
 | `bloodhound_clear`  | — | |
 
+### Named-endpoint resolution
+
+An endpoint can live in one of three stores (CoT tracks, AIS vessels, mission features), and the agent has no way to know from a name alone which one owns it. Early versions of the bundle let the agent call `map_list_features` / `ais_list_vessels` one-at-a-time and guess — which failed loudly when a CoT track name (e.g. "USV-Alpha") got confused with an unrelated mission-feature id.
+
+The canonical resolver is `map_find_entity(name)` (in `tools/map.js`), which searches all three stores in one call and returns each hit with a typed `kind` field. The `bloodhound_add` description directs the agent to call `map_find_entity` first for any named endpoint, then translate `kind` → the matching id field (`cot`→`trackUid`, `ais`→`vesselMmsi`, `feature`→`featureId`). This removes the store-guessing step from the tool chain.
+
 ## Files
 
 | File | Role |

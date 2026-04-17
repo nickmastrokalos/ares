@@ -50,7 +50,7 @@ const ENTITY_ENUM = Object.keys(ENTITY_SUFFIX)
 // back into the word the agent reasons with ("friendly", "hostile", …).
 const AFFIL_WORD = Object.fromEntries(Object.entries(AFFIL_MAP).map(([w, c]) => [c, w]))
 
-export function mapTools({ featuresStore, tracksStore, settingsStore, flyToGeometry, flyTo, switchBasemap }) {
+export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, flyToGeometry, flyTo, switchBasemap }) {
   return [
 
     // ── Read ─────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ export function mapTools({ featuresStore, tracksStore, settingsStore, flyToGeome
 
     {
       name: 'map_list_features',
-      description: 'List mission-owned features on the map — shapes, routes, points, and MANUAL tracks. Manual tracks expose "affiliation" (friendly / hostile / civilian / unknown). IMPORTANT: this does NOT include live CoT tracks received from listeners — call cot_list_tracks for those. When the user says "tracks" without qualification, consider consulting both tools. For containment questions ("what is inside the box?"), prefer map_features_in_area, which checks both sources in one call.',
+      description: 'List mission-owned features on the map — shapes, routes, points, and MANUAL tracks. Manual tracks expose "affiliation" (friendly / hostile / civilian / unknown). IMPORTANT: this does NOT include live CoT tracks received from listeners (call cot_list_tracks) and does NOT include AIS vessels (call ais_list_vessels). When the user refers to an entity by NAME or CALLSIGN and you are not certain which source owns it, DO NOT guess — call `map_find_entity` instead, which searches all three sources at once. When the user says "tracks" without qualification, consider consulting both this tool and cot_list_tracks. For containment questions ("what is inside the box?"), prefer map_features_in_area, which checks both sources in one call.',
       readonly: true,
       inputSchema: { type: 'object', properties: {}, required: [] },
       async handler() {
@@ -90,6 +90,106 @@ export function mapTools({ featuresStore, tracksStore, settingsStore, flyToGeome
           }
           return summary
         })
+      }
+    },
+
+    {
+      name: 'map_find_entity',
+      description: 'Resolve a name or identifier to a concrete on-map entity across ALL live sources in one call — CoT tracks (from listeners), AIS vessels, and mission features (shapes, routes, manual tracks, points). ALWAYS call this FIRST whenever the user references something by name or callsign (e.g. "USV-Alpha", "Oceanus V", "FRND-1") before feeding an id into any other tool (bloodhound_add, map_measure_distance, map_fly_to_feature, map_move_feature, etc.). Do NOT guess which list tool owns a name. Each result has a "kind" field telling you which identifier field to use downstream: kind="cot" → use uid (pass as trackUid / fromTrackUid), kind="ais" → use mmsi (pass as vesselMmsi / fromVesselMmsi), kind="feature" → use id (pass as featureId / fromFeatureId).',
+      readonly: true,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Case-insensitive substring to match against callsigns, vessel names, feature names, uids, and MMSIs.'
+          },
+          kinds: {
+            type: 'array',
+            items: { type: 'string', enum: ['cot', 'ais', 'feature'] },
+            description: 'Optional whitelist of entity kinds to search. Omit to search all three.'
+          },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            description: 'Max total results to return. Default 25.'
+          }
+        },
+        required: ['name']
+      },
+      async handler({ name, kinds, limit = 25 }) {
+        const needle = String(name ?? '').trim().toLowerCase()
+        if (!needle) return { error: 'Provide a non-empty name.' }
+        const allow = kinds?.length ? new Set(kinds) : null
+        const results = []
+
+        if (!allow || allow.has('cot')) {
+          const tracks = tracksStore?.tracks
+          if (tracks) {
+            for (const t of tracks.values()) {
+              const callsign = t.callsign ?? t.uid
+              if (callsign.toLowerCase().includes(needle) || t.uid.toLowerCase().includes(needle)) {
+                results.push({
+                  kind: 'cot',
+                  uid: t.uid,
+                  name: callsign,
+                  coordinate: [t.lon, t.lat],
+                  affiliation: AFFIL_WORD[t.cotType?.[2]] ?? 'unknown',
+                  cotType: t.cotType ?? null
+                })
+              }
+            }
+          }
+        }
+
+        if (!allow || allow.has('ais')) {
+          const vessels = aisStore?.vessels
+          if (vessels) {
+            for (const v of vessels.values()) {
+              const vname = v.name ?? String(v.mmsi)
+              const mmsi  = String(v.mmsi)
+              if (vname.toLowerCase().includes(needle) || mmsi.includes(needle)) {
+                results.push({
+                  kind: 'ais',
+                  mmsi,
+                  name: vname,
+                  coordinate: [v.longitude, v.latitude],
+                  vesselType: v.vesselType ?? ''
+                })
+              }
+            }
+          }
+        }
+
+        if (!allow || allow.has('feature')) {
+          for (const f of featuresStore.features) {
+            const props = JSON.parse(f.properties)
+            const fname = props.name ?? props.callsign ?? f.type
+            if (fname.toLowerCase().includes(needle)) {
+              const entry = {
+                kind: 'feature',
+                id: f.id,
+                type: f.type,
+                name: fname,
+                color: props.color ?? DEFAULT_FEATURE_COLOR
+              }
+              if (f.type === 'manual-track') {
+                entry.affiliation = AFFIL_WORD[props.affiliation] ?? 'unknown'
+                if (props.cotType) entry.cotType = props.cotType
+              }
+              results.push(entry)
+            }
+          }
+        }
+
+        return {
+          query: name,
+          matchCount: results.length,
+          returnedCount: Math.min(results.length, limit),
+          truncated: results.length > limit,
+          results: results.slice(0, limit)
+        }
       }
     },
 
