@@ -4,6 +4,7 @@ use std::sync::Mutex;
 mod cot;
 mod listeners;
 mod migrations;
+mod plugins;
 mod tileserver;
 
 use listeners::ListenerManager;
@@ -167,6 +168,8 @@ pub fn run() {
             add_tile_path,
             remove_tile_path,
             list_tilesets,
+            plugins::list_plugin_files,
+            plugins::read_plugin_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

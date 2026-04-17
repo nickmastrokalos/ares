@@ -21,6 +21,8 @@ import { useMapManualTracks } from '@/composables/useMapManualTracks'
 import { useMapGhosts } from '@/composables/useMapGhosts'
 import { useMapAis } from '@/composables/useMapAis'
 import { getBasemap } from '@/services/basemaps'
+import { usePluginRegistry } from '@/composables/usePluginRegistry'
+import { loadPlugins } from '@/services/pluginLoader'
 import neCountries from '@/assets/ne-countries-110m.json'
 import MapToolbar from '@/components/MapToolbar.vue'
 import DrawPanel from '@/components/DrawPanel.vue'
@@ -79,6 +81,7 @@ const { ranging, toggleRange } = useMapRange(() => map)
 const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher)
 const externalSuppress = computed(() => ranging.value || routing.value)
 const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress, dispatcher)
+const pluginRegistry = usePluginRegistry({ flyToGeometry })
 const suppressTrackPanel = computed(() => ranging.value || routing.value || placing.value != null)
 const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
@@ -92,6 +95,8 @@ provide('draggingFeature', draggingFeature)
 provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
+
+provide('pluginRegistry', pluginRegistry)
 
 provide('setInterceptMarker', (lon, lat) => {
   if (!map) return
@@ -199,6 +204,7 @@ onMounted(async () => {
   }
 
   await settingsStore.load()
+  loadPlugins(pluginRegistry)
   await tileserverStore.load()
   await aisStore.load()
   const basemap = resolveBasemapTiles(settingsStore.selectedBasemap)
@@ -347,6 +353,7 @@ onUnmounted(async () => {
       :intercept-panel-open="interceptPanelOpen"
       :ais-panel-open="aisPanelOpen"
       :mission-name="featuresStore.activeMission?.name || ''"
+      :plugin-buttons="pluginRegistry.allToolbarButtons.value"
       @toggle-draw="toggleDrawPanel"
       @toggle-layers="toggleLayersPanel"
       @toggle-measure="toggleMeasure"
