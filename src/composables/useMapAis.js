@@ -84,10 +84,12 @@ export function useMapAis(getMap, dispatcher = null, suppress = { value: false }
   }
 
   function onMouseEnter() {
+    if (suppress.value) return
     getMap().getCanvas().style.cursor = 'pointer'
   }
 
   function onMouseLeave() {
+    if (suppress.value) return
     getMap().getCanvas().style.cursor = ''
   }
 
