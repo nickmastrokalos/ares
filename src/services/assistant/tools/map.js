@@ -369,7 +369,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_create_track',
-      description: 'Place a manual track on the map. Infer affiliation from user phrasing ("friendly" → affiliation="friendly", "hostile" → "hostile", etc.). Infer entity_type from what the user describes ("tank" → "armor", "helicopter" → "helicopter", "ship" → "surface_vessel"). Omit entity_type if the user has not described a specific entity — the track will render as a plain circle.',
+      description: 'Place a manual track on the map. Infer affiliation from user phrasing ("friendly" → "friendly", "hostile" → "hostile", etc.). Always supply entity_type — infer it from context ("tank" → "armor", "helo" → "helicopter", "ship" → "surface_vessel"); use "ground" when the user says just "track" or "contact" without specifying an entity type.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -392,12 +392,12 @@ export function mapTools({ featuresStore, flyToGeometry }) {
               'surface_vessel', 'combatant', 'submarine',
               'sof'
             ],
-            description: 'Entity type for MIL-STD-2525 symbology. Infer from context: "tank"→"armor", "helo"→"helicopter", "fighter jet"→"fixed_wing", "ship"→"surface_vessel", "sub"→"submarine". Omit if no entity type was specified.'
+            description: 'MIL-STD-2525 entity type. Infer from context: "tank"→"armor", "helo"→"helicopter", "fighter"→"fixed_wing", "ship"→"surface_vessel", "sub"→"submarine". Use "ground" as the default when the user has not specified an entity type.'
           },
           course: { type: 'number', description: 'Heading in degrees (0–360). Defaults to 0.' },
           speed:  { type: 'number', description: 'Speed in knots. Defaults to 0.' }
         },
-        required: ['coordinate', 'callsign']
+        required: ['coordinate', 'callsign', 'entity_type']
       },
       previewRender({ coordinate, callsign, affiliation, entity_type }) {
         const [lon, lat] = coordinate
