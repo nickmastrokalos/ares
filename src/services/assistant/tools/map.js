@@ -381,8 +381,8 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           callsign: { type: 'string', description: 'Short label or callsign. Do not include the affiliation word here.' },
           affiliation: {
             type: 'string',
-            enum: ['friendly', 'hostile', 'neutral', 'unknown', 'generic'],
-            description: 'Tactical affiliation inferred from user phrasing. Use "generic" when not specified.'
+            enum: ['friendly', 'hostile', 'neutral', 'unknown'],
+            description: 'Tactical affiliation. Infer from user phrasing ("friendly track" → "friendly", "hostile contact" → "hostile"). Use "unknown" when the user has not specified an affiliation.'
           },
           entity_type: {
             type: 'string',
@@ -406,7 +406,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
         return `Track "${callsign}" (${aff}${type}) at ${lat.toFixed(4)}, ${lon.toFixed(4)}`
       },
       async handler({ coordinate, callsign, affiliation, entity_type, course = 0, speed = 0 }) {
-        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u', generic: 'g' }
+        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u' }
         const ENTITY_SUFFIX = {
           ground:            'G',
           infantry:          'G-U-C-I',
@@ -425,7 +425,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           submarine:         'U',
           sof:               'F',
         }
-        const affilCode = AFFIL_MAP[affiliation] ?? 'g'
+        const affilCode = AFFIL_MAP[affiliation] ?? 'u'
         const cotType   = entity_type ? `a-${affilCode}-${ENTITY_SUFFIX[entity_type]}` : null
         const geometry  = { type: 'Point', coordinates: coordinate }
         const id = await featuresStore.addFeature('manual-track', geometry, {
@@ -492,7 +492,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           callsign: { type: 'string' },
           affiliation: {
             type: 'string',
-            enum: ['friendly', 'hostile', 'neutral', 'unknown', 'generic']
+            enum: ['friendly', 'hostile', 'neutral', 'unknown']
           },
           entity_type: {
             type: 'string',
@@ -517,7 +517,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
         return parts.join(' · ')
       },
       async handler({ id, callsign, affiliation, entity_type, course, speed }) {
-        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u', generic: 'g' }
+        const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u' }
         const ENTITY_SUFFIX = {
           ground:            'G',
           infantry:          'G-U-C-I',
