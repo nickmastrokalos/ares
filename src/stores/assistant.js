@@ -133,10 +133,15 @@ export const useAssistantStore = defineStore('assistant', () => {
       return
     }
 
+    const mapHint = contextLabel.value === 'Map assistant'
+      ? ' When placing tracks, always infer the affiliation (friendly/hostile/neutral/unknown) from the user\'s phrasing and pass it as the `affiliation` parameter — never embed it in the callsign.'
+      : ''
+
     const systemPrompt =
       `You are a helpful assistant embedded in Ares, a Tauri desktop application for mission planning and situational awareness. ` +
-      `The current context is: ${contextLabel.value}. ` +
-      `Use the provided tools to read data and take actions. Always confirm your understanding before making irreversible changes when possible.`
+      `The current context is: ${contextLabel.value}.` +
+      mapHint +
+      ` Use the provided tools to read data and take actions. Always confirm your understanding before making irreversible changes when possible.`
 
     // eslint-disable-next-line no-constant-condition
     while (true) {

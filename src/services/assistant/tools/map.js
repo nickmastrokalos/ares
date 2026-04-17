@@ -344,7 +344,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
 
     {
       name: 'map_create_track',
-      description: 'Place a manual track (unit, contact, or position) on the map at a coordinate.',
+      description: 'Place a manual track (unit, contact, or position) on the map at a coordinate. When the user says "a friendly track", "a hostile contact", etc., extract the affiliation word into the `affiliation` field — do NOT include it in the callsign.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -353,11 +353,11 @@ export function mapTools({ featuresStore, flyToGeometry }) {
             type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
             description: '[longitude, latitude]'
           },
-          callsign: { type: 'string', description: 'Label / callsign for the track.' },
+          callsign: { type: 'string', description: 'Short label or callsign. Do not include the affiliation word (friendly/hostile/neutral/unknown) here.' },
           affiliation: {
             type: 'string',
             enum: ['friendly', 'hostile', 'neutral', 'unknown'],
-            description: 'Track affiliation. Defaults to "unknown".'
+            description: 'Tactical affiliation inferred from the user\'s phrasing ("a friendly track" → "friendly", "hostile contact" → "hostile"). Defaults to "unknown".'
           },
           course: { type: 'number', description: 'Heading in degrees (0–360). Defaults to 0.' },
           speed: { type: 'number', description: 'Speed in knots. Defaults to 0.' }
