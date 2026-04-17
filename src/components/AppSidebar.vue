@@ -98,8 +98,20 @@ function isSceneActive(id) {
         </template>
       </div>
 
-      <!-- Missions — fixed bottom, exits to mission picker -->
+      <!-- Fixed bottom: settings + missions -->
       <div class="sidebar-bottom">
+        <v-tooltip text="Settings" location="right">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              icon="mdi-cog-outline"
+              size="small"
+              :to="{ name: 'settings' }"
+              :color="isActive('settings') ? 'primary' : undefined"
+              :class="{ 'text-medium-emphasis': !isActive('settings') }"
+            />
+          </template>
+        </v-tooltip>
         <v-tooltip text="Missions" location="right">
           <template #activator="{ props }">
             <v-btn

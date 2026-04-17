@@ -37,6 +37,11 @@ const routes = [
     name: 'scene',
     component: () => import('@/views/SceneEditorView.vue'),
     props: route => ({ sceneId: String(route.params.sceneId) })
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/SettingsView.vue')
   }
 ]
 
