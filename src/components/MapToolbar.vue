@@ -13,7 +13,8 @@ defineProps({
   ghostPanelOpen: Boolean,
   interceptPanelOpen: Boolean,
   aisPanelOpen: Boolean,
-  missionName: { type: String, default: '' }
+  missionName: { type: String, default: '' },
+  pluginButtons: { type: Array, default: () => [] }
 })
 </script>
 
@@ -189,6 +190,27 @@ defineProps({
           />
         </template>
       </v-tooltip>
+
+      <!-- Plugin buttons -->
+      <template v-if="pluginButtons.length > 0">
+        <v-divider vertical class="mx-2 toolbar-divider" />
+        <v-tooltip
+          v-for="btn in pluginButtons"
+          :key="btn.id"
+          :text="btn.tooltip || btn.id"
+          location="bottom"
+        >
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              :icon="btn.icon"
+              size="small"
+              class="text-medium-emphasis"
+              @click="btn.onClick"
+            />
+          </template>
+        </v-tooltip>
+      </template>
     </div>
 
     <v-spacer />

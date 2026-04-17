@@ -271,6 +271,10 @@ Currently provided:
 - **Wiring to the backend:** `ListenersDialog` calls `invoke('start_listener', ...)` / `invoke('stop_listener', ...)` on toggle and remove. `MapView` starts all enabled listeners on map load and calls `invoke('stop_all_listeners')` on unmount.
 - `useTracksStore.startListening()` wires the `cot-event` Tauri event to the track map and starts a 30-second stale-track pruning interval.
 
+## Plugins
+
+Third-party plugins extend the app with new toolbar buttons and mission data automation. The full authoring guide — including the plugin contract, `api` surface, lifecycle, and trust model — is in [plugins.md](./plugins.md). Relevant implementation files: `src/composables/usePluginRegistry.js`, `src/services/pluginLoader.js`, `src-tauri/src/plugins.rs`, `src/components/MapToolbar.vue` (plugin-buttons slot), `src/components/SettingsDialog.vue` (Plugins tab).
+
 ## Tracks
 
 The project has two track systems — ephemeral CoT-feed tracks and persistent user-placed manual tracks. Both are documented together in [tracks.md](./tracks.md), including:
