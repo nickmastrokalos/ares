@@ -144,6 +144,52 @@ export function mapTools({ featuresStore }) {
         await featuresStore.removeFeature(id)
         return { success: true }
       }
+    },
+    {
+      name: 'map_create_track',
+      description: 'Place a manual track (unit or contact) on the map at a coordinate. Use this for creating tracks, units, contacts, or positions.',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          coordinate: {
+            type: 'array',
+            items: { type: 'number' },
+            minItems: 2,
+            maxItems: 2,
+            description: 'Position as [longitude, latitude].'
+          },
+          callsign: {
+            type: 'string',
+            description: 'Label / callsign for the track.'
+          },
+          affiliation: {
+            type: 'string',
+            enum: ['friendly', 'hostile', 'neutral', 'unknown'],
+            description: 'Track affiliation. Defaults to "unknown".'
+          },
+          course: {
+            type: 'number',
+            description: 'Heading in degrees (0–360). Defaults to 0.'
+          },
+          speed: {
+            type: 'number',
+            description: 'Speed in knots. Defaults to 0.'
+          }
+        },
+        required: ['coordinate', 'callsign']
+      },
+      previewRender({ coordinate, callsign, affiliation }) {
+        const [lon, lat] = coordinate
+        const aff = affiliation ?? 'unknown'
+        return `Track "${callsign}" (${aff}) at ${lat.toFixed(4)}, ${lon.toFixed(4)}`
+      },
+      async handler({ coordinate, callsign, affiliation = 'unknown', course = 0, speed = 0 }) {
+        const geometry = { type: 'Point', coordinates: coordinate }
+        const props = { callsign, affiliation, course, speed, hae: 0 }
+        const id = await featuresStore.addFeature('manual-track', geometry, props)
+        return { id, success: true }
+      }
     }
   ]
 }
