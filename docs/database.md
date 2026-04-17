@@ -103,6 +103,21 @@ Individual geometries belonging to a mission.
 | `created_at` | TEXT    | `datetime('now')` default.                                                                |
 | `updated_at` | TEXT    | Bumped on edit.                                                                           |
 
+### `scenes` (migration v3)
+
+User-authored dashboards composed of draggable/resizable cards. Global — not mission-scoped. See [scenes.md](./scenes.md) for the full data model.
+
+| Column       | Type    | Notes |
+|--------------|---------|-------|
+| `id`         | TEXT PK | UUID (generated in the webview). |
+| `label`      | TEXT    | Scene name. |
+| `description`| TEXT    | Optional description. |
+| `icon`       | TEXT    | MDI icon name. |
+| `order_idx`  | INTEGER | Display order. |
+| `cards`      | TEXT    | JSON array of card objects `{id, typeId, source, controls, layout:{x,y,w,h}}`. |
+| `created_at` | TEXT    | `datetime('now')` default. |
+| `updated_at` | TEXT    | Bumped on save. |
+
 ### Migration v2 — rename to missions
 Dropped the "projects" vocabulary in favor of "missions" to match the
 mission-picker entry flow on the home page. SQLite can rename a parent table
