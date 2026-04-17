@@ -12,8 +12,7 @@ export const AFFIL_CONFIG = {
   f: { label: 'Friendly', color: '#4a9ade', prefix: 'FRND' },
   n: { label: 'Civilian', color: '#4caf50', prefix: 'CIV' },
   u: { label: 'Unknown',  color: '#ffeb3b', prefix: 'UNKN' },
-  h: { label: 'Hostile',  color: '#f44336', prefix: 'HSTL' },
-  g: { label: 'Track',    color: '#9e9e9e', prefix: 'TRK'  }
+  h: { label: 'Hostile',  color: '#f44336', prefix: 'HSTL' }
 }
 
 const AFFIL_MATCH = [
@@ -22,8 +21,7 @@ const AFFIL_MATCH = [
   'h', '#f44336',
   'n', '#4caf50',
   'u', '#ffeb3b',
-  'g', '#9e9e9e',
-  '#9e9e9e'
+  '#ffeb3b'
 ]
 
 // Filter expressions keyed by milStd mode.

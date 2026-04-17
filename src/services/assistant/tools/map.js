@@ -382,7 +382,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           affiliation: {
             type: 'string',
             enum: ['friendly', 'hostile', 'neutral', 'unknown'],
-            description: 'Tactical affiliation. Infer from user phrasing ("friendly track" → "friendly", "hostile contact" → "hostile"). Use "unknown" when the user has not specified an affiliation.'
+            description: 'Tactical affiliation. Infer from user phrasing ("friendly track" → "friendly", "hostile contact" → "hostile"). Use "friendly" when the user has not specified an affiliation.'
           },
           entity_type: {
             type: 'string',
@@ -407,6 +407,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
       },
       async handler({ coordinate, callsign, affiliation, entity_type, course = 0, speed = 0 }) {
         const AFFIL_MAP = { friendly: 'f', hostile: 'h', neutral: 'n', unknown: 'u' }
+        const DEFAULT_AFFIL = 'f'
         const ENTITY_SUFFIX = {
           ground:            'G',
           infantry:          'G-U-C-I',
@@ -425,7 +426,7 @@ export function mapTools({ featuresStore, flyToGeometry }) {
           submarine:         'U',
           sof:               'F',
         }
-        const affilCode = AFFIL_MAP[affiliation] ?? 'u'
+        const affilCode = AFFIL_MAP[affiliation] ?? DEFAULT_AFFIL
         const cotType   = entity_type ? `a-${affilCode}-${ENTITY_SUFFIX[entity_type]}` : null
         const geometry  = { type: 'Point', coordinates: coordinate }
         const id = await featuresStore.addFeature('manual-track', geometry, {
