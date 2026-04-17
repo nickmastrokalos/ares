@@ -453,7 +453,9 @@ export function mapTools({ featuresStore, flyToGeometry }) {
         return `Rename feature #${id} → "${name}"`
       },
       async handler({ id, name }) {
-        await featuresStore.updateFeatureProperties(id, { name })
+        const row = featuresStore.features.find(f => f.id === id)
+        const patch = row?.type === 'manual-track' ? { callsign: name } : { name }
+        await featuresStore.updateFeatureProperties(id, patch)
         return { success: true }
       }
     },
