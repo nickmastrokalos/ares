@@ -48,6 +48,11 @@ function clearAll() {
   bh?.clearAll()
 }
 
+function close() {
+  if (bh?.bloodhounding.value) bh.toggleSelecting()
+  emit('close')
+}
+
 onMounted(() => {
   pos.value = { x: 12, y: 80 }
   positioned.value = true
@@ -85,7 +90,7 @@ onMounted(() => {
         variant="text"
         class="text-medium-emphasis header-btn"
         @pointerdown.stop
-        @click.stop="emit('close')"
+        @click.stop="close"
       />
     </div>
 

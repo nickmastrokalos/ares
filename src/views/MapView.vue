@@ -92,18 +92,19 @@ const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
 const dispatcher = useClickDispatcher()
-const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher)
-const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const bloodhoundApi = useMapBloodhound(() => map)
 const { bloodhounding } = bloodhoundApi
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher)
-const externalSuppress = computed(() => bloodhounding.value || routing.value)
-const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress, dispatcher)
+const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, bloodhounding)
+const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, bloodhounding)
+const suppressEntityClicks = computed(
+  () => bloodhounding.value || routing.value || placing.value != null
+)
+const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
 const pluginRegistry = usePluginRegistry({ flyToGeometry })
-const suppressTrackPanel = computed(() => bloodhounding.value || routing.value || placing.value != null)
-const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel, dispatcher)
+const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
-const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher)
+const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppressEntityClicks)
 
 // Register assistant tool bundles. Factories run once on mount, after the
 // stores above are created — so the closures capture live store instances.

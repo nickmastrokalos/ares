@@ -42,7 +42,7 @@ const SHAPE_ICONS = {
   image:   'mdi-image-outline'
 }
 
-export function useMapDraw(getMap, dispatcher = null) {
+export function useMapDraw(getMap, dispatcher = null, suppress = { value: false }) {
   const activeTool = ref(null)
   const featuresStore = useFeaturesStore()
   const settingsStore = useSettingsStore()
@@ -812,7 +812,7 @@ export function useMapDraw(getMap, dispatcher = null) {
       dispatcher.register('draw-features', {
         layers: SELECTABLE_LAYERS,
         action: (f) => featuresStore.selectFeature(f.properties._dbId),
-        suppress: () => Boolean(activeTool.value) || isMovingFeature,
+        suppress: () => Boolean(activeTool.value) || isMovingFeature || suppress.value,
         label: (f) => {
           const type = f.properties._type
           return {

@@ -74,6 +74,7 @@ export function useMapBloodhound(getMap) {
   // falls back to a raw coordinate for misc hits.
   const SNAP_LAYERS = [
     'cot-tracks-points',
+    'cot-tracks-symbols',
     'ais-vessels-points',
     'ais-vessels-arrows',
     'manual-tracks-points',
@@ -81,6 +82,8 @@ export function useMapBloodhound(getMap) {
     'draw-features-points',
     'draw-features-line',
     'draw-features-fill',
+    'draw-image-bounds-fill',
+    'route-line',
     'route-dot'
   ]
 
@@ -331,7 +334,7 @@ export function useMapBloodhound(getMap) {
     const hit = hits[0]
     const layer = hit.layer.id
 
-    if (layer === 'cot-tracks-points') {
+    if (layer === 'cot-tracks-points' || layer === 'cot-tracks-symbols') {
       const uid = hit.properties.uid
       const t = tracksStore.tracks.get(uid)
       if (t) return { kind: 'cot', uid, coord: [t.lon, t.lat] }
@@ -341,6 +344,11 @@ export function useMapBloodhound(getMap) {
       const mmsi = String(hit.properties.mmsi)
       const v = aisStore.vessels.get(mmsi)
       if (v) return { kind: 'ais', mmsi, coord: [v.longitude, v.latitude] }
+      // Store lookup failed — the feature was rendered but the backing vessel
+      // is no longer in the store (likely a poll rebuilt the map just after
+      // render). Anchor to the clicked coord; the watcher will snap back to
+      // live position on the next poll if the mmsi reappears.
+      return { kind: 'ais', mmsi, coord: [hit.geometry.coordinates[0], hit.geometry.coordinates[1]] }
     }
 
     // All feature-backed layers (draw shapes, manual tracks, route dots)

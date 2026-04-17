@@ -48,7 +48,7 @@ function createArrowImage() {
 const DEBOUNCE_MS  = 600
 const POLL_MS      = 30_000
 
-export function useMapAis(getMap, dispatcher = null) {
+export function useMapAis(getMap, dispatcher = null, suppress = { value: false }) {
   const aisStore      = useAisStore()
   const settingsStore = useSettingsStore()
   let initialized   = false
@@ -77,6 +77,7 @@ export function useMapAis(getMap, dispatcher = null) {
   }
 
   function onVesselClick(e) {
+    if (suppress.value) return
     const feature = e.features?.[0]
     if (!feature) return
     aisStore.openPanel(String(feature.properties.mmsi))
@@ -176,7 +177,7 @@ export function useMapAis(getMap, dispatcher = null) {
       dispatcher.register('ais-vessels', {
         layers: [AIS_LAYER, AIS_LAYER_ARROWS],
         action: (f) => aisStore.openPanel(String(f.properties.mmsi)),
-        suppress: () => false,
+        suppress: () => suppress.value,
         label: (f) => ({
           text: f.properties.name || String(f.properties.mmsi),
           subtitle: 'AIS Vessel',
