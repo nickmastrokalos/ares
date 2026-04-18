@@ -64,6 +64,8 @@ For every perimeter with `alert=true`, on each tick:
 - Skip the perimeter's own owner.
 - If `distanceBetween(intruder, center) < radius` (great-circle, via `src/services/geometry.js`), mark the intruder as breached.
 
+**AIS visibility gate** — the AIS loop is skipped entirely when `aisStore.visible === false`. A breach halo floating over empty map (with no vessel rendered) is confusing, and an operator who has explicitly hidden AIS has opted out of AIS-driven alerting. A watcher on `aisStore.visible` triggers `reresolveAll()` so breaches appear / disappear immediately on toggle.
+
 Results drive two MapLibre sources:
 
 | Source            | Layer                  | Role                                                                                 |
