@@ -23,7 +23,7 @@ Every mutation writes through immediately — there is no dirty/save cycle. The 
 
 - **Hover a marker** to reveal its full text in an HTML tooltip above the pin. The tooltip is suppressed while the pin is being dragged.
 - **Drag a marker** to move it — the new position persists on pointerup. A small drag threshold (4 px) prevents accidental nudges on click.
-- **Click a marker** (no drag) selects it. `selectedId` updates; the panel scrolls the corresponding row into view and outlines it.
+- **Click a marker** (no drag) selects it and opens the `AnnotationsPanel` (if closed). `selectedId` updates; the panel scrolls the corresponding row into view and outlines it. The open-panel callback is passed into `useMapAnnotations` from `MapView.vue` — the composable itself doesn't own panel visibility.
 - Annotations do not block other click interactions. They are HTML markers with their own pointer handlers; map clicks / track clicks / draw clicks continue to work normally when not dragging an annotation.
 
 ## Panel UX
@@ -48,7 +48,7 @@ Panel and marker use the same 8-swatch palette (yellow / orange / pink / red / g
 
 ## Programmatic API
 
-`useMapAnnotations(getMap, missionId)` returns:
+`useMapAnnotations(getMap, missionId, onRequestOpenPanel?)` returns:
 
 ```js
 {
@@ -66,6 +66,8 @@ Panel and marker use the same 8-swatch palette (yellow / orange / pink / red / g
 ```
 
 `missionId` scopes persistence. Pass `null` to disable persistence entirely (tests, non-mission views). `init()` must be called after the MapLibre style has loaded — `MapView.vue` runs it inside `map.on('load')` alongside the other composables.
+
+`onRequestOpenPanel` is an optional callback fired when the user clicks a pin (no drag). `MapView.vue` passes `() => { annotationsPanelOpen.value = true }` so clicking a note opens the editor panel.
 
 The composable is provided under the `'annotationsApi'` inject key from `MapView.vue`. `AnnotationsPanel.vue` injects it.
 
