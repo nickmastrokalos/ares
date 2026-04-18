@@ -40,7 +40,7 @@ function ensureMilStdIcons(map, features) {
   }
 }
 
-export function useMapTracks(getMap, ranging = { value: false }, dispatcher = null) {
+export function useMapTracks(getMap, suppress = { value: false }, dispatcher = null) {
   const tracksStore   = useTracksStore()
   const settingsStore = useSettingsStore()
   let initialized = false
@@ -151,7 +151,7 @@ export function useMapTracks(getMap, ranging = { value: false }, dispatcher = nu
       dispatcher.register('cot-tracks', {
         layers: [TRACKS_LAYER_POINTS, TRACKS_LAYER_SYMBOLS],
         action: (f) => tracksStore.openPanel(f.properties.uid),
-        suppress: () => ranging.value,
+        suppress: () => suppress.value,
         label: (f) => ({
           text: f.properties.callsign || f.properties.uid,
           subtitle: 'Track',
@@ -161,7 +161,7 @@ export function useMapTracks(getMap, ranging = { value: false }, dispatcher = nu
       })
     } else {
       const onTrackClick = (e) => {
-        if (ranging.value) return
+        if (suppress.value) return
         const uid = e.features?.[0]?.properties?.uid
         if (uid) tracksStore.openPanel(uid)
       }

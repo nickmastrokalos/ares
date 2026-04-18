@@ -82,5 +82,50 @@ pub fn migrations() -> Vec<Migration> {
             ",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "create_bullseyes_table",
+            // One bullseye per mission — mission_id is the PK, which both
+            // enforces the one-per-mission invariant and lets FK cascade
+            // clean up on mission delete. show_cardinals is stored as 0/1
+            // per SQLite boolean convention.
+            sql: "
+                CREATE TABLE IF NOT EXISTS bullseyes (
+                    mission_id     INTEGER PRIMARY KEY,
+                    lat            REAL    NOT NULL,
+                    lon            REAL    NOT NULL,
+                    name           TEXT    NOT NULL,
+                    ring_interval  REAL    NOT NULL,
+                    ring_count     INTEGER NOT NULL,
+                    show_cardinals INTEGER NOT NULL,
+                    updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+                );
+            ",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "create_annotations_table",
+            // Operator-placed sticky notes pinned to a map location. Many
+            // per mission; mission_id is a plain FK (not PK) so duplicates
+            // are allowed. `color` is stored as a hex string so the UI can
+            // pick from any palette — the schema is colour-blind.
+            sql: "
+                CREATE TABLE IF NOT EXISTS annotations (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mission_id  INTEGER NOT NULL,
+                    lat         REAL    NOT NULL,
+                    lon         REAL    NOT NULL,
+                    text        TEXT    NOT NULL,
+                    color       TEXT    NOT NULL DEFAULT '#ffeb3b',
+                    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                    updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_annotations_mission ON annotations(mission_id);
+            ",
+            kind: MigrationKind::Up,
+        },
     ]
 }

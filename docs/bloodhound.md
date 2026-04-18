@@ -60,12 +60,23 @@ The click handler routes by topmost layer hit:
 
 | Layer                                                     | Endpoint kind                              |
 |-----------------------------------------------------------|--------------------------------------------|
-| `cot-tracks-points`                                       | `{ kind: 'cot', uid, coord }`              |
+| `cot-tracks-points`, `cot-tracks-symbols`                 | `{ kind: 'cot', uid, coord }`              |
 | `ais-vessels-points`, `ais-vessels-arrows`                | `{ kind: 'ais', mmsi, coord }`             |
-| `manual-tracks-points`, `manual-tracks-symbols`, `draw-features-points`, `draw-features-line`, `draw-features-fill`, `route-dot` | `{ kind: 'feature', featureId, coord }` (centroid, not click coord) |
-| (fallback, rare)                                          | `{ kind: 'point', coord }`                 |
+| `manual-tracks-points`, `manual-tracks-symbols`, `draw-features-points`, `draw-features-line`, `draw-features-fill`, `draw-image-bounds-fill`, `route-line`, `route-dot` | `{ kind: 'feature', featureId, coord }` (centroid, not click coord) |
+| Empty map space                                           | `{ kind: 'point', coord }` (anchored at the click lng/lat) |
 
 For feature-backed layers, the endpoint tracks the **feature**, not the pixel the user clicked — so dragging a box to a new location moves the line with it, regardless of which corner the user originally clicked.
+
+Empty-space clicks produce a static `point` endpoint — useful for measuring to/from an arbitrary location (a reported position, a waypoint, a terrain feature). The cursor stays `crosshair` for the entire selection so every pixel is reachable.
+
+### Coexistence with the click dispatcher
+
+The composable installs its own raw `map.on('click', …)` handler during selection — it does **not** flow through `useClickDispatcher`. The dispatcher still fires in parallel on every click and would otherwise trigger the clicked entity's default action (open info card, select shape, open route panel) on top of the endpoint capture. Every dispatcher-registered composable must therefore include `bloodhounding` in its `suppress()` callback:
+
+- `useMapAis`, `useMapTracks`, `useMapManualTracks` — receive the shared `suppressEntityClicks` computed from `MapView.vue` (`bloodhounding || routing || placing`).
+- `useMapDraw`, `useMapRoute` — receive `bloodhounding` directly as a `suppress` ref; it's OR'd into their existing mode-specific suppress conditions.
+
+Bloodhound's own click handler, registered separately on the map when selection starts, still receives the click and captures the endpoint against its `SNAP_LAYERS` list. Anyone adding a new clickable entity composable must take the same suppress ref and gate its dispatcher action the same way, and must also add its clickable layer ids to `SNAP_LAYERS` — otherwise the new entity won't be reachable as a bloodhound endpoint, or bloodhound selection will "double-fire" on it.
 
 ## Programmatic API
 

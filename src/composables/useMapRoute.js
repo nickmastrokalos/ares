@@ -24,7 +24,7 @@ function wpLabel(index, total) {
   return `WP ${index}`
 }
 
-export function useMapRoute(getMap, dispatcher = null) {
+export function useMapRoute(getMap, dispatcher = null, suppress = { value: false }) {
   const featuresStore = useFeaturesStore()
   const settingsStore = useSettingsStore()
 
@@ -486,7 +486,7 @@ export function useMapRoute(getMap, dispatcher = null) {
       dispatcher.register('routes', {
         layers: [LINE_LAYER, DOT_LAYER],
         action: (f) => openRoutePanel(f.properties._dbId),
-        suppress: () => routing.value || appending.value,
+        suppress: () => routing.value || appending.value || suppress.value,
         label: (f) => ({
           text: f.properties.name || 'Route',
           subtitle: 'Route',

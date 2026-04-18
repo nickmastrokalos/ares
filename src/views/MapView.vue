@@ -15,6 +15,12 @@ import { useClickDispatcher } from '@/composables/useClickDispatcher'
 import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
 import { useMapBloodhound } from '@/composables/useMapBloodhound'
+import { useMapPerimeters } from '@/composables/useMapPerimeters'
+import { useMapBullseye } from '@/composables/useMapBullseye'
+import { useMapAnnotations } from '@/composables/useMapAnnotations'
+import { useMapIntercepts } from '@/composables/useMapIntercepts'
+import { useMapAlerts } from '@/composables/useMapAlerts'
+import { useMapSnapshot } from '@/composables/useMapSnapshot'
 import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
@@ -43,17 +49,16 @@ import TrackListPanel from '@/components/TrackListPanel.vue'
 import GhostPanel from '@/components/GhostPanel.vue'
 import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
 import BloodhoundPanel from '@/components/BloodhoundPanel.vue'
+import PerimeterPanel from '@/components/PerimeterPanel.vue'
+import BullseyePanel from '@/components/BullseyePanel.vue'
+import AnnotationsPanel from '@/components/AnnotationsPanel.vue'
+import MapAlertChip from '@/components/MapAlertChip.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
 import { useAssistantTools } from '@/composables/useAssistantTools'
-import { mapTools } from '@/services/assistant/tools/map'
-import { aisTools } from '@/services/assistant/tools/ais'
-import { routeTools } from '@/services/assistant/tools/routes'
-import { bloodhoundTools } from '@/services/assistant/tools/bloodhound'
-import { ghostTools } from '@/services/assistant/tools/ghosts'
-import { cotTools } from '@/services/assistant/tools/cot'
+import { buildMapToolBundles } from '@/services/assistant/toolBundles'
 
 const props = defineProps({
   missionId: { type: Number, required: true }
@@ -86,36 +91,96 @@ const ghostPanelOpen     = ref(false)
 const interceptPanelOpen = ref(false)
 const aisPanelOpen       = ref(false)
 const bloodhoundPanelOpen = ref(false)
-let interceptMarker = null
+const perimeterPanelOpen  = ref(false)
+const bullseyePanelOpen   = ref(false)
+const annotationsPanelOpen = ref(false)
 const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
 const dispatcher = useClickDispatcher()
-const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher)
-const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const bloodhoundApi = useMapBloodhound(() => map)
 const { bloodhounding } = bloodhoundApi
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher)
-const externalSuppress = computed(() => bloodhounding.value || routing.value)
-const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, externalSuppress, dispatcher)
+const perimeterApi = useMapPerimeters(() => map)
+const { perimeterSelecting } = perimeterApi
+const bullseyeApi  = useMapBullseye(() => map, props.missionId)
+const { bullseyeSelecting } = bullseyeApi
+const annotationsApi = useMapAnnotations(() => map, props.missionId)
+const { annotationSelecting } = annotationsApi
+const interceptApi = useMapIntercepts(() => map)
+const mapAlerts    = useMapAlerts()
+const { capture: captureSnapshotRaw } = useMapSnapshot({
+  getMap: () => map,
+  featuresStore
+})
+
+async function captureSnapshot() {
+  const res = await captureSnapshotRaw()
+  if (res.ok || res.cancelled) return
+  mapAlerts.setAlert('snapshot-err', {
+    source: 'snapshot', level: 'critical',
+    message: `Snapshot failed: ${res.error}`,
+    timestamp: Date.now()
+  })
+  setTimeout(() => mapAlerts.clearAlert('snapshot-err'), 6000)
+}
+
+// Perimeter breaches are aggregated into a single alert so the chip stays
+// compact regardless of how many perimeters are breached. Each breaching
+// perimeter contributes one line to the aggregate message; the chip's
+// expand UI surfaces the full list when needed.
+watch(
+  () => perimeterApi.perimeters.value,
+  (list) => {
+    const breaching = list.filter(p => p.alert && p.breached.length > 0)
+    if (breaching.length === 0) {
+      mapAlerts.clearAlert('perimeter-breach')
+      return
+    }
+    // One detail entry per (perimeter, intruder) so the flyTo action on
+    // each line targets the actual intruder, not the ring owner.
+    const details = []
+    for (const p of breaching) {
+      for (const b of p.breached) {
+        details.push({
+          label: `${b.label} in ${p.owner.label}`,
+          coord: b.coord
+        })
+      }
+    }
+    const summary = breaching.length === 1 && breaching[0].breached.length === 1
+      ? `Perimeter breach: ${details[0].label}`
+      : `${details.length} perimeter ${details.length === 1 ? 'breach' : 'breaches'}`
+    mapAlerts.setAlert('perimeter-breach', {
+      source:  'perimeter',
+      level:   'critical',
+      message: summary,
+      details
+    })
+  },
+  { deep: true }
+)
+const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value)
+const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
+const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
+const suppressEntityClicks = computed(
+  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || placing.value != null
+)
+const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
 const pluginRegistry = usePluginRegistry({ flyToGeometry })
-const suppressTrackPanel = computed(() => bloodhounding.value || routing.value || placing.value != null)
-const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressTrackPanel, dispatcher)
+const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
-const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher)
+const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppressEntityClicks)
 
 // Register assistant tool bundles. Factories run once on mount, after the
 // stores above are created — so the closures capture live store instances.
 useAssistantTools(
-  () => [
-    ...mapTools({ featuresStore, tracksStore, aisStore, settingsStore, flyToGeometry, flyTo, switchBasemap }),
-    ...routeTools({ featuresStore }),
-    ...aisTools({ aisStore, featuresStore }),
-    ...cotTools({ tracksStore, featuresStore }),
-    ...bloodhoundTools({ featuresStore, tracksStore, aisStore, bloodhoundApi }),
-    ...ghostTools({ featuresStore, ghostsStore })
-  ],
+  () => buildMapToolBundles({
+    featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
+    flyToGeometry, flyTo, switchBasemap,
+    bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi
+  }),
   'Map assistant'
 )
 
@@ -128,25 +193,12 @@ provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
 provide('bloodhoundApi', bloodhoundApi)
+provide('perimeterApi', perimeterApi)
+provide('bullseyeApi', bullseyeApi)
+provide('annotationsApi', annotationsApi)
+provide('interceptApi', interceptApi)
 
 provide('pluginRegistry', pluginRegistry)
-
-provide('setInterceptMarker', (lon, lat) => {
-  if (!map) return
-  if (interceptMarker) interceptMarker.remove()
-  const el = document.createElement('div')
-  el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#4fc3f7;border:2px solid #ffffff;box-shadow:0 0 6px rgba(0,0,0,0.6);pointer-events:none'
-  interceptMarker = new maplibregl.Marker({ element: el })
-    .setLngLat([lon, lat])
-    .addTo(map)
-})
-
-provide('clearInterceptMarker', () => {
-  if (interceptMarker) {
-    interceptMarker.remove()
-    interceptMarker = null
-  }
-})
 
 function resolveBasemapTiles(id) {
   if (id?.startsWith('offline:')) {
@@ -208,12 +260,20 @@ function toggleBloodhoundPanel() {
   bloodhoundPanelOpen.value = !bloodhoundPanelOpen.value
 }
 
+function togglePerimeterPanel() {
+  perimeterPanelOpen.value = !perimeterPanelOpen.value
+}
+
+function toggleBullseyePanel() {
+  bullseyePanelOpen.value = !bullseyePanelOpen.value
+}
+
+function toggleAnnotationsPanel() {
+  annotationsPanelOpen.value = !annotationsPanelOpen.value
+}
+
 function toggleInterceptPanel() {
   interceptPanelOpen.value = !interceptPanelOpen.value
-  if (!interceptPanelOpen.value && interceptMarker) {
-    interceptMarker.remove()
-    interceptMarker = null
-  }
 }
 
 function onToolSelect(toolId) {
@@ -301,7 +361,11 @@ onMounted(async () => {
     bearing: mapStore.bearing,
     pitch: mapStore.pitch,
     attributionControl: false,
-    maplibreLogo: false
+    maplibreLogo: false,
+    // Required so the map canvas can be read back for snapshot export.
+    // Default is `false`, which clears the WebGL drawing buffer after each
+    // paint — reading pixels after that yields a blank image.
+    preserveDrawingBuffer: true
   })
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right')
@@ -316,6 +380,10 @@ onMounted(async () => {
       appStore.footerInfo = coord ? formatCoordinate(coord.lng, coord.lat, fmt) : null
     }
   )
+
+  const updateFooterZoom = () => { appStore.footerDetail = `z ${map.getZoom().toFixed(2)}` }
+  updateFooterZoom()
+  map.on('zoom', updateFooterZoom)
 
   map.on('contextmenu', (e) => {
     e.originalEvent.preventDefault()
@@ -339,6 +407,8 @@ onMounted(async () => {
     initTrackLayers()
     initManualTrackLayers()
     initAisLayers()
+    bullseyeApi.init()
+    annotationsApi.init()
 
     // Start any CoT listeners that were enabled at the time the map loaded.
     for (const listener of settingsStore.cotListeners) {
@@ -376,13 +446,13 @@ onUnmounted(async () => {
   } catch (err) {
     console.error('Failed to stop listeners:', err)
   }
-  if (interceptMarker) { interceptMarker.remove(); interceptMarker = null }
   if (map) {
     mapStore.saveView(map)
     map.remove()
     map = null
   }
   appStore.footerInfo = null
+  appStore.footerDetail = null
 })
 </script>
 
@@ -394,6 +464,9 @@ onUnmounted(async () => {
       :overlays-dialog-open="overlaysDialogOpen"
       :measuring="measuring"
       :bloodhound-panel-open="bloodhoundPanelOpen"
+      :perimeter-panel-open="perimeterPanelOpen"
+      :bullseye-panel-open="bullseyePanelOpen"
+      :annotations-panel-open="annotationsPanelOpen"
       :routing="routing"
       :track-drop-panel-open="trackDropPanelOpen"
       :track-list-open="trackListOpen"
@@ -406,6 +479,9 @@ onUnmounted(async () => {
       @toggle-layers="toggleLayersPanel"
       @toggle-measure="toggleMeasure"
       @toggle-bloodhound="toggleBloodhoundPanel"
+      @toggle-perimeter="togglePerimeterPanel"
+      @toggle-bullseye="toggleBullseyePanel"
+      @toggle-annotations="toggleAnnotationsPanel"
       @toggle-route="toggleRoute"
       @toggle-track-drop="toggleTrackDrop"
       @toggle-track-list="toggleTrackList"
@@ -417,6 +493,7 @@ onUnmounted(async () => {
       @toggle-settings="settingsDialogOpen = true"
       @exit-mission="exitMission"
       @toggle-io="ioDialogOpen = true"
+      @snapshot="captureSnapshot"
     />
     <div class="map-body">
       <div ref="mapContainer" class="map-container">
@@ -456,6 +533,18 @@ onUnmounted(async () => {
           v-if="bloodhoundPanelOpen"
           @close="bloodhoundPanelOpen = false"
         />
+        <PerimeterPanel
+          v-if="perimeterPanelOpen"
+          @close="perimeterPanelOpen = false"
+        />
+        <BullseyePanel
+          v-if="bullseyePanelOpen"
+          @close="bullseyePanelOpen = false"
+        />
+        <AnnotationsPanel
+          v-if="annotationsPanelOpen"
+          @close="annotationsPanelOpen = false"
+        />
         <AisTrackPanel
           v-for="mmsi in aisStore.openPanelList"
           :key="mmsi"
@@ -493,6 +582,7 @@ onUnmounted(async () => {
           @select="dispatcher.selectItem($event)"
           @close="dispatcher.dismiss()"
         />
+        <MapAlertChip :alerts="mapAlerts.alerts.value" />
       </div>
     </div>
   </div>

@@ -55,11 +55,15 @@ src/
     assistant/
       client.js           # Thin invoke wrapper for assistant_chat command
       toolRegistry.js     # MCP-shaped register/unregister/list module
+      turnRunner.js       # Pure chat → tool-dispatch loop (no Vue/Pinia)
+      toolBundles.js      # buildMapToolBundles(deps) aggregator
+      entityResolution.js # Shared resolveEndpoint/resolveTarget/featureCentroid
       tools/
         map.js            # Map surface tool bundle
         scenes.js         # Scenes surface tool bundle
   stores/
-    assistant.js          # Turn loop, pendingCalls, message list
+    assistant.js          # Panel state, message log, send() entry point
+    assistantConfirm.js   # Pending write queue + Promise resolvers
   components/
     AppFooter.vue         # Global footer (all non-home routes)
     assistant/
@@ -308,8 +312,9 @@ Currently provided:
 | `draggingFeature`      | `Ref<feature \| null>`             | `useMapDraw().draggingFeature`      |
 | `openManualTrackPanel` | `(id) => void`                     | `useMapManualTracks().openPanel`    |
 | `switchBasemap`        | `(id) => Promise`                  | `MapView.switchBasemap`             |
-| `setInterceptMarker`   | `(lon, lat) => void`               | `MapView` (inline)                  |
-| `clearInterceptMarker` | `() => void`                       | `MapView` (inline)                  |
+| `bloodhoundApi`        | `ReturnType<useMapBloodhound>`     | `useMapBloodhound`                  |
+| `perimeterApi`         | `ReturnType<useMapPerimeters>`     | `useMapPerimeters`                  |
+| `interceptApi`         | `ReturnType<useMapIntercepts>`     | `useMapIntercepts`                  |
 
 ## Basemap Switching
 - Available basemaps are defined in `src/services/basemaps.js` as the `BASEMAPS` array. Adding a new online basemap = adding one entry with `{ id, name, icon, tiles, tileSize, maxzoom }`.
@@ -352,13 +357,47 @@ The Scenes dashboard engine is documented in [scenes.md](./scenes.md). Key conce
 
 Live-tracking range lines between tracks, vessels, shapes, or raw coordinates are documented in [bloodhound.md](./bloodhound.md). Toolbar entry is the `mdi-map-marker-distance` button in the Analysis group; the `BloodhoundPanel` manages add / remove / clear. The line and its distance label follow both endpoints as sources move.
 
+## Perimeter
+
+Live-following standoff rings around individual tracks, with optional breach alerts, are documented in [perimeter.md](./perimeter.md). Toolbar entry is the `mdi-shield-outline` button in the Analysis group alongside Measure and Bloodhound; the `PerimeterPanel` manages add / remove / radius / alert. When alert is on, any other track inside the ring flips the ring red and gets a red halo. Owners are restricted to tracks (CoT, AIS vessel, manual track) — one perimeter per track.
+
+## Bullseye
+
+Operator-placed reference point with concentric range rings and cardinal spokes, for classic tactical position calls ("bullseye 090 / 10 nm"), is documented in [bullseye.md](./bullseye.md). Toolbar entry is the `mdi-bullseye` button in the Analysis group; the `BullseyePanel` handles place / config / clear and shows live bullseye calls for CoT and manual tracks sorted by range. Bearings are true-north; only one bullseye is active at a time.
+
+## Annotations
+
+Sticky-note style text pins the operator drops on the map (free text, colour, draggable) are documented in [annotations.md](./annotations.md). Toolbar entry is the `mdi-note-text-outline` button in the Annotation group; the `AnnotationsPanel` lists, edits, recolours, and deletes them. Persisted per-mission in the SQLite `annotations` table (migration v5).
+
+## Intercept
+
+Live-updating intercept and CPA solutions between a friendly and hostile track are documented in [intercept.md](./intercept.md). Toolbar entry is the `mdi-target` button in the Analysis group; the `CallInterceptorPanel` manages the add form plus a list of active solves. Each solve renders a friendly→aim line, a dashed hostile projected path, a dashed aim ring, and an aim marker. When the friendly can't catch the hostile, the solver falls back to the closest-point-of-approach (amber styling + miss distance). Both endpoints may be CoT tracks, AIS vessels, or manual tracks; multiple simultaneous intercepts are supported and persist when the panel is closed.
+
+## Map alerts
+
+`useMapAlerts()` is a tiny composable that aggregates map-level alerts keyed by id. `MapAlertChip.vue` is a top-center overlay that renders a **single** pulsing pill (amber = warning, red = critical) showing the highest-severity alert. When more than one alert is live, a `+N` count badge appears and the chip becomes clickable — clicking toggles a popover that lists every alert and its details.
+
+The alert shape is `{ id, source, level, message, details?, timestamp }`. `details` is an optional array of `{ label, coord? }` entries — source-side aggregators use them to list the individual items that rolled up into the summary. When a detail has a `coord` ([lng, lat]), the chip renders a `mdi-crosshairs-gps` button next to that line; clicking it invokes the injected `flyToGeometry` and centres the map there.
+
+Sources push alerts with `setAlert(id, { source, level, message, details? })` and clear them with `clearAlert(id)` or `clearSource(src)`.
+
+Wired today: perimeter breach. `MapView.vue` watches `perimeterApi.perimeters` and, when any perimeter with alert enabled has intruders, emits a **single** `perimeter-breach` alert. The message is either the full description (one breach total) or a count (`"3 perimeter breaches"`); the `details` array carries one `{ label: "<intruder> in <owner>", coord: <intruder coord> }` entry per breaching (perimeter, intruder) pair, so each line's fly-to button targets the actual intruder. Source-side aggregation keeps the chip one pill regardless of how many perimeters trip. Other sources (intercept TTI crossing, bloodhound proximity, …) can hook in the same way.
+
+## Snapshot
+
+PNG export of the current map view with a legend strip (mission name, timestamp, overlay counts, view info) is documented in [snapshot.md](./snapshot.md). Toolbar entry is the `mdi-camera-outline` button in the right cluster. Requires `preserveDrawingBuffer: true` on the MapLibre constructor so the WebGL drawing buffer is readable after paint.
+
 ## Assistant
 
 The in-app AI assistant is documented in [assistant.md](./assistant.md). Key concepts:
 - A **global footer** (`AppFooter.vue`) is rendered on all non-home routes. It hosts the assistant toggle button and a reserved left slot for future status indicators.
 - The **assistant panel** (`AssistantPanel.vue`) is a docked card (bottom-right, RoutePanel-styled) that shows the chat log, pending confirms, and an input row.
 - The **tool registry** (`src/services/assistant/toolRegistry.js`) is an MCP-shaped register/unregister surface. Each route registers its tool bundle on mount and unregisters on unmount via `useAssistantTools`.
-- The **assistant store** (`src/stores/assistant.js`) owns the turn loop, pendingCalls, and message list.
+- The **assistant store** (`src/stores/assistant.js`) owns panel visibility, the message log, and the `send()` entry point. It stays thin by delegating orchestration.
+- The **turn runner** (`src/services/assistant/turnRunner.js`) is a pure function — no Vue/Pinia imports — that drives the chat → tool-dispatch loop. Callbacks cover message append and write confirmation; it is testable in isolation.
+- The **confirm store** (`src/stores/assistantConfirm.js`) owns the pending-write queue and the `Promise` resolvers that gate user confirmation. UI components (`AssistantConfirmCard`) read/write this store directly; the main assistant store does not.
+- The **tool bundles module** (`src/services/assistant/toolBundles.js`) aggregates every MapView bundle into `buildMapToolBundles(deps)`. `MapView.vue` calls this once instead of hand-spreading factories.
+- The **entity resolution module** (`src/services/assistant/entityResolution.js`) centralises `resolveEndpoint`, `resolveTarget`, and `featureCentroid` — the (featureId | trackUid | vesselMmsi | coordinate) → `{ kind, ...ids, coord }` lookup shared by Bloodhound, Perimeter, CoT, and AIS tools.
 - Transport is via a Rust command (`assistant_chat`) that calls the Anthropic API — no direct HTTPS from the webview.
 - API key, provider, and model are configured in Settings → Assistant tab.
 

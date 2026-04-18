@@ -1,12 +1,14 @@
 <script setup>
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useAssistantStore } from '@/stores/assistant'
+import { useAssistantConfirmStore } from '@/stores/assistantConfirm'
 import { useZIndex } from '@/composables/useZIndex'
 import { useDraggable } from '@/composables/useDraggable'
 import AssistantMessage from './AssistantMessage.vue'
 import AssistantConfirmCard from './AssistantConfirmCard.vue'
 
-const store = useAssistantStore()
+const store        = useAssistantStore()
+const confirmStore = useAssistantConfirmStore()
 const { zIndex, bringToFront } = useZIndex()
 const { pos, onPointerDown } = useDraggable()
 const positioned = ref(false)
@@ -43,7 +45,7 @@ function submit() {
 
 // Scroll to bottom when messages or pending confirm cards change
 watch(
-  () => [store.messages.length, store.pendingCalls.length],
+  () => [store.messages.length, confirmStore.pending.length],
   async () => {
     await nextTick()
     if (logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight
@@ -98,7 +100,7 @@ watch(
         />
         <!-- Inline confirm cards for pending writes (after the latest assistant turn) -->
         <AssistantConfirmCard
-          v-for="call in store.pendingCalls"
+          v-for="call in confirmStore.pending"
           :key="call.id"
           :call="call"
         />

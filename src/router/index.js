@@ -1,7 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '@/views/HomeView.vue'
-import MapView from '@/views/MapView.vue'
 
+// MapView stays lazy: it pulls in maplibre-gl (~900 KB) plus every map
+// composable, so loading it only when the user enters a mission keeps the
+// home-screen bundle small. In a Tauri app with local assets the extra
+// import() round-trip is imperceptible.
 const routes = [
   {
     path: '/',
@@ -14,7 +17,7 @@ const routes = [
     // the id against the DB and redirects home if it's unknown.
     path: '/map/:missionId',
     name: 'map',
-    component: MapView,
+    component: () => import('@/views/MapView.vue'),
     props: route => ({ missionId: Number(route.params.missionId) })
   },
   {

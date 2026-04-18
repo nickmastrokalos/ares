@@ -74,6 +74,7 @@ export function useMapBloodhound(getMap) {
   // falls back to a raw coordinate for misc hits.
   const SNAP_LAYERS = [
     'cot-tracks-points',
+    'cot-tracks-symbols',
     'ais-vessels-points',
     'ais-vessels-arrows',
     'manual-tracks-points',
@@ -81,6 +82,8 @@ export function useMapBloodhound(getMap) {
     'draw-features-points',
     'draw-features-line',
     'draw-features-fill',
+    'draw-image-bounds-fill',
+    'route-line',
     'route-dot'
   ]
 
@@ -323,15 +326,16 @@ export function useMapBloodhound(getMap) {
   }
 
   // Resolve a click to a typed endpoint by snapping to the topmost hit feature.
-  // Returns null for empty-space clicks — both endpoints must be snapped.
+  // Empty-space clicks fall through to a `point` endpoint anchored at the click
+  // coord so the operator can measure to/from arbitrary locations.
   function resolveEndpointAtClick(map, e) {
     const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
-    if (!hits.length) return null
+    if (!hits.length) return { kind: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
 
     const hit = hits[0]
     const layer = hit.layer.id
 
-    if (layer === 'cot-tracks-points') {
+    if (layer === 'cot-tracks-points' || layer === 'cot-tracks-symbols') {
       const uid = hit.properties.uid
       const t = tracksStore.tracks.get(uid)
       if (t) return { kind: 'cot', uid, coord: [t.lon, t.lat] }
@@ -341,6 +345,11 @@ export function useMapBloodhound(getMap) {
       const mmsi = String(hit.properties.mmsi)
       const v = aisStore.vessels.get(mmsi)
       if (v) return { kind: 'ais', mmsi, coord: [v.longitude, v.latitude] }
+      // Store lookup failed — the feature was rendered but the backing vessel
+      // is no longer in the store (likely a poll rebuilt the map just after
+      // render). Anchor to the clicked coord; the watcher will snap back to
+      // live position on the next poll if the mmsi reappears.
+      return { kind: 'ais', mmsi, coord: [hit.geometry.coordinates[0], hit.geometry.coordinates[1]] }
     }
 
     // All feature-backed layers (draw shapes, manual tracks, route dots)
@@ -357,21 +366,21 @@ export function useMapBloodhound(getMap) {
     return { kind: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
   }
 
-  // Registers map handlers and enters selecting state. Clicks on empty space
-  // are ignored; the handler resets pendingEpA after each pair and keeps
-  // running so the user can place multiple lines in a row.
+  // Registers map handlers and enters selecting state. Every click is valid —
+  // snap hits produce typed endpoints, empty-space clicks produce point
+  // endpoints. Handler resets pendingEpA after each pair and keeps running
+  // so the user can place multiple lines in a row.
   function startSelecting() {
     const map = getMap()
     if (!map) return
 
     pendingEpA = null
     isSelecting.value = true
-    map.getCanvasContainer().style.cursor = 'default'
+    map.getCanvasContainer().style.cursor = 'crosshair'
     removeClickHandler()
 
-    moveHandler = (e) => {
-      const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
-      map.getCanvasContainer().style.cursor = hits.length ? 'crosshair' : 'default'
+    moveHandler = () => {
+      map.getCanvasContainer().style.cursor = 'crosshair'
     }
 
     clickHandler = (e) => {
