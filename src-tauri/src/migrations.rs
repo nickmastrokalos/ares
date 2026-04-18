@@ -82,5 +82,27 @@ pub fn migrations() -> Vec<Migration> {
             ",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "create_bullseyes_table",
+            // One bullseye per mission — mission_id is the PK, which both
+            // enforces the one-per-mission invariant and lets FK cascade
+            // clean up on mission delete. show_cardinals is stored as 0/1
+            // per SQLite boolean convention.
+            sql: "
+                CREATE TABLE IF NOT EXISTS bullseyes (
+                    mission_id     INTEGER PRIMARY KEY,
+                    lat            REAL    NOT NULL,
+                    lon            REAL    NOT NULL,
+                    name           TEXT    NOT NULL,
+                    ring_interval  REAL    NOT NULL,
+                    ring_count     INTEGER NOT NULL,
+                    show_cardinals INTEGER NOT NULL,
+                    updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+                );
+            ",
+            kind: MigrationKind::Up,
+        },
     ]
 }

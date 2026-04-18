@@ -5,7 +5,6 @@ Running backlog for Ares. Not a strict roadmap — reorder as priorities shift. 
 ## Backlog — feature ideas
 
 - **Track prediction ghosts** — project each CoT / AIS / manual track forward by its current course + speed and render a semi-transparent "ghost" of where it'll be in N seconds. Per-track toggle, global time horizon. Related to `useMapGhosts` (existing, different feature).
-- **Bullseye / range rings** — an operator-placed reference point with concentric range rings + cardinal bearings. Reports of other tracks are given as "bullseye 090/10" style. Classic tactical aid.
 - **Map annotations / stickies** — freeform text notes pinned to a map coord. Colour-coded, draggable, persisted per mission. Distinct from manual tracks (no affiliation, no kinematics) and from draw shapes (no geometry).
 - **CoT track history trails** — render the recent path of each live CoT track as a fading polyline. **Design note** (already in memory): trail length scales with the track's current speed — faster tracks get longer trails so the visual span of the trail represents roughly the same time window.
 - **Replay / time scrub** — record incoming CoT + AIS positions over time and let the operator scrub a timeline to replay movement. Separate store for historical positions; draw layer in a "replay" styling.
