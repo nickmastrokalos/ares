@@ -18,6 +18,7 @@ import { useMapBloodhound } from '@/composables/useMapBloodhound'
 import { useMapPerimeters } from '@/composables/useMapPerimeters'
 import { useMapIntercepts } from '@/composables/useMapIntercepts'
 import { useMapAlerts } from '@/composables/useMapAlerts'
+import { useMapSnapshot } from '@/composables/useMapSnapshot'
 import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
@@ -98,6 +99,22 @@ const perimeterApi = useMapPerimeters(() => map)
 const { perimeterSelecting } = perimeterApi
 const interceptApi = useMapIntercepts(() => map)
 const mapAlerts    = useMapAlerts()
+const { capture: captureSnapshotRaw } = useMapSnapshot({
+  getMap: () => map,
+  featuresStore, tracksStore, aisStore,
+  perimeterApi, bloodhoundApi, interceptApi, ghostsStore
+})
+
+async function captureSnapshot() {
+  const res = await captureSnapshotRaw()
+  if (res.ok || res.cancelled) return
+  mapAlerts.setAlert('snapshot-err', {
+    source: 'snapshot', level: 'critical',
+    message: `Snapshot failed: ${res.error}`,
+    timestamp: Date.now()
+  })
+  setTimeout(() => mapAlerts.clearAlert('snapshot-err'), 6000)
+}
 
 // Perimeter breaches are aggregated into a single alert so the chip stays
 // compact regardless of how many perimeters are breached. Each breaching
@@ -325,7 +342,11 @@ onMounted(async () => {
     bearing: mapStore.bearing,
     pitch: mapStore.pitch,
     attributionControl: false,
-    maplibreLogo: false
+    maplibreLogo: false,
+    // Required so the map canvas can be read back for snapshot export.
+    // Default is `false`, which clears the WebGL drawing buffer after each
+    // paint — reading pixels after that yields a blank image.
+    preserveDrawingBuffer: true
   })
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right')
@@ -442,6 +463,7 @@ onUnmounted(async () => {
       @toggle-settings="settingsDialogOpen = true"
       @exit-mission="exitMission"
       @toggle-io="ioDialogOpen = true"
+      @snapshot="captureSnapshot"
     />
     <div class="map-body">
       <div ref="mapContainer" class="map-container">

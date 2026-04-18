@@ -8,7 +8,6 @@ Running backlog for Ares. Not a strict roadmap — reorder as priorities shift. 
 - **Bullseye / range rings** — an operator-placed reference point with concentric range rings + cardinal bearings. Reports of other tracks are given as "bullseye 090/10" style. Classic tactical aid.
 - **Map annotations / stickies** — freeform text notes pinned to a map coord. Colour-coded, draggable, persisted per mission. Distinct from manual tracks (no affiliation, no kinematics) and from draw shapes (no geometry).
 - **CoT track history trails** — render the recent path of each live CoT track as a fading polyline. **Design note** (already in memory): trail length scales with the track's current speed — faster tracks get longer trails so the visual span of the trail represents roughly the same time window.
-- **Map snapshot / brief export** — render the current map state (or a selected bbox) to PNG / PDF with a legend strip — for briefing slides, after-action reports. Should include visible overlays, selected intercepts/perimeters, timestamp.
 - **Replay / time scrub** — record incoming CoT + AIS positions over time and let the operator scrub a timeline to replay movement. Separate store for historical positions; draw layer in a "replay" styling.
 
 ## Follow-ups from recent work

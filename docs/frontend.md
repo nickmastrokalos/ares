@@ -375,6 +375,10 @@ Sources push alerts with `setAlert(id, { source, level, message, details? })` an
 
 Wired today: perimeter breach. `MapView.vue` watches `perimeterApi.perimeters` and, when any perimeter with alert enabled has intruders, emits a **single** `perimeter-breach` alert. The message is either the full description (one breach total) or a count (`"3 perimeter breaches"`); the `details` array carries one `{ label: "<intruder> in <owner>", coord: <intruder coord> }` entry per breaching (perimeter, intruder) pair, so each line's fly-to button targets the actual intruder. Source-side aggregation keeps the chip one pill regardless of how many perimeters trip. Other sources (intercept TTI crossing, bloodhound proximity, …) can hook in the same way.
 
+## Snapshot
+
+PNG export of the current map view with a legend strip (mission name, timestamp, overlay counts, view info) is documented in [snapshot.md](./snapshot.md). Toolbar entry is the `mdi-camera-outline` button in the right cluster. Requires `preserveDrawingBuffer: true` on the MapLibre constructor so the WebGL drawing buffer is readable after paint.
+
 ## Assistant
 
 The in-app AI assistant is documented in [assistant.md](./assistant.md). Key concepts:
