@@ -174,8 +174,10 @@ export function useMapPerimeters(getMap) {
         source: RINGS_SOURCE,
         paint: {
           'line-color': ['case', ['==', ['get', 'breached'], true], '#e53935', '#4a9ade'],
-          'line-width': 2,
-          'line-dasharray': [4, 3]
+          'line-width': 1.5,
+          'line-dasharray': [4, 3],
+          'line-opacity': 0.85,
+          'line-blur': 0.4
         }
       })
     }
