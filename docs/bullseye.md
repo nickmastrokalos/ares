@@ -23,6 +23,7 @@ Distances are rendered on-map using the user's preferred distance unit (`setting
 - **Toolbar button** (`mdi-bullseye`, Analysis group, alongside Measure / Bloodhound / Perimeter): opens / closes `BullseyePanel.vue`. Closing the panel does not clear the bullseye.
 - The panel's **Set bullseye** button puts the map into click-to-place mode; one click anywhere on the map places (or replaces) the bullseye.
 - **Clicking the centre cross on the map** opens `BullseyePanel.vue` — same flow as clicking an annotation pin. The cross has a 22 px transparent hit pad so the 14 px visible mark is comfortable to click on hi-DPI displays.
+- **Dragging the centre cross** moves the bullseye. A 4 px drag threshold keeps plain clicks separate. Only the centre marker moves visually during the drag; on release the rings / labels rebuild and the new position persists via `setBullseye({ lat, lon })`.
 
 ## Panel UX
 

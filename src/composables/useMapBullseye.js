@@ -117,18 +117,53 @@ export function useMapBullseye(getMap, missionId = null, onRequestOpenPanel = nu
     // target is tiny on hi-DPI displays.
     const el = document.createElement('div')
     el.style.cssText =
-      'width:22px;height:22px;position:relative;cursor:pointer;' +
-      'background:transparent;'
+      'width:22px;height:22px;position:relative;cursor:grab;' +
+      'background:transparent;user-select:none;'
     el.innerHTML =
       `<div style="position:absolute;left:50%;top:4px;bottom:4px;width:1px;background:${RING_COLOR};transform:translateX(-50%);pointer-events:none"></div>` +
       `<div style="position:absolute;top:50%;left:4px;right:4px;height:1px;background:${RING_COLOR};transform:translateY(-50%);pointer-events:none"></div>`
 
-    // Click opens the bullseye panel. Ignored if no callback wired (e.g.
-    // tests, non-mission views). stopPropagation keeps the map from also
-    // handling this as a bullseye-selecting click.
-    el.addEventListener('click', (e) => {
+    // Pointer handlers implement both click-to-open-panel and drag-to-move.
+    // A 4 px threshold avoids accidental nudges on click. During drag we only
+    // move the centre marker visually; ring / label rebuild happens once on
+    // release so we don't rebuild polygons every pointer frame.
+    let startX = 0, startY = 0
+    let dragging = false
+    let dragLngLat = null
+
+    el.addEventListener('pointerdown', (e) => {
       e.stopPropagation()
-      if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
+      startX = e.clientX
+      startY = e.clientY
+      dragging = false
+      dragLngLat = null
+      el.setPointerCapture(e.pointerId)
+      el.style.cursor = 'grabbing'
+    })
+
+    el.addEventListener('pointermove', (e) => {
+      if (!el.hasPointerCapture(e.pointerId)) return
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      if (!dragging && Math.hypot(dx, dy) < 4) return
+      dragging = true
+      const map = getMap()
+      if (!map || !centerMarker) return
+      const rect = map.getContainer().getBoundingClientRect()
+      dragLngLat = map.unproject([e.clientX - rect.left, e.clientY - rect.top])
+      centerMarker.setLngLat(dragLngLat)
+    })
+
+    el.addEventListener('pointerup', (e) => {
+      el.releasePointerCapture(e.pointerId)
+      el.style.cursor = 'grab'
+      if (dragging && dragLngLat) {
+        setBullseye({ lat: dragLngLat.lat, lon: dragLngLat.lng })
+      } else {
+        if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
+      }
+      dragging = false
+      dragLngLat = null
     })
     return el
   }

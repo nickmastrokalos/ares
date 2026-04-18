@@ -39,6 +39,9 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
 
   let placeClickHandler = null
   let keyHandler        = null
+  // Guards the post-drag click that the map fires on mouseup: without it the
+  // dispatcher would open the panel every time we drag a track.
+  let suppressNextClick = false
 
   // ---- Derived data ----
 
@@ -220,7 +223,7 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
       dispatcher.register('manual-tracks', {
         layers:     clickLayers,
         action:     (f) => { const id = f.properties._dbId; if (id != null) openPanel(id) },
-        suppress:   () => suppress.value || Boolean(placing.value),
+        suppress:   () => suppress.value || Boolean(placing.value) || suppressNextClick,
         label:      (f) => ({
           text:     f.properties.callsign || 'Manual Track',
           subtitle: 'Manual Track',
@@ -230,23 +233,104 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
       })
     } else {
       map.on('click', MANUAL_TRACKS_LAYER, (e) => {
-        if (suppress.value || placing.value) return
+        if (suppress.value || placing.value || suppressNextClick) return
         const id = e.features?.[0]?.properties?._dbId
         if (id != null) openPanel(id)
       })
       map.on('click', MANUAL_TRACKS_SYMBOLS, (e) => {
-        if (suppress.value || placing.value) return
+        if (suppress.value || placing.value || suppressNextClick) return
         const id = e.features?.[0]?.properties?._dbId
         if (id != null) openPanel(id)
       })
     }
 
-    const onEnter = () => { if (!placing.value) map.getCanvasContainer().style.cursor = 'pointer' }
+    const onEnter = () => { if (!placing.value) map.getCanvasContainer().style.cursor = 'grab' }
     const onLeave = () => { if (!placing.value) map.getCanvasContainer().style.cursor = '' }
     for (const layer of clickLayers) {
       map.on('mouseenter', layer, onEnter)
       map.on('mouseleave', layer, onLeave)
     }
+
+    setupTrackDrag(map, clickLayers)
+  }
+
+  // ---- Drag-to-move ----
+  //
+  // Mirrors the shape-vertex drag in `useMapDraw.js`: map-layer mousedown →
+  // disable dragPan → window-level mousemove/mouseup. Live preview updates
+  // MANUAL_TRACKS_SOURCE directly (no DB write per frame). The DB write
+  // happens once on release. A zero-movement press falls through to the
+  // dispatcher's click handler so panels still open on plain clicks.
+
+  function setupTrackDrag(map, layers) {
+    const canvas = map.getCanvasContainer()
+
+    function onLayerMouseDown(e) {
+      if (suppress.value || placing.value) return
+      if (e.originalEvent?.button !== 0) return
+      const id = e.features?.[0]?.properties?._dbId
+      if (id == null) return
+      const feature = featuresStore.features.find(f => f.id === id)
+      if (!feature) return
+      const geometry   = JSON.parse(feature.geometry)
+      const properties = JSON.parse(feature.properties)
+      if (geometry.type !== 'Point') return
+
+      e.preventDefault()
+      map.dragPan.disable()
+      canvas.style.cursor = 'grabbing'
+
+      let hasMoved = false
+      let lastLngLat = null
+
+      function onWindowMouseMove(me) {
+        hasMoved = true
+        const rect = canvas.getBoundingClientRect()
+        lastLngLat = map.unproject([me.clientX - rect.left, me.clientY - rect.top])
+        const src = map.getSource(MANUAL_TRACKS_SOURCE)
+        if (!src) return
+        const fc = manualTrackCollection.value
+        src.setData({
+          ...fc,
+          features: fc.features.map(f =>
+            f.properties._dbId === id
+              ? { ...f, geometry: { type: 'Point', coordinates: [lastLngLat.lng, lastLngLat.lat] } }
+              : f
+          )
+        })
+      }
+
+      function finish(commit) {
+        window.removeEventListener('mousemove', onWindowMouseMove)
+        window.removeEventListener('mouseup', onWindowMouseUp)
+        window.removeEventListener('keydown', onWindowKeyDown)
+        map.dragPan.enable()
+        canvas.style.cursor = ''
+
+        if (commit && hasMoved && lastLngLat) {
+          // Swallow the mouseup → click the map fires on release so the
+          // dispatcher doesn't open the panel for the just-dragged track.
+          suppressNextClick = true
+          setTimeout(() => { suppressNextClick = false }, 0)
+          featuresStore.updateFeature(
+            id,
+            { type: 'Point', coordinates: [lastLngLat.lng, lastLngLat.lat] },
+            properties
+          )
+        } else {
+          map.getSource(MANUAL_TRACKS_SOURCE)?.setData(manualTrackCollection.value)
+        }
+      }
+
+      function onWindowMouseUp()       { finish(true) }
+      function onWindowKeyDown(ke)     { if (ke.key === 'Escape') finish(false) }
+
+      window.addEventListener('mousemove', onWindowMouseMove)
+      window.addEventListener('mouseup', onWindowMouseUp)
+      window.addEventListener('keydown', onWindowKeyDown)
+    }
+
+    for (const layer of layers) map.on('mousedown', layer, onLayerMouseDown)
   }
 
   // ---- Watchers ----
