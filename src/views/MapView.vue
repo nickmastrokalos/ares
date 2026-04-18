@@ -16,6 +16,7 @@ import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
 import { useMapBloodhound } from '@/composables/useMapBloodhound'
 import { useMapPerimeters } from '@/composables/useMapPerimeters'
+import { useMapBullseye } from '@/composables/useMapBullseye'
 import { useMapIntercepts } from '@/composables/useMapIntercepts'
 import { useMapAlerts } from '@/composables/useMapAlerts'
 import { useMapSnapshot } from '@/composables/useMapSnapshot'
@@ -48,6 +49,7 @@ import GhostPanel from '@/components/GhostPanel.vue'
 import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
 import BloodhoundPanel from '@/components/BloodhoundPanel.vue'
 import PerimeterPanel from '@/components/PerimeterPanel.vue'
+import BullseyePanel from '@/components/BullseyePanel.vue'
 import MapAlertChip from '@/components/MapAlertChip.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
@@ -88,6 +90,7 @@ const interceptPanelOpen = ref(false)
 const aisPanelOpen       = ref(false)
 const bloodhoundPanelOpen = ref(false)
 const perimeterPanelOpen  = ref(false)
+const bullseyePanelOpen   = ref(false)
 const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
@@ -97,12 +100,14 @@ const bloodhoundApi = useMapBloodhound(() => map)
 const { bloodhounding } = bloodhoundApi
 const perimeterApi = useMapPerimeters(() => map)
 const { perimeterSelecting } = perimeterApi
+const bullseyeApi  = useMapBullseye(() => map, props.missionId)
+const { bullseyeSelecting } = bullseyeApi
 const interceptApi = useMapIntercepts(() => map)
 const mapAlerts    = useMapAlerts()
 const { capture: captureSnapshotRaw } = useMapSnapshot({
   getMap: () => map,
   featuresStore, tracksStore, aisStore,
-  perimeterApi, bloodhoundApi, interceptApi, ghostsStore
+  perimeterApi, bloodhoundApi, interceptApi, ghostsStore, bullseyeApi
 })
 
 async function captureSnapshot() {
@@ -151,12 +156,12 @@ watch(
   },
   { deep: true }
 )
-const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value)
+const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value)
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
 const suppressEntityClicks = computed(
-  () => bloodhounding.value || perimeterSelecting.value || routing.value || placing.value != null
+  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || routing.value || placing.value != null
 )
 const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
 const pluginRegistry = usePluginRegistry({ flyToGeometry })
@@ -185,6 +190,7 @@ provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
 provide('bloodhoundApi', bloodhoundApi)
 provide('perimeterApi', perimeterApi)
+provide('bullseyeApi', bullseyeApi)
 provide('interceptApi', interceptApi)
 
 provide('pluginRegistry', pluginRegistry)
@@ -251,6 +257,10 @@ function toggleBloodhoundPanel() {
 
 function togglePerimeterPanel() {
   perimeterPanelOpen.value = !perimeterPanelOpen.value
+}
+
+function toggleBullseyePanel() {
+  bullseyePanelOpen.value = !bullseyePanelOpen.value
 }
 
 function toggleInterceptPanel() {
@@ -384,6 +394,7 @@ onMounted(async () => {
     initTrackLayers()
     initManualTrackLayers()
     initAisLayers()
+    bullseyeApi.init()
 
     // Start any CoT listeners that were enabled at the time the map loaded.
     for (const listener of settingsStore.cotListeners) {
@@ -439,6 +450,7 @@ onUnmounted(async () => {
       :measuring="measuring"
       :bloodhound-panel-open="bloodhoundPanelOpen"
       :perimeter-panel-open="perimeterPanelOpen"
+      :bullseye-panel-open="bullseyePanelOpen"
       :routing="routing"
       :track-drop-panel-open="trackDropPanelOpen"
       :track-list-open="trackListOpen"
@@ -452,6 +464,7 @@ onUnmounted(async () => {
       @toggle-measure="toggleMeasure"
       @toggle-bloodhound="toggleBloodhoundPanel"
       @toggle-perimeter="togglePerimeterPanel"
+      @toggle-bullseye="toggleBullseyePanel"
       @toggle-route="toggleRoute"
       @toggle-track-drop="toggleTrackDrop"
       @toggle-track-list="toggleTrackList"
@@ -506,6 +519,10 @@ onUnmounted(async () => {
         <PerimeterPanel
           v-if="perimeterPanelOpen"
           @close="perimeterPanelOpen = false"
+        />
+        <BullseyePanel
+          v-if="bullseyePanelOpen"
+          @close="bullseyePanelOpen = false"
         />
         <AisTrackPanel
           v-for="mmsi in aisStore.openPanelList"

@@ -361,6 +361,10 @@ Live-tracking range lines between tracks, vessels, shapes, or raw coordinates ar
 
 Live-following standoff rings around individual tracks, with optional breach alerts, are documented in [perimeter.md](./perimeter.md). Toolbar entry is the `mdi-shield-outline` button in the Analysis group alongside Measure and Bloodhound; the `PerimeterPanel` manages add / remove / radius / alert. When alert is on, any other track inside the ring flips the ring red and gets a red halo. Owners are restricted to tracks (CoT, AIS vessel, manual track) — one perimeter per track.
 
+## Bullseye
+
+Operator-placed reference point with concentric range rings and cardinal spokes, for classic tactical position calls ("bullseye 090 / 10 nm"), is documented in [bullseye.md](./bullseye.md). Toolbar entry is the `mdi-bullseye` button in the Analysis group; the `BullseyePanel` handles place / config / clear and shows live bullseye calls for CoT and manual tracks sorted by range. Bearings are true-north; only one bullseye is active at a time.
+
 ## Intercept
 
 Live-updating intercept and CPA solutions between a friendly and hostile track are documented in [intercept.md](./intercept.md). Toolbar entry is the `mdi-target` button in the Analysis group; the `CallInterceptorPanel` manages the add form plus a list of active solves. Each solve renders a friendly→aim line, a dashed hostile projected path, a dashed aim ring, and an aim marker. When the friendly can't catch the hostile, the solver falls back to the closest-point-of-approach (amber styling + miss distance). Both endpoints may be CoT tracks, AIS vessels, or manual tracks; multiple simultaneous intercepts are supported and persist when the panel is closed.

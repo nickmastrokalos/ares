@@ -98,6 +98,16 @@ export function distanceBetween([lng1, lat1], [lng2, lat2]) {
   return EARTH_RADIUS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+// Classic tactical bullseye call: bearing (degrees true) and range (meters)
+// from the bullseye to the target. Returns null if either coord is missing.
+export function bullseyeCall(bullseye, target) {
+  if (!bullseye || !target) return null
+  return {
+    bearing: bearingBetween(bullseye, target),
+    range: distanceBetween(bullseye, target)
+  }
+}
+
 export function bearingBetween([lng1, lat1], [lng2, lat2]) {
   const toRad = Math.PI / 180
   const toDeg = 180 / Math.PI

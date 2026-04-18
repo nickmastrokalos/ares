@@ -23,7 +23,8 @@ export function useMapSnapshot({
   perimeterApi,
   bloodhoundApi,
   interceptApi,
-  ghostsStore
+  ghostsStore,
+  bullseyeApi
 }) {
 
   function overlaySummary() {
@@ -42,6 +43,8 @@ export function useMapSnapshot({
     if (ix) tokens.push(`${ix} intercept${ix === 1 ? '' : 's'}`)
     const gh = ghostsStore?.ghosts?.length ?? 0
     if (gh) tokens.push(`${gh} ghost${gh === 1 ? '' : 's'}`)
+    const be = bullseyeApi?.bullseyeCount?.value ?? 0
+    if (be) tokens.push('bullseye')
     return tokens.length ? tokens.join(' · ') : 'No overlays active'
   }
 
