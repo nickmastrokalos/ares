@@ -179,7 +179,7 @@ useAssistantTools(
   () => buildMapToolBundles({
     featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
     flyToGeometry, flyTo, switchBasemap,
-    bloodhoundApi, perimeterApi, annotationsApi
+    bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi
   }),
   'Map assistant'
 )
