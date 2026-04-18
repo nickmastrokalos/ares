@@ -180,6 +180,8 @@ The label `text-offset` shifts from `[0, 1.5]` (circle) to `[0, 2.5]` (2525 on) 
 
 **Click dispatch.** If a `dispatcher` instance is provided (from `useClickDispatcher`), the composable registers with it for multi-layer click arbitration. Otherwise it falls back to direct `map.on('click', layer, …)` bindings on both the circle and symbol layers.
 
+**Drag-to-move.** Mousedown on either click layer starts a drag (same pattern as shape vertex handles in `useMapDraw.js`): `dragPan` is disabled, the cursor switches to `grabbing`, and window-level `mousemove` listeners patch `MANUAL_TRACKS_SOURCE` directly — no DB write per frame. On release (mouseup) the final coordinate is committed via `featuresStore.updateFeature()` and a `suppressNextClick` flag swallows the trailing click so the dispatcher doesn't also open the track panel. A zero-movement press falls through to the dispatcher's normal click handling. Escape aborts and reverts the source data to the last persisted state.
+
 ---
 
 ## Map provide/inject
