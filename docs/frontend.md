@@ -352,6 +352,10 @@ The Scenes dashboard engine is documented in [scenes.md](./scenes.md). Key conce
 
 Live-tracking range lines between tracks, vessels, shapes, or raw coordinates are documented in [bloodhound.md](./bloodhound.md). Toolbar entry is the `mdi-map-marker-distance` button in the Analysis group; the `BloodhoundPanel` manages add / remove / clear. The line and its distance label follow both endpoints as sources move.
 
+## Perimeter
+
+Live-following standoff rings around individual tracks, with optional breach alerts, are documented in [perimeter.md](./perimeter.md). Toolbar entry is the `mdi-shield-outline` button in the Analysis group alongside Measure and Bloodhound; the `PerimeterPanel` manages add / remove / radius / alert. When alert is on, any other track inside the ring flips the ring red and gets a red halo. Owners are restricted to tracks (CoT, AIS vessel, manual track) — one perimeter per track.
+
 ## Assistant
 
 The in-app AI assistant is documented in [assistant.md](./assistant.md). Key concepts:

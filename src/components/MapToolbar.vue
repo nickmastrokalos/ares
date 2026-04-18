@@ -3,7 +3,7 @@ import { useDisplay } from 'vuetify'
 
 const { mdAndUp, smAndDown } = useDisplay()
 
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io'])
 
 const props = defineProps({
   drawPanelOpen: Boolean,
@@ -11,6 +11,7 @@ const props = defineProps({
   overlaysDialogOpen: Boolean,
   measuring: Boolean,
   bloodhoundPanelOpen: Boolean,
+  perimeterPanelOpen: Boolean,
   routing: Boolean,
   trackDropPanelOpen: Boolean,
   trackListOpen: Boolean,
@@ -23,7 +24,7 @@ const props = defineProps({
 
 // True when any button in that group is active — used to highlight the group activator in collapsed mode.
 const annotationActive = () => props.drawPanelOpen || props.layersPanelOpen || props.routing || props.trackDropPanelOpen || props.trackListOpen
-const analysisActive   = () => props.measuring || props.bloodhoundPanelOpen
+const analysisActive   = () => props.measuring || props.bloodhoundPanelOpen || props.perimeterPanelOpen
 const operationsActive = () => props.ghostPanelOpen || props.interceptPanelOpen
 const feedsActive      = () => props.aisPanelOpen
 </script>
@@ -131,6 +132,15 @@ const feedsActive      = () => props.aisPanelOpen
           </template>
         </v-tooltip>
 
+        <v-tooltip text="Perimeter" location="bottom">
+          <template #activator="{ props: tip }">
+            <v-btn v-bind="tip" icon="mdi-shield-outline" size="small"
+              :color="perimeterPanelOpen ? 'primary' : undefined"
+              :class="[perimeterPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+              @click="emit('toggle-perimeter')" />
+          </template>
+        </v-tooltip>
+
         <v-divider vertical class="mx-2 toolbar-divider" />
 
         <!-- Operations -->
@@ -215,6 +225,9 @@ const feedsActive      = () => props.aisPanelOpen
             <v-list-item prepend-icon="mdi-map-marker-distance" title="Bloodhound"
               :active="bloodhoundPanelOpen" active-color="primary"
               @click="emit('toggle-bloodhound')" />
+            <v-list-item prepend-icon="mdi-shield-outline" title="Perimeter"
+              :active="perimeterPanelOpen" active-color="primary"
+              @click="emit('toggle-perimeter')" />
           </v-list>
         </v-menu>
 

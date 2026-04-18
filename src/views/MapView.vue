@@ -15,6 +15,7 @@ import { useClickDispatcher } from '@/composables/useClickDispatcher'
 import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
 import { useMapBloodhound } from '@/composables/useMapBloodhound'
+import { useMapPerimeters } from '@/composables/useMapPerimeters'
 import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
@@ -43,6 +44,7 @@ import TrackListPanel from '@/components/TrackListPanel.vue'
 import GhostPanel from '@/components/GhostPanel.vue'
 import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
 import BloodhoundPanel from '@/components/BloodhoundPanel.vue'
+import PerimeterPanel from '@/components/PerimeterPanel.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
@@ -52,6 +54,7 @@ import { mapTools } from '@/services/assistant/tools/map'
 import { aisTools } from '@/services/assistant/tools/ais'
 import { routeTools } from '@/services/assistant/tools/routes'
 import { bloodhoundTools } from '@/services/assistant/tools/bloodhound'
+import { perimeterTools } from '@/services/assistant/tools/perimeter'
 import { ghostTools } from '@/services/assistant/tools/ghosts'
 import { cotTools } from '@/services/assistant/tools/cot'
 
@@ -86,6 +89,7 @@ const ghostPanelOpen     = ref(false)
 const interceptPanelOpen = ref(false)
 const aisPanelOpen       = ref(false)
 const bloodhoundPanelOpen = ref(false)
+const perimeterPanelOpen  = ref(false)
 let interceptMarker = null
 const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
@@ -94,11 +98,14 @@ let map = null
 const dispatcher = useClickDispatcher()
 const bloodhoundApi = useMapBloodhound(() => map)
 const { bloodhounding } = bloodhoundApi
-const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, bloodhounding)
+const perimeterApi = useMapPerimeters(() => map)
+const { perimeterSelecting } = perimeterApi
+const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value)
+const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, bloodhounding)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
 const suppressEntityClicks = computed(
-  () => bloodhounding.value || routing.value || placing.value != null
+  () => bloodhounding.value || perimeterSelecting.value || routing.value || placing.value != null
 )
 const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
 const pluginRegistry = usePluginRegistry({ flyToGeometry })
@@ -115,6 +122,7 @@ useAssistantTools(
     ...aisTools({ aisStore, featuresStore }),
     ...cotTools({ tracksStore, featuresStore }),
     ...bloodhoundTools({ featuresStore, tracksStore, aisStore, bloodhoundApi }),
+    ...perimeterTools({ featuresStore, tracksStore, aisStore, perimeterApi }),
     ...ghostTools({ featuresStore, ghostsStore })
   ],
   'Map assistant'
@@ -129,6 +137,7 @@ provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
 provide('bloodhoundApi', bloodhoundApi)
+provide('perimeterApi', perimeterApi)
 
 provide('pluginRegistry', pluginRegistry)
 
@@ -207,6 +216,10 @@ function toggleAisPanel() {
 
 function toggleBloodhoundPanel() {
   bloodhoundPanelOpen.value = !bloodhoundPanelOpen.value
+}
+
+function togglePerimeterPanel() {
+  perimeterPanelOpen.value = !perimeterPanelOpen.value
 }
 
 function toggleInterceptPanel() {
@@ -395,6 +408,7 @@ onUnmounted(async () => {
       :overlays-dialog-open="overlaysDialogOpen"
       :measuring="measuring"
       :bloodhound-panel-open="bloodhoundPanelOpen"
+      :perimeter-panel-open="perimeterPanelOpen"
       :routing="routing"
       :track-drop-panel-open="trackDropPanelOpen"
       :track-list-open="trackListOpen"
@@ -407,6 +421,7 @@ onUnmounted(async () => {
       @toggle-layers="toggleLayersPanel"
       @toggle-measure="toggleMeasure"
       @toggle-bloodhound="toggleBloodhoundPanel"
+      @toggle-perimeter="togglePerimeterPanel"
       @toggle-route="toggleRoute"
       @toggle-track-drop="toggleTrackDrop"
       @toggle-track-list="toggleTrackList"
@@ -456,6 +471,10 @@ onUnmounted(async () => {
         <BloodhoundPanel
           v-if="bloodhoundPanelOpen"
           @close="bloodhoundPanelOpen = false"
+        />
+        <PerimeterPanel
+          v-if="perimeterPanelOpen"
+          @close="perimeterPanelOpen = false"
         />
         <AisTrackPanel
           v-for="mmsi in aisStore.openPanelList"
