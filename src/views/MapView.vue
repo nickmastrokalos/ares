@@ -103,9 +103,9 @@ const bloodhoundApi = useMapBloodhound(() => map)
 const { bloodhounding } = bloodhoundApi
 const perimeterApi = useMapPerimeters(() => map)
 const { perimeterSelecting } = perimeterApi
-const bullseyeApi  = useMapBullseye(() => map, props.missionId)
+const bullseyeApi  = useMapBullseye(() => map, props.missionId, () => { bullseyePanelOpen.value = true })
 const { bullseyeSelecting } = bullseyeApi
-const annotationsApi = useMapAnnotations(() => map, props.missionId)
+const annotationsApi = useMapAnnotations(() => map, props.missionId, () => { annotationsPanelOpen.value = true })
 const { annotationSelecting } = annotationsApi
 const interceptApi = useMapIntercepts(() => map)
 const mapAlerts    = useMapAlerts()

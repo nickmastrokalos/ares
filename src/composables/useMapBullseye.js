@@ -35,7 +35,7 @@ const DEFAULTS = {
   showCardinals: true
 }
 
-export function useMapBullseye(getMap, missionId = null) {
+export function useMapBullseye(getMap, missionId = null, onRequestOpenPanel = null) {
   const settingsStore = useSettingsStore()
 
   const persistEnabled = missionId != null
@@ -112,13 +112,24 @@ export function useMapBullseye(getMap, missionId = null) {
   }
 
   function centerEl() {
+    // 22 px hit target so the cross is comfortable to click; the visible
+    // cross is a 14 px core centred within. Without this pad the 14 px
+    // target is tiny on hi-DPI displays.
     const el = document.createElement('div')
     el.style.cssText =
-      'width:14px;height:14px;pointer-events:none;' +
-      'background:transparent;position:relative;'
+      'width:22px;height:22px;position:relative;cursor:pointer;' +
+      'background:transparent;'
     el.innerHTML =
-      `<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:${RING_COLOR};transform:translateX(-50%)"></div>` +
-      `<div style="position:absolute;top:50%;left:0;right:0;height:1px;background:${RING_COLOR};transform:translateY(-50%)"></div>`
+      `<div style="position:absolute;left:50%;top:4px;bottom:4px;width:1px;background:${RING_COLOR};transform:translateX(-50%);pointer-events:none"></div>` +
+      `<div style="position:absolute;top:50%;left:4px;right:4px;height:1px;background:${RING_COLOR};transform:translateY(-50%);pointer-events:none"></div>`
+
+    // Click opens the bullseye panel. Ignored if no callback wired (e.g.
+    // tests, non-mission views). stopPropagation keeps the map from also
+    // handling this as a bullseye-selecting click.
+    el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
+    })
     return el
   }
 

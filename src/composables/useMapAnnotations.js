@@ -11,7 +11,7 @@ import { getDb } from '@/plugins/database'
 
 const DEFAULT_COLOR = '#ffeb3b'
 
-export function useMapAnnotations(getMap, missionId = null) {
+export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel = null) {
   const persistEnabled = missionId != null
 
   const annotations = ref([])       // { id, lat, lon, text, color }
@@ -169,6 +169,10 @@ export function useMapAnnotations(getMap, missionId = null) {
         updateAnnotation(id, { lat: dragLngLat.lat, lon: dragLngLat.lng })
       } else {
         selectedId.value = id
+        // Clicking the pin is the user reaching for the panel editor —
+        // if it's closed, open it. The panel's own `selectedId` watch then
+        // scrolls the matching row into view.
+        if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
       }
       dragging = false
       dragLngLat = null
