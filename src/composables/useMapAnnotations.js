@@ -155,7 +155,10 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
       const dy = e.clientY - startY
       if (!dragging && Math.hypot(dx, dy) < 4) return  // below drag threshold
       dragging = true
-      const rect = map.getContainer().getBoundingClientRect()
+      // Unproject expects screen coords relative to the canvas origin, not
+      // the outer container. Using `getContainer()` here makes the marker
+      // jump by any toolbar/padding offset between the two elements.
+      const rect = map.getCanvasContainer().getBoundingClientRect()
       dragLngLat = map.unproject([e.clientX - rect.left, e.clientY - rect.top])
       const entry = markers.get(id)
       if (entry) entry.marker.setLngLat(dragLngLat)
