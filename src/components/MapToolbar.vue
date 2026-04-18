@@ -3,7 +3,7 @@ import { useDisplay } from 'vuetify'
 
 const { mdAndUp, smAndDown } = useDisplay()
 
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io', 'snapshot'])
 
 const props = defineProps({
   drawPanelOpen: Boolean,
@@ -305,6 +305,14 @@ const feedsActive      = () => props.aisPanelOpen
           <v-btn v-bind="tip" icon="mdi-swap-vertical" size="small"
             class="text-medium-emphasis"
             @click="emit('toggle-io')" />
+        </template>
+      </v-tooltip>
+
+      <v-tooltip text="Snapshot" location="bottom">
+        <template #activator="{ props: tip }">
+          <v-btn v-bind="tip" icon="mdi-camera-outline" size="small"
+            class="text-medium-emphasis"
+            @click="emit('snapshot')" />
         </template>
       </v-tooltip>
 
