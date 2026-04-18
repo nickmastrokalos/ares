@@ -53,13 +53,7 @@ import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
 import { useAssistantTools } from '@/composables/useAssistantTools'
-import { mapTools } from '@/services/assistant/tools/map'
-import { aisTools } from '@/services/assistant/tools/ais'
-import { routeTools } from '@/services/assistant/tools/routes'
-import { bloodhoundTools } from '@/services/assistant/tools/bloodhound'
-import { perimeterTools } from '@/services/assistant/tools/perimeter'
-import { ghostTools } from '@/services/assistant/tools/ghosts'
-import { cotTools } from '@/services/assistant/tools/cot'
+import { buildMapToolBundles } from '@/services/assistant/toolBundles'
 
 const props = defineProps({
   missionId: { type: Number, required: true }
@@ -156,15 +150,11 @@ const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppres
 // Register assistant tool bundles. Factories run once on mount, after the
 // stores above are created — so the closures capture live store instances.
 useAssistantTools(
-  () => [
-    ...mapTools({ featuresStore, tracksStore, aisStore, settingsStore, flyToGeometry, flyTo, switchBasemap }),
-    ...routeTools({ featuresStore }),
-    ...aisTools({ aisStore, featuresStore }),
-    ...cotTools({ tracksStore, featuresStore }),
-    ...bloodhoundTools({ featuresStore, tracksStore, aisStore, bloodhoundApi }),
-    ...perimeterTools({ featuresStore, tracksStore, aisStore, perimeterApi }),
-    ...ghostTools({ featuresStore, ghostsStore })
-  ],
+  () => buildMapToolBundles({
+    featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
+    flyToGeometry, flyTo, switchBasemap,
+    bloodhoundApi, perimeterApi
+  }),
   'Map assistant'
 )
 

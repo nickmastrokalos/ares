@@ -15,18 +15,29 @@ Examples:
 ```
 User input
     ↓
-stores/assistant.js  (turn loop, pendingCalls, messages)
+stores/assistant.js           (panel state, message log, send())
+    ↓ invokes
+services/assistant/turnRunner.js  (pure loop — chat + tool dispatch)
     ↓ invoke
 src-tauri/src/assistant/commands.rs  (assistant_chat Tauri command)
     ↓ reqwest HTTPS
 Anthropic API  (cloud LLM)
     ↑ response JSON (content blocks with text / tool_use)
     ↓
-Turn loop resolves tool_use blocks via toolRegistry
+turnRunner resolves tool_use blocks via toolRegistry
     ├─ readonly → execute immediately, feed tool_result back to LLM
-    └─ write   → queue as pendingCall; AssistantConfirmCard in UI;
-                  on confirm → execute + feed tool_result; on cancel → "user declined"
+    └─ write   → stores/assistantConfirm.js queues the call;
+                  AssistantConfirmCard lets the user confirm or cancel;
+                  on confirm → execute + feed tool_result
+                  on cancel  → feed "user declined" and continue
 ```
+
+Split of concerns:
+- `stores/assistant.js` — panel open/minimized/messages/contextLabel/send. Thin.
+- `services/assistant/turnRunner.js` — the chat → dispatch loop. Pure; takes callbacks; no Vue/Pinia imports; testable in isolation.
+- `stores/assistantConfirm.js` — pending-write queue plus the `Promise` resolvers that gate confirmations. UI components read this store directly.
+- `services/assistant/toolBundles.js` — `buildMapToolBundles(deps)` aggregator. `MapView.vue` calls it once instead of hand-spreading every bundle.
+- `services/assistant/entityResolution.js` — shared `resolveEndpoint` / `resolveTarget` / `featureCentroid` for tools that accept (featureId | trackUid | vesselMmsi | coordinate).
 
 The Rust command is the only thing that touches the network. The API key travels from the settings store to the command invocation and is used only as an HTTP header — it is never logged.
 
@@ -131,19 +142,21 @@ Settings UI: **Settings → Assistant tab** (`mdi-robot-outline`). Provider drop
 
 ## Turn loop (technical)
 
-In `src/stores/assistant.js`, `_runTurnLoop()`:
+`src/services/assistant/turnRunner.js` exports `runTurnLoop({ provider, model, apiKey, system, getMessages, appendMessage, confirmWrite })`:
 
 1. Builds `tools` array from `toolRegistry.list()` mapped to Anthropic's `{name, description, input_schema}` shape.
-2. Serialises the conversation `messages` array (user/assistant roles; tool_result turns use role `user` with `tool_result` content blocks — Anthropic format).
+2. Serialises the conversation from `getMessages()` (user/assistant roles; tool_result turns use role `user` with `tool_result` content blocks — Anthropic format).
 3. Calls `assistant_chat` via `client.chat(...)`.
-4. Appends the assistant turn to `messages`.
+4. Calls `appendMessage('assistant', blocks)`.
 5. For each `tool_use` block in the response:
    - Looks up the `ToolDef` by name.
    - Readonly → `await toolDef.handler(args)` → stash result.
-   - Write → push to `pendingCalls` → `await _awaitDecision(callId)` → execute or feed "user declined".
-6. Appends a user turn with all collected `tool_result` blocks.
+   - Write → `await confirmWrite(toolDef, block)` → the assistant store queues an entry in `assistantConfirm.pending`, awaits the user, then executes (or returns a cancel envelope).
+6. Calls `appendMessage('user', toolResults)`.
 7. If `response.stop_reason === 'tool_use'`, loops from step 1.
 8. Otherwise, the loop exits — the final text is already appended in step 4.
+
+Closing the assistant panel calls `assistantConfirm.clear()`, which rejects any outstanding resolvers so an in-flight write tool returns a cancel result rather than hanging.
 
 ## Out of scope (v1)
 

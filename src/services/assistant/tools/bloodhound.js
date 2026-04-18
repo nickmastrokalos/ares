@@ -1,4 +1,4 @@
-import { geometryBounds } from '@/services/geometry'
+import { resolveEndpoint } from '@/services/assistant/entityResolution'
 
 // A bloodhound is a live-tracking range line between two endpoints. Each
 // endpoint may be a mission feature, a CoT track (by uid), an AIS vessel
@@ -7,50 +7,6 @@ import { geometryBounds } from '@/services/geometry'
 //
 // These tools drive useMapBloodhound's programmatic API. Labels are resolved
 // from the source stores so handler errors can reference them clearly.
-
-function resolveEndpoint({ featuresStore, tracksStore, aisStore }, spec, label) {
-  const { featureId, trackUid, vesselMmsi, coordinate } = spec
-  const provided = [featureId != null, trackUid != null, vesselMmsi != null, coordinate != null].filter(Boolean).length
-  if (provided !== 1) {
-    return { ok: false, error: `Provide exactly one of ${label}FeatureId, ${label}TrackUid, ${label}VesselMmsi, or ${label}Coordinate.` }
-  }
-
-  if (coordinate) {
-    return { ok: true, ep: { kind: 'point', coord: coordinate } }
-  }
-
-  if (trackUid != null) {
-    const t = tracksStore.tracks.get(trackUid)
-    if (!t) return { ok: false, error: `CoT track ${trackUid} not found.` }
-    return { ok: true, ep: { kind: 'cot', uid: trackUid, coord: [t.lon, t.lat] } }
-  }
-
-  if (vesselMmsi != null) {
-    const mmsi = String(vesselMmsi)
-    const v = aisStore.vessels.get(mmsi)
-    if (!v) return { ok: false, error: `AIS vessel ${mmsi} not found in the current feed window.` }
-    return { ok: true, ep: { kind: 'ais', mmsi, coord: [v.longitude, v.latitude] } }
-  }
-
-  const row = featuresStore.features.find(f => f.id === featureId)
-  if (!row) return { ok: false, error: `Feature ${featureId} not found.` }
-  const props = JSON.parse(row.properties)
-  let coord
-  if (props.center) coord = props.center
-  else if (row.type === 'box' && props.sw && props.ne) {
-    coord = [(props.sw[0] + props.ne[0]) / 2, (props.sw[1] + props.ne[1]) / 2]
-  } else {
-    const geom = JSON.parse(row.geometry)
-    if (geom.type === 'Point') coord = geom.coordinates
-    else {
-      const bounds = geometryBounds(geom)
-      if (!bounds) return { ok: false, error: `Feature ${featureId} has no usable geometry.` }
-      const [[w, s], [e, n]] = bounds
-      coord = [(w + e) / 2, (s + n) / 2]
-    }
-  }
-  return { ok: true, ep: { kind: 'feature', featureId, coord } }
-}
 
 const ENDPOINT_PROPS = (label) => ({
   [`${label}FeatureId`]:   { type: 'integer', description: `${label} endpoint: mission feature id (shape, manual track, or route).` },

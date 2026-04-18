@@ -1,4 +1,5 @@
-import { distanceBetween, geometryBounds } from '@/services/geometry'
+import { distanceBetween } from '@/services/geometry'
+import { featureCentroid } from '@/services/assistant/entityResolution'
 
 // AIS assistant tools. All writes gate on presence of feedUrl + apiKey when
 // the user is trying to enable the feed — otherwise the toggle silently does
@@ -23,25 +24,14 @@ function summariseVessel(v) {
 }
 
 // Resolve a center point from either a featureId (uses feature center) or a
-// raw coordinate. Mirrors the helper pattern in range.js / map.js.
+// raw coordinate.
 function resolveCenter(featuresStore, featureId, coordinate) {
   if (coordinate) return { ok: true, point: coordinate }
   if (featureId == null) {
     return { ok: false, error: 'Provide either featureId or coordinate.' }
   }
-  const row = featuresStore.features.find(f => f.id === featureId)
-  if (!row) return { ok: false, error: `Feature ${featureId} not found.` }
-  const props = JSON.parse(row.properties)
-  if (props.center) return { ok: true, point: props.center }
-  if (row.type === 'box' && props.sw && props.ne) {
-    return { ok: true, point: [(props.sw[0] + props.ne[0]) / 2, (props.sw[1] + props.ne[1]) / 2] }
-  }
-  const geom = JSON.parse(row.geometry)
-  if (geom.type === 'Point') return { ok: true, point: geom.coordinates }
-  const bounds = geometryBounds(geom)
-  if (!bounds) return { ok: false, error: `Feature ${featureId} has no usable geometry.` }
-  const [[w, s], [e, n]] = bounds
-  return { ok: true, point: [(w + e) / 2, (s + n) / 2] }
+  const c = featureCentroid(featuresStore, featureId)
+  return c.ok ? { ok: true, point: c.coord } : c
 }
 
 export function aisTools({ aisStore, featuresStore }) {
