@@ -3,7 +3,7 @@ import { useDisplay } from 'vuetify'
 
 const { mdAndUp, smAndDown } = useDisplay()
 
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-bullseye', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io', 'snapshot'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-bullseye', 'toggle-annotations', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io', 'snapshot'])
 
 const props = defineProps({
   drawPanelOpen: Boolean,
@@ -13,6 +13,7 @@ const props = defineProps({
   bloodhoundPanelOpen: Boolean,
   perimeterPanelOpen: Boolean,
   bullseyePanelOpen: Boolean,
+  annotationsPanelOpen: Boolean,
   routing: Boolean,
   trackDropPanelOpen: Boolean,
   trackListOpen: Boolean,
@@ -24,7 +25,7 @@ const props = defineProps({
 })
 
 // True when any button in that group is active — used to highlight the group activator in collapsed mode.
-const annotationActive = () => props.drawPanelOpen || props.layersPanelOpen || props.routing || props.trackDropPanelOpen || props.trackListOpen
+const annotationActive = () => props.drawPanelOpen || props.layersPanelOpen || props.routing || props.trackDropPanelOpen || props.trackListOpen || props.annotationsPanelOpen
 const analysisActive   = () => props.measuring || props.bloodhoundPanelOpen || props.perimeterPanelOpen || props.bullseyePanelOpen
 const operationsActive = () => props.ghostPanelOpen || props.interceptPanelOpen
 const feedsActive      = () => props.aisPanelOpen
@@ -91,6 +92,15 @@ const feedsActive      = () => props.aisPanelOpen
             <v-btn v-bind="tip" icon="mdi-shape-outline" size="small"
               class="text-medium-emphasis"
               @click="emit('toggle-overlays')" />
+          </template>
+        </v-tooltip>
+
+        <v-tooltip text="Annotations" location="bottom">
+          <template #activator="{ props: tip }">
+            <v-btn v-bind="tip" icon="mdi-note-text-outline" size="small"
+              :color="annotationsPanelOpen ? 'primary' : undefined"
+              :class="[annotationsPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+              @click="emit('toggle-annotations')" />
           </template>
         </v-tooltip>
 
@@ -210,6 +220,9 @@ const feedsActive      = () => props.aisPanelOpen
               @click="emit('toggle-route')" />
             <v-list-item prepend-icon="mdi-shape-outline" title="Overlays"
               @click="emit('toggle-overlays')" />
+            <v-list-item prepend-icon="mdi-note-text-outline" title="Annotations"
+              :active="annotationsPanelOpen" active-color="primary"
+              @click="emit('toggle-annotations')" />
             <v-list-item prepend-icon="mdi-map-marker-account" title="Track Drop"
               :active="trackDropPanelOpen" active-color="primary"
               @click="emit('toggle-track-drop')" />

@@ -11,6 +11,9 @@ export const useAppStore = defineStore('app', () => {
   // Per-view status string rendered on the left of AppFooter (e.g. the map's
   // cursor coordinate). Views set this on mount / update and clear on unmount.
   const footerInfo = ref(null)
+  // Secondary status chip rendered to the right of `footerInfo` (e.g. the
+  // map's current zoom level). Same lifecycle rules as `footerInfo`.
+  const footerDetail = ref(null)
 
   function beginLoad() {
     _count.value++
@@ -20,5 +23,5 @@ export const useAppStore = defineStore('app', () => {
     if (_count.value > 0) _count.value--
   }
 
-  return { loading, beginLoad, endLoad, footerInfo }
+  return { loading, beginLoad, endLoad, footerInfo, footerDetail }
 })

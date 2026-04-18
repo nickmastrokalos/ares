@@ -21,10 +21,9 @@ The user frames the map first (pan / zoom / toggle the overlays they want visibl
 |------|---------|
 | 1a | Mission name (bold, from `featuresStore.activeMission.name`) |
 | 1b | UTC timestamp (right-aligned, `YYYY-MM-DD HH:MM:SSZ`) |
-| 2 | Overlay summary — comma-separated tokens for non-empty layers (`N AIS`, `N CoT`, `N perimeters`, etc.) |
-| 3 | View info (dim) — `zoom X.XX · lat, lng` of the center |
+| 2 | View info (dim) — `zoom X.XX · lat, lng` of the center |
 
-When no overlays are active the summary row renders `No overlays active`. The center/zoom line always renders.
+The legend deliberately does not include an overlay-count summary — what's on the map is what's in the image, and the counts added noise without adding information.
 
 ## Architecture
 
@@ -36,6 +35,9 @@ MapView.vue:captureSnapshot()
 composables/useMapSnapshot.js:capture()
     ├─ awaits map `idle`, triggers a repaint
     ├─ reads map.getCanvas() and drawImage()s it onto an offscreen canvas
+    ├─ rasterizes text-bearing HTML markers (bullseye / bloodhound /
+    │     perimeter labels, etc.) onto the canvas at their current
+    │     screen positions — WebGL readback misses DOM overlays
     ├─ draws legend strip (dark band + text rows) at the bottom
     ├─ canvas.toBlob('image/png')
     ├─ @tauri-apps/plugin-dialog `save()` → file path (or null on cancel)

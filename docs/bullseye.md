@@ -68,7 +68,7 @@ Projection (rather than zoom level) handles the globe-projection case: 1 nm near
 ```js
 {
   bullseye,            // ComputedRef<Bullseye | null>
-  bullseyeCount,       // ComputedRef<0 | 1>    — snapshot legend uses this
+  bullseyeCount,       // ComputedRef<0 | 1>
   bullseyeSelecting,   // ComputedRef<boolean> — panel-exposed click-to-place state
   toggleSelecting,     // enter / exit click-to-place mode
   setBullseye(patch),  // place or replace; patch must include lat + lon (or merge onto an existing bullseye)
@@ -95,9 +95,20 @@ The composable instance is provided under the `'bullseyeApi'` inject key from `M
 
 Bullseye's click-to-place handler is a raw `map.on('click', …)` handler, like bloodhound / perimeter. Other entity composables must continue to gate their click actions when `bullseyeSelecting` is true. `MapView.vue` OR's `bullseyeSelecting` into both `entitySelecting` (for draw / route) and `suppressEntityClicks` (for tracks / AIS / manual tracks).
 
-## Snapshot integration
+## Assistant tools
 
-When a bullseye is placed, the snapshot legend adds a `bullseye` token to the overlay summary (`useMapSnapshot` reads `bullseyeApi.bullseyeCount`).
+Bundle: `src/services/assistant/tools/bullseye.js`, registered through `toolBundles.js` and wired with `bullseyeApi` from `MapView.vue`. Because the bullseye is not a mission feature, `map_list_features` / `map_move_feature` do not touch it — the assistant must use these dedicated tools when the user says "the bullseye".
+
+| Tool | Readonly | Purpose |
+|------|----------|---------|
+| `bullseye_get`    | ✓ | Return the active bullseye (centre, name, ring interval in metres, ring count, cardinals flag) or null. |
+| `bullseye_set`    |   | Place or replace the bullseye. Location via `atFeatureId` / `atTrackUid` / `atVesselMmsi` / `atCoordinate` (exactly one). Optional name / ringIntervalMeters / ringCount / showCardinals. |
+| `bullseye_update` |   | Modify the existing bullseye. Any subset of name / rings / cardinals plus an optional `moveTo*` field (same four location options). Errors if no bullseye is placed. |
+| `bullseye_clear`  |   | Remove the active bullseye. |
+
+Coordinate resolution for `bullseye_set` and `bullseye_update`'s `moveTo*` fields reuses `entityResolution.resolveEndpoint` — the same helper used by annotations / bloodhound. Placements on tracks or vessels capture the instantaneous coordinate only; the bullseye does not follow a moving source.
+
+All writes go through the confirm-card flow (`readonly: false`).
 
 ## Files
 
@@ -107,6 +118,7 @@ When a bullseye is placed, the snapshot legend adds a `bullseye` token to the ov
 | `src/components/BullseyePanel.vue`          | Draggable panel — place, config, live bullseye-call list. |
 | `src/views/MapView.vue`                     | Instantiates the composable, provides `bullseyeApi`, mounts the panel, extends `suppressEntityClicks` / `entitySelecting`. |
 | `src/components/MapToolbar.vue`             | `bullseyePanelOpen` prop + `toggle-bullseye` event (icon `mdi-bullseye`, tooltip "Bullseye") in the Analysis group. |
+| `src/services/assistant/tools/bullseye.js`  | Assistant tool bundle — `bullseye_get` / `_set` / `_update` / `_clear`. |
 | `src/services/geometry.js`                  | `bullseyeCall(from, to)` helper. |
 
 ## Out of scope (v1)
@@ -115,4 +127,3 @@ When a bullseye is placed, the snapshot legend adds a `bullseye` token to the ov
 - **Multiple bullseyes** — only one at a time; second placement replaces the first.
 - **AIS in the track list** — intentional, avoids flooding the panel. Could be surfaced via a future toggle.
 - **Per-track panel bullseye line** — track panels do not yet display bullseye calls; a follow-up could add a single read-only line to `TrackPanel`, `AisTrackPanel`, and `ManualTrackPanel`.
-- **Assistant tools** — no bundle yet (`bullseye_set`, `bullseye_clear`, etc.). Natural follow-up modelled on `perimeterTools`.
