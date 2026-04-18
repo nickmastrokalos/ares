@@ -16,6 +16,8 @@ import { useMapDraw } from '@/composables/useMapDraw'
 import { useMapMeasure } from '@/composables/useMapMeasure'
 import { useMapBloodhound } from '@/composables/useMapBloodhound'
 import { useMapPerimeters } from '@/composables/useMapPerimeters'
+import { useMapIntercepts } from '@/composables/useMapIntercepts'
+import { useMapAlerts } from '@/composables/useMapAlerts'
 import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
@@ -45,6 +47,7 @@ import GhostPanel from '@/components/GhostPanel.vue'
 import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
 import BloodhoundPanel from '@/components/BloodhoundPanel.vue'
 import PerimeterPanel from '@/components/PerimeterPanel.vue'
+import MapAlertChip from '@/components/MapAlertChip.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
@@ -90,7 +93,6 @@ const interceptPanelOpen = ref(false)
 const aisPanelOpen       = ref(false)
 const bloodhoundPanelOpen = ref(false)
 const perimeterPanelOpen  = ref(false)
-let interceptMarker = null
 const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
@@ -100,6 +102,44 @@ const bloodhoundApi = useMapBloodhound(() => map)
 const { bloodhounding } = bloodhoundApi
 const perimeterApi = useMapPerimeters(() => map)
 const { perimeterSelecting } = perimeterApi
+const interceptApi = useMapIntercepts(() => map)
+const mapAlerts    = useMapAlerts()
+
+// Perimeter breaches are aggregated into a single alert so the chip stays
+// compact regardless of how many perimeters are breached. Each breaching
+// perimeter contributes one line to the aggregate message; the chip's
+// expand UI surfaces the full list when needed.
+watch(
+  () => perimeterApi.perimeters.value,
+  (list) => {
+    const breaching = list.filter(p => p.alert && p.breached.length > 0)
+    if (breaching.length === 0) {
+      mapAlerts.clearAlert('perimeter-breach')
+      return
+    }
+    // One detail entry per (perimeter, intruder) so the flyTo action on
+    // each line targets the actual intruder, not the ring owner.
+    const details = []
+    for (const p of breaching) {
+      for (const b of p.breached) {
+        details.push({
+          label: `${b.label} in ${p.owner.label}`,
+          coord: b.coord
+        })
+      }
+    }
+    const summary = breaching.length === 1 && breaching[0].breached.length === 1
+      ? `Perimeter breach: ${details[0].label}`
+      : `${details.length} perimeter ${details.length === 1 ? 'breach' : 'breaches'}`
+    mapAlerts.setAlert('perimeter-breach', {
+      source:  'perimeter',
+      level:   'critical',
+      message: summary,
+      details
+    })
+  },
+  { deep: true }
+)
 const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value)
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
@@ -138,25 +178,9 @@ provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
 provide('bloodhoundApi', bloodhoundApi)
 provide('perimeterApi', perimeterApi)
+provide('interceptApi', interceptApi)
 
 provide('pluginRegistry', pluginRegistry)
-
-provide('setInterceptMarker', (lon, lat) => {
-  if (!map) return
-  if (interceptMarker) interceptMarker.remove()
-  const el = document.createElement('div')
-  el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#4fc3f7;border:2px solid #ffffff;box-shadow:0 0 6px rgba(0,0,0,0.6);pointer-events:none'
-  interceptMarker = new maplibregl.Marker({ element: el })
-    .setLngLat([lon, lat])
-    .addTo(map)
-})
-
-provide('clearInterceptMarker', () => {
-  if (interceptMarker) {
-    interceptMarker.remove()
-    interceptMarker = null
-  }
-})
 
 function resolveBasemapTiles(id) {
   if (id?.startsWith('offline:')) {
@@ -224,10 +248,6 @@ function togglePerimeterPanel() {
 
 function toggleInterceptPanel() {
   interceptPanelOpen.value = !interceptPanelOpen.value
-  if (!interceptPanelOpen.value && interceptMarker) {
-    interceptMarker.remove()
-    interceptMarker = null
-  }
 }
 
 function onToolSelect(toolId) {
@@ -390,7 +410,6 @@ onUnmounted(async () => {
   } catch (err) {
     console.error('Failed to stop listeners:', err)
   }
-  if (interceptMarker) { interceptMarker.remove(); interceptMarker = null }
   if (map) {
     mapStore.saveView(map)
     map.remove()
@@ -513,6 +532,7 @@ onUnmounted(async () => {
           @select="dispatcher.selectItem($event)"
           @close="dispatcher.dismiss()"
         />
+        <MapAlertChip :alerts="mapAlerts.alerts.value" />
       </div>
     </div>
   </div>

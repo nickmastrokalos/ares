@@ -63,9 +63,11 @@ The click handler routes by topmost layer hit:
 | `cot-tracks-points`, `cot-tracks-symbols`                 | `{ kind: 'cot', uid, coord }`              |
 | `ais-vessels-points`, `ais-vessels-arrows`                | `{ kind: 'ais', mmsi, coord }`             |
 | `manual-tracks-points`, `manual-tracks-symbols`, `draw-features-points`, `draw-features-line`, `draw-features-fill`, `draw-image-bounds-fill`, `route-line`, `route-dot` | `{ kind: 'feature', featureId, coord }` (centroid, not click coord) |
-| (fallback, rare)                                          | `{ kind: 'point', coord }`                 |
+| Empty map space                                           | `{ kind: 'point', coord }` (anchored at the click lng/lat) |
 
 For feature-backed layers, the endpoint tracks the **feature**, not the pixel the user clicked — so dragging a box to a new location moves the line with it, regardless of which corner the user originally clicked.
+
+Empty-space clicks produce a static `point` endpoint — useful for measuring to/from an arbitrary location (a reported position, a waypoint, a terrain feature). The cursor stays `crosshair` for the entire selection so every pixel is reachable.
 
 ### Coexistence with the click dispatcher
 

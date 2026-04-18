@@ -16,6 +16,25 @@ export default defineConfig({
     }
   },
   clearScreen: false,
+  build: {
+    // The Map view is a single screen that pulls in every map composable
+    // and every map-side panel (~2 MB), and the maplibre-gl vendor chunk is
+    // another ~1 MB. 2200 KB covers today's reality plus a small growth
+    // budget, so the warning only fires when something genuinely surprising
+    // slips in (e.g., a heavy new dep). If MapView crosses this, that's a
+    // signal to split its panels into async components.
+    chunkSizeWarningLimit: 2200,
+    rollupOptions: {
+      output: {
+        // Carve maplibre-gl into its own cacheable chunk so it doesn't
+        // balloon the MapView bundle — it rarely changes, the app code
+        // around it churns.
+        manualChunks(id) {
+          if (id.includes('node_modules/maplibre-gl')) return 'vendor-maplibre'
+        }
+      }
+    }
+  },
   server: {
     host: host || false,
     port: 1420,

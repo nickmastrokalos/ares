@@ -326,10 +326,11 @@ export function useMapBloodhound(getMap) {
   }
 
   // Resolve a click to a typed endpoint by snapping to the topmost hit feature.
-  // Returns null for empty-space clicks — both endpoints must be snapped.
+  // Empty-space clicks fall through to a `point` endpoint anchored at the click
+  // coord so the operator can measure to/from arbitrary locations.
   function resolveEndpointAtClick(map, e) {
     const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
-    if (!hits.length) return null
+    if (!hits.length) return { kind: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
 
     const hit = hits[0]
     const layer = hit.layer.id
@@ -365,21 +366,21 @@ export function useMapBloodhound(getMap) {
     return { kind: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
   }
 
-  // Registers map handlers and enters selecting state. Clicks on empty space
-  // are ignored; the handler resets pendingEpA after each pair and keeps
-  // running so the user can place multiple lines in a row.
+  // Registers map handlers and enters selecting state. Every click is valid —
+  // snap hits produce typed endpoints, empty-space clicks produce point
+  // endpoints. Handler resets pendingEpA after each pair and keeps running
+  // so the user can place multiple lines in a row.
   function startSelecting() {
     const map = getMap()
     if (!map) return
 
     pendingEpA = null
     isSelecting.value = true
-    map.getCanvasContainer().style.cursor = 'default'
+    map.getCanvasContainer().style.cursor = 'crosshair'
     removeClickHandler()
 
-    moveHandler = (e) => {
-      const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
-      map.getCanvasContainer().style.cursor = hits.length ? 'crosshair' : 'default'
+    moveHandler = () => {
+      map.getCanvasContainer().style.cursor = 'crosshair'
     }
 
     clickHandler = (e) => {

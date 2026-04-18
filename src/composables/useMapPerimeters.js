@@ -50,9 +50,10 @@ export function useMapPerimeters(getMap) {
   let clickHandler = null
   let moveHandler  = null
   let keyHandler   = null
-  let stopTrackWatch   = null
-  let stopAisWatch     = null
-  let stopFeatureWatch = null
+  let stopTrackWatch      = null
+  let stopAisWatch        = null
+  let stopAisVisibleWatch = null
+  let stopFeatureWatch    = null
 
   // Reactive list for panel + assistant tools. Rebuilds on add/remove/clear
   // (perimeterCount bump) and on re-resolve ticks (bumpTick).
@@ -67,7 +68,12 @@ export function useMapPerimeters(getMap) {
       breached: [...p.breached].map(k => {
         const [kind, id] = splitKey(k)
         const ep = makeEndpointFromKey(kind, id)
-        return { kind, id, label: ep ? labelForOwner(ep) : id }
+        return {
+          kind,
+          id,
+          label: ep ? labelForOwner(ep) : id,
+          coord: ep?.coord ?? null
+        }
       })
     }))
   })
@@ -196,6 +202,10 @@ export function useMapPerimeters(getMap) {
 
   // Iterates every live track and returns those inside the given perimeter,
   // keyed as `${kind}:${id}`. The owner itself is always excluded.
+  //
+  // Hidden AIS vessels are skipped: a breach halo / red ring over empty
+  // map is confusing, and an operator who has explicitly hidden AIS has
+  // opted out of AIS-driven alerting.
   function computeBreaches(p, ownerKey) {
     const breached = new Set()
     const center = p.owner.coord
@@ -206,10 +216,12 @@ export function useMapPerimeters(getMap) {
       if (key === ownerKey) continue
       if (distanceBetween([t.lon, t.lat], center) < r) breached.add(key)
     }
-    for (const v of aisStore.vessels.values()) {
-      const key = `ais:${v.mmsi}`
-      if (key === ownerKey) continue
-      if (distanceBetween([v.longitude, v.latitude], center) < r) breached.add(key)
+    if (aisStore.visible) {
+      for (const v of aisStore.vessels.values()) {
+        const key = `ais:${v.mmsi}`
+        if (key === ownerKey) continue
+        if (distanceBetween([v.longitude, v.latitude], center) < r) breached.add(key)
+      }
     }
     for (const f of featuresStore.features) {
       if (f.type !== 'manual-track') continue
@@ -310,15 +322,19 @@ export function useMapPerimeters(getMap) {
     if (!stopAisWatch) {
       stopAisWatch = watch(() => aisStore.vessels, reresolveAll, { deep: false })
     }
+    if (!stopAisVisibleWatch) {
+      stopAisVisibleWatch = watch(() => aisStore.visible, reresolveAll)
+    }
     if (!stopFeatureWatch) {
       stopFeatureWatch = watch(() => featuresStore.features, reresolveAll, { deep: false })
     }
   }
 
   function stopWatchers() {
-    if (stopTrackWatch)   { stopTrackWatch();   stopTrackWatch   = null }
-    if (stopAisWatch)     { stopAisWatch();     stopAisWatch     = null }
-    if (stopFeatureWatch) { stopFeatureWatch(); stopFeatureWatch = null }
+    if (stopTrackWatch)      { stopTrackWatch();      stopTrackWatch      = null }
+    if (stopAisWatch)        { stopAisWatch();        stopAisWatch        = null }
+    if (stopAisVisibleWatch) { stopAisVisibleWatch(); stopAisVisibleWatch = null }
+    if (stopFeatureWatch)    { stopFeatureWatch();    stopFeatureWatch    = null }
   }
 
   function ensureKeyHandler() {

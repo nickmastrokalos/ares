@@ -308,8 +308,9 @@ Currently provided:
 | `draggingFeature`      | `Ref<feature \| null>`             | `useMapDraw().draggingFeature`      |
 | `openManualTrackPanel` | `(id) => void`                     | `useMapManualTracks().openPanel`    |
 | `switchBasemap`        | `(id) => Promise`                  | `MapView.switchBasemap`             |
-| `setInterceptMarker`   | `(lon, lat) => void`               | `MapView` (inline)                  |
-| `clearInterceptMarker` | `() => void`                       | `MapView` (inline)                  |
+| `bloodhoundApi`        | `ReturnType<useMapBloodhound>`     | `useMapBloodhound`                  |
+| `perimeterApi`         | `ReturnType<useMapPerimeters>`     | `useMapPerimeters`                  |
+| `interceptApi`         | `ReturnType<useMapIntercepts>`     | `useMapIntercepts`                  |
 
 ## Basemap Switching
 - Available basemaps are defined in `src/services/basemaps.js` as the `BASEMAPS` array. Adding a new online basemap = adding one entry with `{ id, name, icon, tiles, tileSize, maxzoom }`.
@@ -355,6 +356,20 @@ Live-tracking range lines between tracks, vessels, shapes, or raw coordinates ar
 ## Perimeter
 
 Live-following standoff rings around individual tracks, with optional breach alerts, are documented in [perimeter.md](./perimeter.md). Toolbar entry is the `mdi-shield-outline` button in the Analysis group alongside Measure and Bloodhound; the `PerimeterPanel` manages add / remove / radius / alert. When alert is on, any other track inside the ring flips the ring red and gets a red halo. Owners are restricted to tracks (CoT, AIS vessel, manual track) — one perimeter per track.
+
+## Intercept
+
+Live-updating intercept and CPA solutions between a friendly and hostile track are documented in [intercept.md](./intercept.md). Toolbar entry is the `mdi-target` button in the Analysis group; the `CallInterceptorPanel` manages the add form plus a list of active solves. Each solve renders a friendly→aim line, a dashed hostile projected path, a dashed aim ring, and an aim marker. When the friendly can't catch the hostile, the solver falls back to the closest-point-of-approach (amber styling + miss distance). Both endpoints may be CoT tracks, AIS vessels, or manual tracks; multiple simultaneous intercepts are supported and persist when the panel is closed.
+
+## Map alerts
+
+`useMapAlerts()` is a tiny composable that aggregates map-level alerts keyed by id. `MapAlertChip.vue` is a top-center overlay that renders a **single** pulsing pill (amber = warning, red = critical) showing the highest-severity alert. When more than one alert is live, a `+N` count badge appears and the chip becomes clickable — clicking toggles a popover that lists every alert and its details.
+
+The alert shape is `{ id, source, level, message, details?, timestamp }`. `details` is an optional array of `{ label, coord? }` entries — source-side aggregators use them to list the individual items that rolled up into the summary. When a detail has a `coord` ([lng, lat]), the chip renders a `mdi-crosshairs-gps` button next to that line; clicking it invokes the injected `flyToGeometry` and centres the map there.
+
+Sources push alerts with `setAlert(id, { source, level, message, details? })` and clear them with `clearAlert(id)` or `clearSource(src)`.
+
+Wired today: perimeter breach. `MapView.vue` watches `perimeterApi.perimeters` and, when any perimeter with alert enabled has intruders, emits a **single** `perimeter-breach` alert. The message is either the full description (one breach total) or a count (`"3 perimeter breaches"`); the `details` array carries one `{ label: "<intruder> in <owner>", coord: <intruder coord> }` entry per breaching (perimeter, intruder) pair, so each line's fly-to button targets the actual intruder. Source-side aggregation keeps the chip one pill regardless of how many perimeters trip. Other sources (intercept TTI crossing, bloodhound proximity, …) can hook in the same way.
 
 ## Assistant
 
