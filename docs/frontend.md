@@ -55,11 +55,15 @@ src/
     assistant/
       client.js           # Thin invoke wrapper for assistant_chat command
       toolRegistry.js     # MCP-shaped register/unregister/list module
+      turnRunner.js       # Pure chat → tool-dispatch loop (no Vue/Pinia)
+      toolBundles.js      # buildMapToolBundles(deps) aggregator
+      entityResolution.js # Shared resolveEndpoint/resolveTarget/featureCentroid
       tools/
         map.js            # Map surface tool bundle
         scenes.js         # Scenes surface tool bundle
   stores/
-    assistant.js          # Turn loop, pendingCalls, message list
+    assistant.js          # Panel state, message log, send() entry point
+    assistantConfirm.js   # Pending write queue + Promise resolvers
   components/
     AppFooter.vue         # Global footer (all non-home routes)
     assistant/
@@ -377,7 +381,11 @@ The in-app AI assistant is documented in [assistant.md](./assistant.md). Key con
 - A **global footer** (`AppFooter.vue`) is rendered on all non-home routes. It hosts the assistant toggle button and a reserved left slot for future status indicators.
 - The **assistant panel** (`AssistantPanel.vue`) is a docked card (bottom-right, RoutePanel-styled) that shows the chat log, pending confirms, and an input row.
 - The **tool registry** (`src/services/assistant/toolRegistry.js`) is an MCP-shaped register/unregister surface. Each route registers its tool bundle on mount and unregisters on unmount via `useAssistantTools`.
-- The **assistant store** (`src/stores/assistant.js`) owns the turn loop, pendingCalls, and message list.
+- The **assistant store** (`src/stores/assistant.js`) owns panel visibility, the message log, and the `send()` entry point. It stays thin by delegating orchestration.
+- The **turn runner** (`src/services/assistant/turnRunner.js`) is a pure function — no Vue/Pinia imports — that drives the chat → tool-dispatch loop. Callbacks cover message append and write confirmation; it is testable in isolation.
+- The **confirm store** (`src/stores/assistantConfirm.js`) owns the pending-write queue and the `Promise` resolvers that gate user confirmation. UI components (`AssistantConfirmCard`) read/write this store directly; the main assistant store does not.
+- The **tool bundles module** (`src/services/assistant/toolBundles.js`) aggregates every MapView bundle into `buildMapToolBundles(deps)`. `MapView.vue` calls this once instead of hand-spreading factories.
+- The **entity resolution module** (`src/services/assistant/entityResolution.js`) centralises `resolveEndpoint`, `resolveTarget`, and `featureCentroid` — the (featureId | trackUid | vesselMmsi | coordinate) → `{ kind, ...ids, coord }` lookup shared by Bloodhound, Perimeter, CoT, and AIS tools.
 - Transport is via a Rust command (`assistant_chat`) that calls the Anthropic API — no direct HTTPS from the webview.
 - API key, provider, and model are configured in Settings → Assistant tab.
 

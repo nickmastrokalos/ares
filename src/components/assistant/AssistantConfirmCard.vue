@@ -1,11 +1,11 @@
 <script setup>
-import { useAssistantStore } from '@/stores/assistant'
+import { useAssistantConfirmStore } from '@/stores/assistantConfirm'
 
 defineProps({
   call: { type: Object, required: true }
 })
 
-const store = useAssistantStore()
+const confirmStore = useAssistantConfirmStore()
 </script>
 
 <template>
@@ -21,7 +21,7 @@ const store = useAssistantStore()
         variant="text"
         class="text-medium-emphasis"
         :disabled="call.status !== 'pending'"
-        @click="store.cancelCall(call.id)"
+        @click="confirmStore.cancel(call.id)"
       >
         Cancel
       </v-btn>
@@ -30,7 +30,7 @@ const store = useAssistantStore()
         variant="tonal"
         color="primary"
         :disabled="call.status !== 'pending'"
-        @click="store.confirmCall(call.id)"
+        @click="confirmStore.confirm(call.id)"
       >
         Confirm
       </v-btn>

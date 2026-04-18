@@ -1,4 +1,4 @@
-import { geometryBounds } from '@/services/geometry'
+import { resolveTarget } from '@/services/assistant/entityResolution'
 
 // A perimeter is a live-following standoff ring around a single track —
 // dashed circle at a user-given radius. Optional breach alert flips the ring
@@ -7,46 +7,6 @@ import { geometryBounds } from '@/services/geometry'
 // Targets are tracks only: CoT (uid), AIS vessel (mmsi), or a mission
 // feature (manual track). Raw coordinates are not accepted — perimeters
 // must follow a live source.
-
-function resolveTarget({ featuresStore, tracksStore, aisStore }, spec) {
-  const { featureId, trackUid, vesselMmsi } = spec
-  const provided = [featureId != null, trackUid != null, vesselMmsi != null].filter(Boolean).length
-  if (provided !== 1) {
-    return { ok: false, error: 'Provide exactly one of targetFeatureId, targetTrackUid, or targetVesselMmsi.' }
-  }
-
-  if (trackUid != null) {
-    const t = tracksStore.tracks.get(trackUid)
-    if (!t) return { ok: false, error: `CoT track ${trackUid} not found.` }
-    return { ok: true, owner: { kind: 'cot', uid: trackUid, coord: [t.lon, t.lat] } }
-  }
-
-  if (vesselMmsi != null) {
-    const mmsi = String(vesselMmsi)
-    const v = aisStore.vessels.get(mmsi)
-    if (!v) return { ok: false, error: `AIS vessel ${mmsi} not found in the current feed window.` }
-    return { ok: true, owner: { kind: 'ais', mmsi, coord: [v.longitude, v.latitude] } }
-  }
-
-  const row = featuresStore.features.find(f => f.id === featureId)
-  if (!row) return { ok: false, error: `Feature ${featureId} not found.` }
-  const props = JSON.parse(row.properties)
-  let coord
-  if (props.center) coord = props.center
-  else if (row.type === 'box' && props.sw && props.ne) {
-    coord = [(props.sw[0] + props.ne[0]) / 2, (props.sw[1] + props.ne[1]) / 2]
-  } else {
-    const geom = JSON.parse(row.geometry)
-    if (geom.type === 'Point') coord = geom.coordinates
-    else {
-      const bounds = geometryBounds(geom)
-      if (!bounds) return { ok: false, error: `Feature ${featureId} has no usable geometry.` }
-      const [[w, s], [e, n]] = bounds
-      coord = [(w + e) / 2, (s + n) / 2]
-    }
-  }
-  return { ok: true, owner: { kind: 'feature', featureId, coord } }
-}
 
 function ownerKeyFromSpec(spec) {
   if (spec.targetTrackUid    != null) return `cot:${spec.targetTrackUid}`
@@ -115,13 +75,13 @@ export function perimeterTools({ featuresStore, tracksStore, aisStore, perimeter
           featureId:  args.targetFeatureId,
           trackUid:   args.targetTrackUid,
           vesselMmsi: args.targetVesselMmsi
-        })
+        }, 'target')
         if (!res.ok) return { error: res.error }
 
         const r = Number(args.radiusMeters)
         if (!Number.isFinite(r) || r <= 0) return { error: 'radiusMeters must be a positive number.' }
 
-        const ownerKey = perimeterApi.addPerimeter(res.owner, r, args.alert !== false)
+        const ownerKey = perimeterApi.addPerimeter(res.ep, r, args.alert !== false)
         if (!ownerKey) return { error: 'Map not ready.' }
         return { success: true, ownerKey }
       }
