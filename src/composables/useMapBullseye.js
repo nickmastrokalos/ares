@@ -123,13 +123,50 @@ export function useMapBullseye(getMap, missionId = null, onRequestOpenPanel = nu
       `<div style="position:absolute;left:50%;top:4px;bottom:4px;width:1px;background:${RING_COLOR};transform:translateX(-50%);pointer-events:none"></div>` +
       `<div style="position:absolute;top:50%;left:4px;right:4px;height:1px;background:${RING_COLOR};transform:translateY(-50%);pointer-events:none"></div>`
 
-    // Click (without drag) opens the panel. Drag handling is delegated to
-    // MapLibre's native draggable Marker — see `rebuild()`. stopPropagation
-    // keeps the click from also hitting the map (which in selecting-mode
-    // would re-place the bullseye).
-    el.addEventListener('click', (e) => {
+    // Pointer handlers — click (no drag) opens the panel, drag (>=4 px) moves
+    // the bullseye. Same pattern as annotation pins; we don't use MapLibre's
+    // native draggable Marker because it offsets the element visually
+    // relative to the projected centre and the cross drifts off the rings.
+    let startX = 0, startY = 0
+    let dragging = false
+    let dragLngLat = null
+
+    el.addEventListener('pointerdown', (e) => {
       e.stopPropagation()
-      if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
+      startX = e.clientX
+      startY = e.clientY
+      dragging = false
+      dragLngLat = null
+      el.setPointerCapture(e.pointerId)
+      el.style.cursor = 'grabbing'
+    })
+
+    el.addEventListener('pointermove', (e) => {
+      if (!el.hasPointerCapture(e.pointerId)) return
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      if (!dragging && Math.hypot(dx, dy) < 4) return
+      dragging = true
+      const map = getMap()
+      if (!map || !centerMarker) return
+      // unproject expects coords in the canvas's frame, not the outer map
+      // container's — using getContainer here shifts the drag by any
+      // toolbar/chrome offset above the canvas.
+      const rect = map.getCanvasContainer().getBoundingClientRect()
+      dragLngLat = map.unproject([e.clientX - rect.left, e.clientY - rect.top])
+      centerMarker.setLngLat(dragLngLat)
+    })
+
+    el.addEventListener('pointerup', (e) => {
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+      el.style.cursor = 'grab'
+      if (dragging && dragLngLat) {
+        setBullseye({ lat: dragLngLat.lat, lon: dragLngLat.lng })
+      } else {
+        if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
+      }
+      dragging = false
+      dragLngLat = null
     })
     return el
   }
@@ -230,21 +267,12 @@ export function useMapBullseye(getMap, missionId = null, onRequestOpenPanel = nu
     }
     map.getSource(CARDINALS_SOURCE).setData({ type: 'FeatureCollection', features: cardinalFeatures })
 
-    // Center cross marker — draggable so the operator can reposition the
-    // bullseye by dragging the cross. MapLibre handles the pointer math and
-    // stops map panning for us; on release we commit the new centre through
-    // `setBullseye` which rebuilds rings and persists.
-    centerMarker = new maplibregl.Marker({
-      element: centerEl(),
-      anchor: 'center',
-      draggable: true
-    })
+    // Center cross marker — drag handling lives on the element itself (see
+    // `centerEl`), so this stays a plain non-draggable Marker whose visual
+    // centre sits exactly on the projected ring centre.
+    centerMarker = new maplibregl.Marker({ element: centerEl(), anchor: 'center' })
       .setLngLat(center)
       .addTo(map)
-    centerMarker.on('dragend', () => {
-      const l = centerMarker.getLngLat()
-      setBullseye({ lat: l.lat, lon: l.lng })
-    })
 
     // Name label just above center
     const nameAnchor = destinationPoint(center, Math.max(b.ringInterval * 0.15, 50), 0)
