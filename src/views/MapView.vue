@@ -17,6 +17,7 @@ import { useMapMeasure } from '@/composables/useMapMeasure'
 import { useMapBloodhound } from '@/composables/useMapBloodhound'
 import { useMapPerimeters } from '@/composables/useMapPerimeters'
 import { useMapBullseye } from '@/composables/useMapBullseye'
+import { useMapAnnotations } from '@/composables/useMapAnnotations'
 import { useMapIntercepts } from '@/composables/useMapIntercepts'
 import { useMapAlerts } from '@/composables/useMapAlerts'
 import { useMapSnapshot } from '@/composables/useMapSnapshot'
@@ -50,6 +51,7 @@ import CallInterceptorPanel from '@/components/CallInterceptorPanel.vue'
 import BloodhoundPanel from '@/components/BloodhoundPanel.vue'
 import PerimeterPanel from '@/components/PerimeterPanel.vue'
 import BullseyePanel from '@/components/BullseyePanel.vue'
+import AnnotationsPanel from '@/components/AnnotationsPanel.vue'
 import MapAlertChip from '@/components/MapAlertChip.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
@@ -91,6 +93,7 @@ const aisPanelOpen       = ref(false)
 const bloodhoundPanelOpen = ref(false)
 const perimeterPanelOpen  = ref(false)
 const bullseyePanelOpen   = ref(false)
+const annotationsPanelOpen = ref(false)
 const mouseCoord = ref(null)
 const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
@@ -102,12 +105,13 @@ const perimeterApi = useMapPerimeters(() => map)
 const { perimeterSelecting } = perimeterApi
 const bullseyeApi  = useMapBullseye(() => map, props.missionId)
 const { bullseyeSelecting } = bullseyeApi
+const annotationsApi = useMapAnnotations(() => map, props.missionId)
+const { annotationSelecting } = annotationsApi
 const interceptApi = useMapIntercepts(() => map)
 const mapAlerts    = useMapAlerts()
 const { capture: captureSnapshotRaw } = useMapSnapshot({
   getMap: () => map,
-  featuresStore, tracksStore, aisStore,
-  perimeterApi, bloodhoundApi, interceptApi, ghostsStore, bullseyeApi
+  featuresStore
 })
 
 async function captureSnapshot() {
@@ -156,12 +160,12 @@ watch(
   },
   { deep: true }
 )
-const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value)
+const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value)
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
 const suppressEntityClicks = computed(
-  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || routing.value || placing.value != null
+  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || placing.value != null
 )
 const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
 const pluginRegistry = usePluginRegistry({ flyToGeometry })
@@ -175,7 +179,7 @@ useAssistantTools(
   () => buildMapToolBundles({
     featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
     flyToGeometry, flyTo, switchBasemap,
-    bloodhoundApi, perimeterApi
+    bloodhoundApi, perimeterApi, annotationsApi
   }),
   'Map assistant'
 )
@@ -191,6 +195,7 @@ provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
 provide('bloodhoundApi', bloodhoundApi)
 provide('perimeterApi', perimeterApi)
 provide('bullseyeApi', bullseyeApi)
+provide('annotationsApi', annotationsApi)
 provide('interceptApi', interceptApi)
 
 provide('pluginRegistry', pluginRegistry)
@@ -261,6 +266,10 @@ function togglePerimeterPanel() {
 
 function toggleBullseyePanel() {
   bullseyePanelOpen.value = !bullseyePanelOpen.value
+}
+
+function toggleAnnotationsPanel() {
+  annotationsPanelOpen.value = !annotationsPanelOpen.value
 }
 
 function toggleInterceptPanel() {
@@ -372,6 +381,10 @@ onMounted(async () => {
     }
   )
 
+  const updateFooterZoom = () => { appStore.footerDetail = `z ${map.getZoom().toFixed(2)}` }
+  updateFooterZoom()
+  map.on('zoom', updateFooterZoom)
+
   map.on('contextmenu', (e) => {
     e.originalEvent.preventDefault()
     // Clamp so the menu doesn't overflow the right or bottom edge.
@@ -395,6 +408,7 @@ onMounted(async () => {
     initManualTrackLayers()
     initAisLayers()
     bullseyeApi.init()
+    annotationsApi.init()
 
     // Start any CoT listeners that were enabled at the time the map loaded.
     for (const listener of settingsStore.cotListeners) {
@@ -438,6 +452,7 @@ onUnmounted(async () => {
     map = null
   }
   appStore.footerInfo = null
+  appStore.footerDetail = null
 })
 </script>
 
@@ -451,6 +466,7 @@ onUnmounted(async () => {
       :bloodhound-panel-open="bloodhoundPanelOpen"
       :perimeter-panel-open="perimeterPanelOpen"
       :bullseye-panel-open="bullseyePanelOpen"
+      :annotations-panel-open="annotationsPanelOpen"
       :routing="routing"
       :track-drop-panel-open="trackDropPanelOpen"
       :track-list-open="trackListOpen"
@@ -465,6 +481,7 @@ onUnmounted(async () => {
       @toggle-bloodhound="toggleBloodhoundPanel"
       @toggle-perimeter="togglePerimeterPanel"
       @toggle-bullseye="toggleBullseyePanel"
+      @toggle-annotations="toggleAnnotationsPanel"
       @toggle-route="toggleRoute"
       @toggle-track-drop="toggleTrackDrop"
       @toggle-track-list="toggleTrackList"
@@ -523,6 +540,10 @@ onUnmounted(async () => {
         <BullseyePanel
           v-if="bullseyePanelOpen"
           @close="bullseyePanelOpen = false"
+        />
+        <AnnotationsPanel
+          v-if="annotationsPanelOpen"
+          @close="annotationsPanelOpen = false"
         />
         <AisTrackPanel
           v-for="mmsi in aisStore.openPanelList"

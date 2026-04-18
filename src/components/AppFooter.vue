@@ -10,6 +10,7 @@ const appStore       = useAppStore()
   <div class="app-footer">
     <div class="footer-left">
       <span v-if="appStore.footerInfo" class="footer-info">{{ appStore.footerInfo }}</span>
+      <span v-if="appStore.footerDetail" class="footer-detail">{{ appStore.footerDetail }}</span>
     </div>
     <div class="footer-right">
       <v-progress-circular
@@ -58,6 +59,7 @@ const appStore       = useAppStore()
   flex: 1;
   display: flex;
   align-items: center;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -75,6 +77,15 @@ const appStore       = useAppStore()
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.footer-detail {
+  font-size: 11px;
+  font-family: monospace;
+  letter-spacing: 0.03em;
+  color: rgba(var(--v-theme-on-surface), 0.45);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .footer-spinner {

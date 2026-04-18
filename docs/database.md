@@ -134,6 +134,22 @@ One bullseye per mission — `mission_id` doubles as the primary key so the one-
 
 Writes use `INSERT … ON CONFLICT(mission_id) DO UPDATE` so "place" and "edit" are the same statement. Clear is a straight `DELETE WHERE mission_id = ?`.
 
+### `annotations` (migration v5)
+
+Operator-placed sticky notes pinned to map locations — many per mission. See [annotations.md](./annotations.md).
+
+| Column        | Type    | Notes |
+|---------------|---------|-------|
+| `id`          | INTEGER PK AUTOINCREMENT | Surrogate key. |
+| `mission_id`  | INTEGER NOT NULL, FK → missions(id) ON DELETE CASCADE | Plain FK (not PK) — duplicates allowed. |
+| `lat`, `lon`  | REAL    | Pin coordinates, WGS84. |
+| `text`        | TEXT    | Free-text note body. Plain text only in v1. |
+| `color`       | TEXT    | Hex string, e.g. `#ffeb3b`. Defaulted to yellow at the schema level. |
+| `created_at`  | TEXT    | `datetime('now')` default. |
+| `updated_at`  | TEXT    | `datetime('now')` default; bumped on every write. |
+
+Index `idx_annotations_mission` covers the `mission_id` lookup used on every `init()`.
+
 ### Migration v2 — rename to missions
 Dropped the "projects" vocabulary in favor of "missions" to match the
 mission-picker entry flow on the home page. SQLite can rename a parent table

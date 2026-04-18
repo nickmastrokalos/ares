@@ -365,6 +365,10 @@ Live-following standoff rings around individual tracks, with optional breach ale
 
 Operator-placed reference point with concentric range rings and cardinal spokes, for classic tactical position calls ("bullseye 090 / 10 nm"), is documented in [bullseye.md](./bullseye.md). Toolbar entry is the `mdi-bullseye` button in the Analysis group; the `BullseyePanel` handles place / config / clear and shows live bullseye calls for CoT and manual tracks sorted by range. Bearings are true-north; only one bullseye is active at a time.
 
+## Annotations
+
+Sticky-note style text pins the operator drops on the map (free text, colour, draggable) are documented in [annotations.md](./annotations.md). Toolbar entry is the `mdi-note-text-outline` button in the Annotation group; the `AnnotationsPanel` lists, edits, recolours, and deletes them. Persisted per-mission in the SQLite `annotations` table (migration v5).
+
 ## Intercept
 
 Live-updating intercept and CPA solutions between a friendly and hostile track are documented in [intercept.md](./intercept.md). Toolbar entry is the `mdi-target` button in the Analysis group; the `CallInterceptorPanel` manages the add form plus a list of active solves. Each solve renders a friendly→aim line, a dashed hostile projected path, a dashed aim ring, and an aim marker. When the friendly can't catch the hostile, the solver falls back to the closest-point-of-approach (amber styling + miss distance). Both endpoints may be CoT tracks, AIS vessels, or manual tracks; multiple simultaneous intercepts are supported and persist when the panel is closed.
