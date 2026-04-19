@@ -6,7 +6,7 @@
 
 Annotations are short text notes the operator drops on the map. They're meant for quick callouts — "check this ridge", "last known contact 14:22", "FARP 1" — rather than structured mission data. Many per mission, freely placed, freely edited.
 
-Each annotation renders as a small coloured pin with the MDI note glyph. The full text body is shown only on hover via an HTML tooltip so the map stays legible even with dozens of notes placed. Editing happens in the side panel, not on the map.
+Each annotation renders as a small coloured circle with the MDI `note-text-outline` glyph centred inside — no outline unless selected. The full text body is shown only on hover via a MapLibre popup so the map stays legible even with dozens of notes placed. Editing happens in the side panel, not on the map.
 
 ## Persistence
 
@@ -21,10 +21,12 @@ Every mutation writes through immediately — there is no dirty/save cycle. The 
 
 ## Map interaction
 
-- **Hover a marker** to reveal its full text in an HTML tooltip above the pin. The tooltip is suppressed while the pin is being dragged.
-- **Drag a marker** to move it — the new position persists on pointerup. A small drag threshold (4 px) prevents accidental nudges on click.
-- **Click a marker** (no drag) selects it and opens the `AnnotationsPanel` (if closed). `selectedId` updates; the panel scrolls the corresponding row into view and outlines it. The open-panel callback is passed into `useMapAnnotations` from `MapView.vue` — the composable itself doesn't own panel visibility.
-- Annotations do not block other click interactions. They are HTML markers with their own pointer handlers; map clicks / track clicks / draw clicks continue to work normally when not dragging an annotation.
+- **Hover a pin** to reveal its full text in a MapLibre popup above the pin. The popup is dismissed the moment a drag begins.
+- **Click an unselected pin** to select it. `selectedId` updates, the `AnnotationsPanel` opens (if closed), the corresponding row is scrolled into view and outlined, and the on-map pin picks up a brighter blue ring via the `annotations-pin-selected` filtered layer. No drag occurs on this first click — it only arms the pin for moving.
+- **Drag an already-selected pin** to move it — the new position persists on `mouseup`. Drag is wired as a `map.on('mousedown', 'annotations-pin', …)` handler with window-level `mousemove`/`mouseup`/`keydown` — the same two-step select-then-move flow draw features use. Live preview patches the `annotations-points` source directly; the DB write happens once on release. **Esc** mid-drag reverts the preview without persisting.
+- **Click away** (a map click with no pin hit) deselects the active annotation and closes the panel. Wired as a `map.on('click', …)` handler in the composable that ignores the event when `selectedId` is already null, when click-to-place is active, or when a pin was hit at the click point (`queryRenderedFeatures` against `annotations-pin`). `MapView.vue` watches `selectedId` and closes the panel whenever it goes to `null`; the panel's own close emit also clears `selectedId`, so the two directions are symmetrical without looping.
+- Adding a new annotation does *not* auto-select, and interacting with a panel row (typing, recolouring) does not flip the on-map blue outline. The open-panel callback is passed into `useMapAnnotations` from `MapView.vue` — the composable itself doesn't own panel visibility.
+- Drag release suppresses the next `click` via a short-lived `suppressNextClick` flag so add-mode doesn't drop a new annotation on top of the just-dragged one.
 
 ## Panel UX
 
@@ -35,20 +37,20 @@ Sections top-to-bottom:
 1. **Header** — note icon, title, minimize, close.
 2. **Add row** — `+ Add annotation`. Toggles click-to-place; shows `Click map…` while active.
 3. **List** — one row per annotation, ordered by id (creation order). Each row has:
-   - A colour dot (matches the marker).
+   - A colour dot (matches the pin).
    - A 2-row `<textarea>` bound to the note text (commits on blur / change).
    - A delete button.
-   - A row of 8 colour swatches; clicking one recolours the marker.
-   - Selected row (via map-marker click) is outlined in the primary colour.
+   - A row of 8 colour swatches; clicking one recolours the pin.
+   - Selected row (via map-pin click) is outlined in the primary colour.
 4. **Clear all** — deletes every annotation for this mission after a confirm prompt.
 
 ## Colour palette
 
-Panel and marker use the same 8-swatch palette (yellow / orange / pink / red / green / blue / purple / grey). The schema is colour-blind — any hex string is valid — but the panel only surfaces these eight to keep things consistent.
+Panel and pin use the same 8-swatch palette (yellow / orange / pink / red / green / blue / purple / grey). The schema is colour-blind — any hex string is valid — but the panel only surfaces these eight to keep things consistent.
 
 ## Programmatic API
 
-`useMapAnnotations(getMap, missionId, onRequestOpenPanel?)` returns:
+`useMapAnnotations(getMap, missionId, onRequestOpenPanel?, suppress?)` returns:
 
 ```js
 {
@@ -65,9 +67,11 @@ Panel and marker use the same 8-swatch palette (yellow / orange / pink / red / g
 }
 ```
 
-`missionId` scopes persistence. Pass `null` to disable persistence entirely (tests, non-mission views). `init()` must be called after the MapLibre style has loaded — `MapView.vue` runs it inside `map.on('load')` alongside the other composables.
+`missionId` scopes persistence. Pass `null` to disable persistence entirely (tests, non-mission views). `init()` must be called after the MapLibre style has loaded — `MapView.vue` runs it inside `map.on('load')` alongside the other composables. `init()` also installs the map source / layers / drag / popup handlers up-front, so a first-placed annotation doesn't race with lazy layer creation.
 
 `onRequestOpenPanel` is an optional callback fired when the user clicks a pin (no drag). `MapView.vue` passes `() => { annotationsPanelOpen.value = true }` so clicking a note opens the editor panel.
+
+`suppress` is a ref-like `{ value: boolean }` consulted at drag start. When true (another entity mode active, a draw tool selected, etc.) the drag-to-move handler is ignored so it doesn't steal interactions from the currently-active tool. `MapView.vue` passes a shared `entitySuppressRef` kept in sync with `suppressEntityClicks` via `watch`.
 
 The composable is provided under the `'annotationsApi'` inject key from `MapView.vue`. `AnnotationsPanel.vue` injects it.
 
@@ -75,13 +79,13 @@ The composable is provided under the `'annotationsApi'` inject key from `MapView
 
 Click-to-place uses a raw `map.on('click', …)` handler. `MapView.vue` OR's `annotationSelecting` into both `entitySelecting` (draw / route) and `suppressEntityClicks` (tracks / AIS / manual tracks) so the placement click doesn't also fire unrelated actions.
 
-The markers themselves use DOM pointer events, not map layer events — no interaction with the click dispatcher is needed.
+Drag-to-move is its own `map.on('mousedown', 'annotations-pin', …)` binding, not routed through the click dispatcher — annotations don't overlap any other clickable layer. The dispatcher's `suppress` signal and annotations' `suppress` ref share the same source so drag is silenced during draw / route / track-drop modes automatically.
 
 ## Files
 
 | File                                          | Role |
 |-----------------------------------------------|------|
-| `src/composables/useMapAnnotations.js`        | Composable — collection state, SQLite CRUD, HTML-marker rendering, click-to-place, drag-to-move. |
+| `src/composables/useMapAnnotations.js`        | Composable — collection state, SQLite CRUD, GeoJSON circle + symbol layer rendering (pin + note glyph), hover popup, click-to-place, drag-to-move. |
 | `src/components/AnnotationsPanel.vue`         | Draggable panel — add, edit, recolour, delete. |
 | `src/views/MapView.vue`                       | Instantiates, provides `annotationsApi`, mounts panel, extends `suppressEntityClicks` / `entitySelecting`. |
 | `src/components/MapToolbar.vue`               | `annotationsPanelOpen` prop + `toggle-annotations` event (icon `mdi-note-text-outline`, tooltip "Annotations") in the Annotation group. |

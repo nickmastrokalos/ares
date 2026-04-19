@@ -3,10 +3,11 @@ import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
 import { cotTypeToSidc, getOrCreateIcon } from '@/services/sidc'
 
-const MANUAL_TRACKS_SOURCE  = 'manual-tracks'
-const MANUAL_TRACKS_LAYER   = 'manual-tracks-points'
-const MANUAL_TRACKS_SYMBOLS = 'manual-tracks-symbols'
-const MANUAL_TRACKS_LABELS  = 'manual-tracks-labels'
+const MANUAL_TRACKS_SOURCE   = 'manual-tracks'
+const MANUAL_TRACKS_LAYER    = 'manual-tracks-points'
+const MANUAL_TRACKS_SYMBOLS  = 'manual-tracks-symbols'
+const MANUAL_TRACKS_LABELS   = 'manual-tracks-labels'
+const MANUAL_TRACKS_SELECTED = 'manual-tracks-selected'
 
 export const AFFIL_CONFIG = {
   f: { label: 'Friendly', color: '#4a9ade', prefix: 'FRND' },
@@ -36,6 +37,10 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
   const placing      = ref(null)
   const openPanelIds = ref(new Set())
   const focusedId    = ref(null)
+  // Broadcast live drag state to the `ManualTrackPanel` so its coordinate
+  // field updates every frame without committing to the store. Mirrors the
+  // `draggingFeature` pattern used by `useMapDraw` / `AttributesPanel`.
+  const draggingTrack = ref(null)  // null | { _dbId, lng, lat }
 
   let placeClickHandler = null
   let keyHandler        = null
@@ -80,6 +85,14 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
     const next = new Set(openPanelIds.value)
     next.delete(id)
     openPanelIds.value = next
+    // Closing the focused panel drops the on-map selection ring too —
+    // otherwise the outline persists with no visible panel to explain it.
+    if (focusedId.value === id) focusedId.value = null
+  }
+
+  function selectedFilter() {
+    // -1 is a safe sentinel — feature ids are SQLite rowids, always >= 1.
+    return ['==', ['get', '_dbId'], focusedId.value ?? -1]
   }
 
   // ---- Auto-naming ----
@@ -217,6 +230,22 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
       }
     })
 
+    // Selection ring — transparent fill, blue stroke, filtered to just the
+    // focused track. Added last so it renders above the circle + symbol,
+    // giving the user a clear "this one is armed" affordance.
+    map.addLayer({
+      id:     MANUAL_TRACKS_SELECTED,
+      type:   'circle',
+      source: MANUAL_TRACKS_SOURCE,
+      filter: selectedFilter(),
+      paint: {
+        'circle-radius':       22,
+        'circle-opacity':      0,
+        'circle-stroke-color': '#4a9ade',
+        'circle-stroke-width': 2
+      }
+    })
+
     const clickLayers = [MANUAL_TRACKS_LAYER, MANUAL_TRACKS_SYMBOLS]
 
     if (dispatcher) {
@@ -229,7 +258,10 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
           subtitle: 'Manual Track',
           icon:     'mdi-map-marker-account'
         }),
-        dedupeKey:  (f) => f.properties._dbId
+        dedupeKey:  (f) => f.properties._dbId,
+        // Clear the selection ring when the user clicks empty space or another
+        // feature domain. Panels stay open — only the "armed for drag" focus drops.
+        onMiss:     () => { focusedId.value = null }
       })
     } else {
       map.on('click', MANUAL_TRACKS_LAYER, (e) => {
@@ -244,10 +276,19 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
       })
     }
 
-    const onEnter = () => { if (!placing.value) map.getCanvasContainer().style.cursor = 'grab' }
+    // Context-aware cursor: `pointer` on an unfocused track (first click
+    // selects), `grab` on the focused track (second mousedown drags).
+    // Wired on `mousemove` rather than `mouseenter` so the cursor updates
+    // the moment `focusedId` changes, even without moving the mouse off.
+    const onMove = (e) => {
+      if (placing.value) return
+      const id = e.features?.[0]?.properties?._dbId
+      map.getCanvasContainer().style.cursor =
+        focusedId.value === id ? 'grab' : 'pointer'
+    }
     const onLeave = () => { if (!placing.value) map.getCanvasContainer().style.cursor = '' }
     for (const layer of clickLayers) {
-      map.on('mouseenter', layer, onEnter)
+      map.on('mousemove', layer, onMove)
       map.on('mouseleave', layer, onLeave)
     }
 
@@ -270,6 +311,13 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
       if (e.originalEvent?.button !== 0) return
       const id = e.features?.[0]?.properties?._dbId
       if (id == null) return
+
+      // Two-step select-then-drag (matches annotation + draw-feature behaviour):
+      // only a track that is already focused (its panel is the active one)
+      // accepts a drag. First-click on an unfocused track falls through to
+      // the dispatcher/click handler, which focuses it and opens its panel.
+      if (focusedId.value !== id) return
+
       const feature = featuresStore.features.find(f => f.id === id)
       if (!feature) return
       const geometry   = JSON.parse(feature.geometry)
@@ -298,6 +346,8 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
               : f
           )
         })
+        // Broadcast live state to the panel so its coord grid updates per frame.
+        draggingTrack.value = { _dbId: id, lng: lastLngLat.lng, lat: lastLngLat.lat }
       }
 
       function finish(commit) {
@@ -306,6 +356,7 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
         window.removeEventListener('keydown', onWindowKeyDown)
         map.dragPan.enable()
         canvas.style.cursor = ''
+        draggingTrack.value = null
 
         if (commit && hasMoved && lastLngLat) {
           // Swallow the mouseup → click the map fires on release so the
@@ -379,19 +430,29 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
     { deep: false }
   )
 
+  // Repaint the selection ring when the focused track changes.
+  const stopFocusWatch = watch(focusedId, () => {
+    const map = getMap()
+    if (map?.getLayer(MANUAL_TRACKS_SELECTED)) {
+      map.setFilter(MANUAL_TRACKS_SELECTED, selectedFilter())
+    }
+  })
+
   onUnmounted(() => {
     if (dispatcher) dispatcher.unregister('manual-tracks')
     stopDataWatch()
     stopDeleteWatch()
+    stopFocusWatch()
     removePlaceHandlers()
     placing.value = null
     const map = getMap()
     if (!map) return
-    if (map.getLayer(MANUAL_TRACKS_LABELS))  map.removeLayer(MANUAL_TRACKS_LABELS)
-    if (map.getLayer(MANUAL_TRACKS_SYMBOLS)) map.removeLayer(MANUAL_TRACKS_SYMBOLS)
-    if (map.getLayer(MANUAL_TRACKS_LAYER))   map.removeLayer(MANUAL_TRACKS_LAYER)
-    if (map.getSource(MANUAL_TRACKS_SOURCE)) map.removeSource(MANUAL_TRACKS_SOURCE)
+    if (map.getLayer(MANUAL_TRACKS_SELECTED)) map.removeLayer(MANUAL_TRACKS_SELECTED)
+    if (map.getLayer(MANUAL_TRACKS_LABELS))   map.removeLayer(MANUAL_TRACKS_LABELS)
+    if (map.getLayer(MANUAL_TRACKS_SYMBOLS))  map.removeLayer(MANUAL_TRACKS_SYMBOLS)
+    if (map.getLayer(MANUAL_TRACKS_LAYER))    map.removeLayer(MANUAL_TRACKS_LAYER)
+    if (map.getSource(MANUAL_TRACKS_SOURCE))  map.removeSource(MANUAL_TRACKS_SOURCE)
   })
 
-  return { placing, setPlacing, openPanelList, openPanel, closePanel, focusedId, initLayers }
+  return { placing, setPlacing, openPanelList, openPanel, closePanel, focusedId, draggingTrack, initLayers }
 }

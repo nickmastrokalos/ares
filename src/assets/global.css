@@ -33,3 +33,17 @@ html, body, #app {
   background: #2a2a2a !important;
   color: #e0e0e0 !important;
 }
+
+/* MapLibre popup used for annotation hover — match Vuetify tooltip look
+   (dark surface, light text) so the visual language stays consistent. */
+.annotation-popup .maplibregl-popup-content {
+  background: #2a2a2a;
+  color: #e0e0e0;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.annotation-popup .maplibregl-popup-tip {
+  display: none;
+}

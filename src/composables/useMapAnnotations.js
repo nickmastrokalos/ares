@@ -1,17 +1,25 @@
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { getDb } from '@/plugins/database'
 
 // Operator-placed sticky notes pinned to map coordinates. Many per mission,
-// persisted in the SQLite `annotations` table (migration v5). Rendered as
-// HTML markers so text content / drag interaction / colour are handled by
-// normal DOM APIs rather than a symbol layer.
+// persisted in the SQLite `annotations` table (migration v5). Rendered via
+// a pair of GeoJSON circle layers so click-to-move uses the same proven
+// map-layer pattern as shape vertices and manual tracks.
 //
 // See docs/annotations.md for the full feature contract.
 
 const DEFAULT_COLOR = '#ffeb3b'
 
-export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel = null) {
+const POINTS_SOURCE      = 'annotations-points'
+const PIN_LAYER          = 'annotations-pin'
+const PIN_SELECTED_LAYER = 'annotations-pin-selected'
+const PIN_ICON_LAYER     = 'annotations-pin-icon'
+const NOTE_ICON_ID       = 'annotation-note-icon'
+// mdi-note-text-outline codepoint (U+F11D7) from @mdi/font.
+const NOTE_GLYPH         = String.fromCodePoint(0xF11D7)
+
+export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel = null, suppress = { value: false }) {
   const persistEnabled = missionId != null
 
   const annotations = ref([])       // { id, lat, lon, text, color }
@@ -21,164 +29,277 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
   const annotationSelecting = computed(() => isSelecting.value)
   const annotationCount     = computed(() => annotations.value.length)
 
-  // Map<id, { marker, root }> so `updateAnnotation` can mutate an existing
-  // marker in place rather than tearing down / rebuilding every time.
-  const markers = new Map()
+  let clickHandler    = null
+  let moveHandler     = null
+  let keyHandler      = null
+  let popup           = null
+  let dragWired       = false
+  let deselectHandler = null
+  // Guards the post-drag click that the map fires on mouseup while the panel
+  // is in add-mode — without it, releasing a drag would also drop a brand
+  // new annotation at the release point.
+  let suppressNextClick = false
 
-  let clickHandler = null
-  let moveHandler  = null
-  let keyHandler   = null
+  // ---- Source / layer lifecycle ----
 
-  // ---- Marker DOM ----
-  //
-  // Each annotation renders as a compact coloured pin with the MDI note
-  // glyph. The full text appears in a hover tooltip rather than on the map
-  // — the icon keeps the map legible even with dozens of notes placed.
-  //
-  // Structure:
-  //   <div .annotation-marker-root>            ← positioned by MapLibre
-  //     <div .annotation-marker-pin>           ← coloured circle + icon
-  //     <div .annotation-marker-tip>           ← hover tooltip (hidden by default)
+  // Register the MDI note-text-outline glyph as a map image so it can be
+  // drawn on top of each pin via a symbol layer. Rendered at 2x and passed
+  // with pixelRatio: 2 so it stays crisp on retina displays — the same
+  // pattern used by SIDC icons (see src/services/sidc.js::getOrCreateIcon).
+  async function ensureAnnotationIcon(map) {
+    if (map.hasImage(NOTE_ICON_ID)) return
+    // Make sure the MDI font has loaded before rasterising; otherwise the
+    // canvas draws a tofu box.
+    try {
+      await document.fonts.load("16px 'Material Design Icons'")
+    } catch { /* ignore — fallback is the coloured circle */ }
 
-  function buildMarkerEl(a) {
-    const root = document.createElement('div')
-    root.className = 'annotation-marker-root'
-    root.style.cssText =
-      'position:relative;width:22px;height:22px;user-select:none;'
-    root.dataset.annotationId = String(a.id)
+    const size = 32                 // displayed pixel size after pixelRatio=2
+    const scale = 2
+    const canvas = document.createElement('canvas')
+    canvas.width  = size * scale
+    canvas.height = size * scale
+    const ctx = canvas.getContext('2d')
+    ctx.scale(scale, scale)
+    ctx.fillStyle    = '#111'
+    ctx.font         = `${Math.round(size * 0.75)}px "Material Design Icons"`
+    ctx.textAlign    = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(NOTE_GLYPH, size / 2, size / 2)
 
-    const pin = document.createElement('div')
-    pin.className = 'annotation-marker-pin'
-    pin.style.cssText =
-      'width:22px;height:22px;border-radius:50%;' +
-      'display:flex;align-items:center;justify-content:center;' +
-      'box-shadow:0 1px 3px rgba(0,0,0,0.45);cursor:grab;' +
-      'border:1px solid rgba(0,0,0,0.35);' +
-      `background:${a.color || DEFAULT_COLOR};`
-    // Using an <i> with the MDI font keeps this consistent with the rest of
-    // the app without pulling a Vue renderer into the composable.
-    pin.innerHTML = '<i class="mdi mdi-note-text-outline" style="font-size:14px;color:#111;line-height:1"></i>'
-    root.appendChild(pin)
-
-    const tip = document.createElement('div')
-    tip.className = 'annotation-marker-tip'
-    // `width:max-content` + `max-width:240px` lets the bubble shrink-wrap to
-    // its text up to 240px, then wrap normally. Without max-content the
-    // absolute-positioned tip inherits the 22px root width and wraps one
-    // character per line.
-    tip.style.cssText =
-      'position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);' +
-      'width:max-content;max-width:240px;padding:4px 8px;border-radius:3px;' +
-      'background:rgba(22,22,22,0.92);color:#e3e6ee;' +
-      'font-size:11px;line-height:1.4;font-family:sans-serif;' +
-      'white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none;' +
-      'box-shadow:0 2px 6px rgba(0,0,0,0.5);opacity:0;transition:opacity 120ms;'
-    tip.textContent = a.text || ''
-    root.appendChild(tip)
-
-    // Hover reveal — native hover without :hover so we can suppress it while
-    // dragging (where the pin stays under the cursor the whole time).
-    root.addEventListener('pointerenter', () => {
-      if (root.dataset.dragging === '1') return
-      if (tip.textContent) tip.style.opacity = '1'
-    })
-    root.addEventListener('pointerleave', () => { tip.style.opacity = '0' })
-
-    return root
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    map.addImage(
+      NOTE_ICON_ID,
+      { width: canvas.width, height: canvas.height, data: imageData.data },
+      { pixelRatio: scale }
+    )
   }
 
-  function applyToEl(root, a) {
-    const pin = root.querySelector('.annotation-marker-pin')
-    const tip = root.querySelector('.annotation-marker-tip')
-    if (pin) pin.style.background = a.color || DEFAULT_COLOR
-    if (tip) tip.textContent = a.text || ''
+  function toFeatureCollection() {
+    return {
+      type: 'FeatureCollection',
+      features: annotations.value.map(a => ({
+        type: 'Feature',
+        properties: {
+          id:    a.id,
+          color: a.color || DEFAULT_COLOR,
+          text:  a.text || ''
+        },
+        geometry: { type: 'Point', coordinates: [a.lon, a.lat] }
+      }))
+    }
   }
 
-  // ---- Render ----
-
-  function placeMarker(a) {
+  function ensureLayers() {
     const map = getMap()
-    if (!map) return
-    const root = buildMarkerEl(a)
-    const marker = new maplibregl.Marker({ element: root, anchor: 'center' })
-      .setLngLat([a.lon, a.lat])
-      .addTo(map)
-
-    wireMarkerInteractions(root, a.id)
-    markers.set(a.id, { marker, root })
-  }
-
-  function removeMarker(id) {
-    const entry = markers.get(id)
-    if (!entry) return
-    entry.marker.remove()
-    markers.delete(id)
-  }
-
-  function syncMarker(a) {
-    const entry = markers.get(a.id)
-    if (!entry) { placeMarker(a); return }
-    entry.marker.setLngLat([a.lon, a.lat])
-    applyToEl(entry.root, a)
-  }
-
-  function rebuildAll() {
-    for (const id of [...markers.keys()]) removeMarker(id)
-    for (const a of annotations.value) placeMarker(a)
-  }
-
-  // ---- Marker interactions (click + drag) ----
-
-  function wireMarkerInteractions(root, id) {
-    const pin = root.querySelector('.annotation-marker-pin')
-    const tip = root.querySelector('.annotation-marker-tip')
-    let startX = 0, startY = 0
-    let dragging = false
-    let dragLngLat = null
-
-    const map = getMap()
-
-    root.addEventListener('pointerdown', (e) => {
-      e.stopPropagation()
-      startX = e.clientX
-      startY = e.clientY
-      dragging = false
-      root.setPointerCapture(e.pointerId)
-      if (pin) pin.style.cursor = 'grabbing'
-      if (tip) tip.style.opacity = '0'
-      root.dataset.dragging = '1'
+    if (!map || map.getSource(POINTS_SOURCE)) return
+    map.addSource(POINTS_SOURCE, {
+      type: 'geojson',
+      data: toFeatureCollection()
     })
-
-    root.addEventListener('pointermove', (e) => {
-      if (!root.hasPointerCapture(e.pointerId)) return
-      const dx = e.clientX - startX
-      const dy = e.clientY - startY
-      if (!dragging && Math.hypot(dx, dy) < 4) return  // below drag threshold
-      dragging = true
-      // Unproject expects screen coords relative to the canvas origin, not
-      // the outer container. Using `getContainer()` here makes the marker
-      // jump by any toolbar/padding offset between the two elements.
-      const rect = map.getCanvasContainer().getBoundingClientRect()
-      dragLngLat = map.unproject([e.clientX - rect.left, e.clientY - rect.top])
-      const entry = markers.get(id)
-      if (entry) entry.marker.setLngLat(dragLngLat)
-    })
-
-    root.addEventListener('pointerup', (e) => {
-      root.releasePointerCapture(e.pointerId)
-      if (pin) pin.style.cursor = 'grab'
-      root.dataset.dragging = '0'
-      if (dragging && dragLngLat) {
-        updateAnnotation(id, { lat: dragLngLat.lat, lon: dragLngLat.lng })
-      } else {
-        selectedId.value = id
-        // Clicking the pin is the user reaching for the panel editor —
-        // if it's closed, open it. The panel's own `selectedId` watch then
-        // scrolls the matching row into view.
-        if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
+    // Unselected pin: coloured fill only. No stroke — the selected layer
+    // adds a blue ring only when a pin is explicitly picked.
+    map.addLayer({
+      id: PIN_LAYER,
+      type: 'circle',
+      source: POINTS_SOURCE,
+      paint: {
+        'circle-radius': 10,
+        'circle-color': ['get', 'color']
       }
-      dragging = false
-      dragLngLat = null
+    })
+    // Selected pin: rendered on top with a brighter blue ring so picker
+    // selection in the panel shows on the map without recolouring.
+    map.addLayer({
+      id: PIN_SELECTED_LAYER,
+      type: 'circle',
+      source: POINTS_SOURCE,
+      filter: selectedFilter(),
+      paint: {
+        'circle-radius': 10,
+        'circle-color': ['get', 'color'],
+        'circle-stroke-color': '#4a9ade',
+        'circle-stroke-width': 3
+      }
+    })
+    // Note-text glyph centred on each pin — registered asynchronously
+    // (font load) and attached once ready. allow-overlap / ignore-placement
+    // keep it visible even when pins crowd together.
+    ensureAnnotationIcon(map).then(() => {
+      if (!getMap() || map.getLayer(PIN_ICON_LAYER)) return
+      map.addLayer({
+        id: PIN_ICON_LAYER,
+        type: 'symbol',
+        source: POINTS_SOURCE,
+        layout: {
+          'icon-image':             NOTE_ICON_ID,
+          'icon-size':              0.6,
+          'icon-allow-overlap':     true,
+          'icon-ignore-placement':  true
+        }
+      })
+    }).catch(err => console.error('Failed to register annotation icon:', err))
+    setupAnnotationDrag(map)
+    setupHoverPopup(map)
+    setupDeselectOnMapClick(map)
+  }
+
+  // Click-away deselection: a generic map click with no pin hit clears the
+  // active selection. Mirrors how draw features drop their selection when
+  // you click empty map. `suppressNextClick` keeps drag-release clicks from
+  // being interpreted as click-away.
+  function setupDeselectOnMapClick(map) {
+    if (deselectHandler) return
+    deselectHandler = (e) => {
+      if (suppressNextClick) return
+      if (selectedId.value == null) return
+      if (isSelecting.value) return  // click-to-place handles its own flow
+      const hits = map.queryRenderedFeatures(e.point, { layers: [PIN_LAYER] })
+      if (hits.length > 0) return    // click landed on a pin — let mousedown handle it
+      selectedId.value = null
+    }
+    map.on('click', deselectHandler)
+  }
+
+  function selectedFilter() {
+    // -1 is a safe non-matching id — annotation ids are SQLite rowids,
+    // always >= 1.
+    return ['==', ['get', 'id'], selectedId.value ?? -1]
+  }
+
+  function refreshSource() {
+    ensureLayers()
+    const map = getMap()
+    map?.getSource(POINTS_SOURCE)?.setData(toFeatureCollection())
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c])
+  }
+
+  // ---- Hover popup ----
+
+  function setupHoverPopup(map) {
+    popup = new maplibregl.Popup({
+      closeButton:  false,
+      closeOnClick: false,
+      offset:       14,
+      className:    'annotation-popup'
+    })
+    map.on('mouseenter', PIN_LAYER, (e) => {
+      const f = e.features?.[0]
+      if (!f) return
+      const text = f.properties?.text || ''
+      if (!text) return
+      popup
+        .setLngLat(f.geometry.coordinates)
+        .setHTML(`<div class="annotation-popup-body">${escapeHtml(text)}</div>`)
+        .addTo(map)
+    })
+    map.on('mouseleave', PIN_LAYER, () => { popup?.remove() })
+  }
+
+  // ---- Drag-to-move ----
+  //
+  // Mirrors setupTrackDrag in useMapManualTracks and the vertex handle drag
+  // in useMapDraw: map-layer mousedown → disable dragPan → window-level
+  // mousemove/mouseup. Live preview patches POINTS_SOURCE; the DB write
+  // happens once on release via updateAnnotation.
+
+  function setupAnnotationDrag(map) {
+    if (dragWired) return
+    dragWired = true
+    const canvas = map.getCanvasContainer()
+
+    // Context-aware cursor: `pointer` on an unselected pin (first click
+    // selects), `grab` on the selected pin (second mousedown drags). Wired
+    // on `mousemove` so the cursor flips the moment `selectedId` changes
+    // without needing to leave/re-enter the pin.
+    map.on('mousemove', PIN_LAYER, (e) => {
+      if (isSelecting.value || suppress.value) return
+      const id = e.features?.[0]?.properties?.id
+      canvas.style.cursor = selectedId.value === id ? 'grab' : 'pointer'
+    })
+    map.on('mouseleave', PIN_LAYER, () => {
+      if (!isSelecting.value && !suppress.value) canvas.style.cursor = ''
+    })
+
+    map.on('mousedown', PIN_LAYER, (e) => {
+      if (suppress.value || isSelecting.value) return
+      if (e.originalEvent?.button !== 0) return
+      const id = e.features?.[0]?.properties?.id
+      if (id == null) return
+      const prev = annotations.value.find(a => a.id === id)
+      if (!prev) return
+
+      // Two-step interaction — matches draw-feature behaviour: the first
+      // click on an unselected pin just selects it and opens the panel; only
+      // an already-selected pin starts a drag. Forces the user to confirm
+      // intent before moving, which is why shapes have the same flow.
+      if (selectedId.value !== id) {
+        e.preventDefault()
+        popup?.remove()
+        selectedId.value = id
+        if (typeof onRequestOpenPanel === 'function') onRequestOpenPanel()
+        return
+      }
+
+      e.preventDefault()
+      map.dragPan.disable()
+      canvas.style.cursor = 'grabbing'
+      popup?.remove()
+
+      let hasMoved = false
+      let lastLngLat = null
+
+      function onWindowMouseMove(me) {
+        hasMoved = true
+        // Unproject expects screen coords in the canvas's frame, not the
+        // outer container's, otherwise the pin jumps by any toolbar/chrome
+        // offset above the canvas.
+        const rect = canvas.getBoundingClientRect()
+        lastLngLat = map.unproject([me.clientX - rect.left, me.clientY - rect.top])
+        const src = map.getSource(POINTS_SOURCE)
+        if (!src) return
+        const fc = toFeatureCollection()
+        src.setData({
+          ...fc,
+          features: fc.features.map(f =>
+            f.properties.id === id
+              ? { ...f, geometry: { type: 'Point', coordinates: [lastLngLat.lng, lastLngLat.lat] } }
+              : f
+          )
+        })
+      }
+
+      async function finish(commit) {
+        window.removeEventListener('mousemove', onWindowMouseMove)
+        window.removeEventListener('mouseup', onWindowMouseUp)
+        window.removeEventListener('keydown', onWindowKeyDown)
+        map.dragPan.enable()
+        canvas.style.cursor = ''
+
+        if (commit && hasMoved && lastLngLat) {
+          // Swallow the trailing click so add-mode doesn't also drop a
+          // second annotation at the release point.
+          suppressNextClick = true
+          setTimeout(() => { suppressNextClick = false }, 0)
+          await updateAnnotation(id, { lat: lastLngLat.lat, lon: lastLngLat.lng })
+        } else {
+          // Escape mid-drag or zero-movement release on an already-selected
+          // pin — revert preview to committed state.
+          refreshSource()
+        }
+      }
+
+      function onWindowMouseUp()   { finish(true) }
+      function onWindowKeyDown(ke) { if (ke.key === 'Escape') finish(false) }
+
+      window.addEventListener('mousemove', onWindowMouseMove)
+      window.addEventListener('mouseup', onWindowMouseUp)
+      window.addEventListener('keydown', onWindowKeyDown)
     })
   }
 
@@ -217,13 +338,13 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
     }
 
     clickHandler = async (e) => {
-      const created = await addAnnotation({
+      if (suppressNextClick) return
+      await addAnnotation({
         lat: e.lngLat.lat,
         lon: e.lngLat.lng,
         text: 'New note',
         color: DEFAULT_COLOR
       })
-      if (created) selectedId.value = created.id
       exitSelecting()
     }
 
@@ -239,6 +360,7 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
   }
 
   function toggleSelecting() {
+    ensureLayers()
     if (!isSelecting.value) {
       ensureKeyHandler()
       startSelecting()
@@ -275,7 +397,7 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
       )
       const created = { id: res.lastInsertId, lat, lon, text, color }
       annotations.value = [...annotations.value, created]
-      placeMarker(created)
+      refreshSource()
       return created
     } catch (err) {
       console.error('Failed to add annotation:', err)
@@ -308,7 +430,7 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
       const copy = [...annotations.value]
       copy[idx] = next
       annotations.value = copy
-      syncMarker(next)
+      refreshSource()
       return next
     } catch (err) {
       console.error('Failed to update annotation:', err)
@@ -322,7 +444,7 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
       const db = await getDb()
       await db.execute('DELETE FROM annotations WHERE id = $1', [id])
       annotations.value = annotations.value.filter(a => a.id !== id)
-      removeMarker(id)
+      refreshSource()
       if (selectedId.value === id) selectedId.value = null
     } catch (err) {
       console.error('Failed to delete annotation:', err)
@@ -335,7 +457,7 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
       const db = await getDb()
       await db.execute('DELETE FROM annotations WHERE mission_id = $1', [missionId])
       annotations.value = []
-      for (const id of [...markers.keys()]) removeMarker(id)
+      refreshSource()
       selectedId.value = null
     } catch (err) {
       console.error('Failed to clear annotations:', err)
@@ -354,16 +476,34 @@ export function useMapAnnotations(getMap, missionId = null, onRequestOpenPanel =
         [missionId]
       )
       annotations.value = rows.map(rowToAnnotation)
-      rebuildAll()
+      ensureLayers()
+      refreshSource()
     } catch (err) {
       console.error('Failed to load annotations:', err)
     }
   }
 
+  // Repaint the selected-pin filter when panel selection changes.
+  const stopSelectedWatch = watch(selectedId, () => {
+    const map = getMap()
+    if (map?.getLayer(PIN_SELECTED_LAYER)) map.setFilter(PIN_SELECTED_LAYER, selectedFilter())
+  })
+
   onUnmounted(() => {
+    stopSelectedWatch()
     removeClickHandler()
     removeKeyHandler()
-    for (const id of [...markers.keys()]) removeMarker(id)
+    popup?.remove()
+    popup = null
+    const map = getMap()
+    if (!map) return
+    if (deselectHandler)                  map.off('click', deselectHandler)
+    deselectHandler = null
+    if (map.getLayer(PIN_ICON_LAYER))     map.removeLayer(PIN_ICON_LAYER)
+    if (map.getLayer(PIN_SELECTED_LAYER)) map.removeLayer(PIN_SELECTED_LAYER)
+    if (map.getLayer(PIN_LAYER))          map.removeLayer(PIN_LAYER)
+    if (map.getSource(POINTS_SOURCE))     map.removeSource(POINTS_SOURCE)
+    if (map.hasImage?.(NOTE_ICON_ID))     map.removeImage(NOTE_ICON_ID)
   })
 
   return {

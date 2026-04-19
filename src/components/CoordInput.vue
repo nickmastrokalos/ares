@@ -5,9 +5,10 @@
  * emits 'commit' with a new [lng, lat] when the user confirms (Enter or focus
  * leaving the entire group). Invalid input reverts to the current model value.
  */
-import { reactive, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { forward as toMgrs, toPoint as fromMgrs } from 'mgrs'
+import { parseCoordinateAuto } from '@/services/coordinates'
 
 const props = defineProps({
   modelValue: { type: Array, default: null }  // [lng, lat] | null
@@ -152,62 +153,129 @@ watch(
   () => settingsStore.coordinateFormat,
   () => { if (props.modelValue) updateFields(props.modelValue) }
 )
+
+// ---- Paste from clipboard ----
+//
+// Accepts whatever format the operator copied (MGRS / DMS / DD) regardless
+// of the currently configured display format. The committed value flows back
+// through `props.modelValue`, which triggers `updateFields` and re-renders
+// the sub-fields in whatever format Settings currently wants.
+const pasteStatus = ref({ kind: 'idle', message: '' })  // 'idle' | 'success' | 'error'
+let pasteResetTimer = null
+
+function flashPasteStatus(kind, message, timeoutMs) {
+  pasteStatus.value = { kind, message }
+  if (pasteResetTimer) clearTimeout(pasteResetTimer)
+  pasteResetTimer = setTimeout(() => {
+    pasteStatus.value = { kind: 'idle', message: '' }
+    pasteResetTimer = null
+  }, timeoutMs)
+}
+
+async function pasteFromClipboard() {
+  let text
+  try {
+    text = await navigator.clipboard.readText()
+  } catch {
+    flashPasteStatus('error', 'Clipboard read denied', 2000)
+    return
+  }
+  if (!text || !text.trim()) {
+    flashPasteStatus('error', 'Clipboard is empty', 2000)
+    return
+  }
+  const parsed = parseCoordinateAuto(text)
+  if (!parsed) {
+    flashPasteStatus('error', 'Clipboard is not a recognised coordinate', 2000)
+    return
+  }
+  emit('commit', parsed.lngLat)
+  flashPasteStatus('success', `Pasted as ${parsed.format.toUpperCase()}`, 1500)
+}
 </script>
 
 <template>
   <div class="coord-input" @focusout="onFocusOut">
+    <div class="ci-fields">
 
-    <!-- ---- Decimal Degrees ---- -->
-    <template v-if="settingsStore.coordinateFormat === 'dd'">
-      <div class="ci-row">
-        <span class="ci-sublabel">Lat</span>
-        <input
-          v-model="f.lat"
-          class="ci-field ci-field--dd"
-          inputmode="decimal"
-          @keydown.enter.prevent="onEnter"
-        />
-        <span class="ci-sublabel ci-sublabel--gap">Lng</span>
-        <input
-          v-model="f.lng"
-          class="ci-field ci-field--dd"
-          inputmode="decimal"
-          @keydown.enter.prevent="onEnter"
-        />
-      </div>
-    </template>
+      <!-- ---- Decimal Degrees ---- -->
+      <template v-if="settingsStore.coordinateFormat === 'dd'">
+        <div class="ci-row">
+          <span class="ci-sublabel">Lat</span>
+          <input
+            v-model="f.lat"
+            class="ci-field ci-field--dd"
+            inputmode="decimal"
+            @keydown.enter.prevent="onEnter"
+          />
+          <span class="ci-sublabel ci-sublabel--gap">Lng</span>
+          <input
+            v-model="f.lng"
+            class="ci-field ci-field--dd"
+            inputmode="decimal"
+            @keydown.enter.prevent="onEnter"
+          />
+        </div>
+      </template>
 
-    <!-- ---- Degrees / Minutes / Seconds ---- -->
-    <template v-else-if="settingsStore.coordinateFormat === 'dms'">
-      <div class="ci-row">
-        <span class="ci-sublabel">Lat</span>
-        <input v-model="f.latD" class="ci-field ci-field--dms-d" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
-        <span class="ci-unit">°</span>
-        <input v-model="f.latM" class="ci-field ci-field--dms-m" inputmode="numeric"  @keydown.enter.prevent="onEnter" />
-        <span class="ci-unit">'</span>
-        <input v-model="f.latS" class="ci-field ci-field--dms-s" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
-        <span class="ci-unit">"</span>
-      </div>
-      <div class="ci-row ci-row--dms2">
-        <span class="ci-sublabel">Lng</span>
-        <input v-model="f.lngD" class="ci-field ci-field--dms-d" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
-        <span class="ci-unit">°</span>
-        <input v-model="f.lngM" class="ci-field ci-field--dms-m" inputmode="numeric"  @keydown.enter.prevent="onEnter" />
-        <span class="ci-unit">'</span>
-        <input v-model="f.lngS" class="ci-field ci-field--dms-s" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
-        <span class="ci-unit">"</span>
-      </div>
-    </template>
+      <!-- ---- Degrees / Minutes / Seconds ---- -->
+      <template v-else-if="settingsStore.coordinateFormat === 'dms'">
+        <div class="ci-row">
+          <span class="ci-sublabel">Lat</span>
+          <input v-model="f.latD" class="ci-field ci-field--dms-d" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
+          <span class="ci-unit">°</span>
+          <input v-model="f.latM" class="ci-field ci-field--dms-m" inputmode="numeric"  @keydown.enter.prevent="onEnter" />
+          <span class="ci-unit">'</span>
+          <input v-model="f.latS" class="ci-field ci-field--dms-s" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
+          <span class="ci-unit">"</span>
+        </div>
+        <div class="ci-row ci-row--dms2">
+          <span class="ci-sublabel">Lng</span>
+          <input v-model="f.lngD" class="ci-field ci-field--dms-d" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
+          <span class="ci-unit">°</span>
+          <input v-model="f.lngM" class="ci-field ci-field--dms-m" inputmode="numeric"  @keydown.enter.prevent="onEnter" />
+          <span class="ci-unit">'</span>
+          <input v-model="f.lngS" class="ci-field ci-field--dms-s" inputmode="decimal"  @keydown.enter.prevent="onEnter" />
+          <span class="ci-unit">"</span>
+        </div>
+      </template>
 
-    <!-- ---- MGRS ---- -->
-    <template v-else>
-      <div class="ci-row">
-        <input v-model="f.zone"   class="ci-field ci-field--mgrs-zone"   placeholder="33U"   @keydown.enter.prevent="onEnter" />
-        <input v-model="f.square" class="ci-field ci-field--mgrs-sq"     placeholder="XP"    @keydown.enter.prevent="onEnter" />
-        <input v-model="f.east"   class="ci-field ci-field--mgrs-digits" placeholder="00848" inputmode="numeric" @keydown.enter.prevent="onEnter" />
-        <input v-model="f.north"  class="ci-field ci-field--mgrs-digits" placeholder="00848" inputmode="numeric" @keydown.enter.prevent="onEnter" />
-      </div>
-    </template>
+      <!-- ---- MGRS ---- -->
+      <template v-else>
+        <div class="ci-row">
+          <input v-model="f.zone"   class="ci-field ci-field--mgrs-zone"   placeholder="33U"   @keydown.enter.prevent="onEnter" />
+          <input v-model="f.square" class="ci-field ci-field--mgrs-sq"     placeholder="XP"    @keydown.enter.prevent="onEnter" />
+          <input v-model="f.east"   class="ci-field ci-field--mgrs-digits" placeholder="00848" inputmode="numeric" @keydown.enter.prevent="onEnter" />
+          <input v-model="f.north"  class="ci-field ci-field--mgrs-digits" placeholder="00848" inputmode="numeric" @keydown.enter.prevent="onEnter" />
+        </div>
+      </template>
+
+    </div>
+
+    <!-- Paste-from-clipboard action. Accepts any of the three formats — see
+         parseCoordinateAuto. Lives outside the per-format templates so the
+         button appearance and placement stay identical across DD / DMS /
+         MGRS. Transient feedback (success / error flash) is surfaced via
+         `pasteStatus`; the button stays inside `.coord-input` so the
+         existing focusout-commit logic ignores it. -->
+    <button
+      type="button"
+      class="ci-paste-btn"
+      :class="{
+        'ci-paste-btn--success': pasteStatus.kind === 'success',
+        'ci-paste-btn--error':   pasteStatus.kind === 'error'
+      }"
+      :title="pasteStatus.message || 'Paste coordinate from clipboard'"
+      @click="pasteFromClipboard"
+    >
+      <v-icon size="14">
+        {{
+          pasteStatus.kind === 'error'   ? 'mdi-alert-circle-outline' :
+          pasteStatus.kind === 'success' ? 'mdi-check'                :
+                                           'mdi-content-paste'
+        }}
+      </v-icon>
+    </button>
 
   </div>
 </template>
@@ -215,14 +283,59 @@ watch(
 <style scoped>
 .coord-input {
   display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.ci-fields {
+  display: flex;
   flex-direction: column;
   gap: 3px;
+  flex: 1;
+  min-width: 0;
 }
 
 .ci-row {
   display: flex;
   align-items: center;
   gap: 3px;
+}
+
+.ci-paste-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(var(--v-theme-on-surface), 0.7);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.ci-paste-btn:hover {
+  border-color: rgba(var(--v-theme-on-surface), 0.4);
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.ci-paste-btn:focus-visible {
+  outline: none;
+  border-color: rgb(var(--v-theme-primary));
+}
+
+.ci-paste-btn--success {
+  border-color: rgb(var(--v-theme-success, 76 175 80));
+  color: rgb(var(--v-theme-success, 76 175 80));
+}
+
+.ci-paste-btn--error {
+  border-color: rgb(var(--v-theme-error));
+  color: rgb(var(--v-theme-error));
 }
 
 .ci-row--dms2 {
