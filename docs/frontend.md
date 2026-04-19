@@ -208,6 +208,8 @@ Every drawn or imported feature has a `type` string stored in the `features` tab
 
 Manual track placement, editing, listing, and rendering are fully documented in [tracks.md](./tracks.md) — including the `TrackDropPanel` two-step placement flow, `ManualTrackPanel`, `TrackTypePicker`, and the MIL-STD-2525 dual-layer pipeline. `cotType` is optional; tracks without one render as affiliation-colored circles regardless of the 2525 symbology setting.
 
+Newly drawn features receive a numbered default `name` scoped to the active mission (`Polygon 1`, `Polygon 2`, `Circle 1`, …). `nextFeatureName(type)` in `useMapDraw.js` scans `featuresStore.features` for existing names matching `^{Label}\s+(\d+)$` and returns `{Label} {max+1}` — the same scan-and-increment strategy used by `useMapManualTracks::nextName` so the two systems stay consistent.
+
 Geometry for parametric shapes (`box`, `circle`, `ellipse`, `sector`) is stored **both** as a pre-computed polygon (for rendering) and as canonical parameters in `properties` (for editing and re-export). When a user edits parameters, the polygon geometry is recalculated and both are written back to SQLite atomically.
 
 The `featureCollection` computed in `useFeaturesStore` always tags every feature with `_dbId` (the SQLite row id) and `_type` (the type string) so map layers and UI components can filter without additional queries.

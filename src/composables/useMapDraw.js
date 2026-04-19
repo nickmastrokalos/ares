@@ -66,6 +66,32 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
   // AttributesPanel can sync its fields in real-time without a DB round-trip.
   const draggingFeature = ref(null)
 
+  // Returns the next default name for a new feature of `type`, numbered so it
+  // is unique within the active mission (e.g. "Polygon 1", "Polygon 2", …).
+  // Mirrors the scan-and-increment strategy used by useMapManualTracks so the
+  // UX is consistent across draw features and manual tracks.
+  const FEATURE_LABELS = {
+    line: 'Line', polygon: 'Polygon', circle: 'Circle', sector: 'Sector',
+    ellipse: 'Ellipse', box: 'Box', image: 'Image', point: 'Point'
+  }
+  function nextFeatureName(type) {
+    const base = FEATURE_LABELS[type] ?? type
+    const re = new RegExp(`^${base}\\s+(\\d+)$`)
+    let max = 0
+    for (const f of featuresStore.features) {
+      if (f.type !== type) continue
+      try {
+        const props = JSON.parse(f.properties)
+        const m = String(props.name ?? '').match(re)
+        if (m) {
+          const n = parseInt(m[1])
+          if (!isNaN(n) && n > max) max = n
+        }
+      } catch { /* skip malformed row */ }
+    }
+    return `${base} ${max + 1}`
+  }
+
   const SELECTABLE_LAYERS = [
     'draw-features-fill',
     'draw-features-line',
@@ -270,7 +296,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       points.pop()
       if (points.length < 2) return
       const geometry = { type: 'LineString', coordinates: [...points] }
-      await featuresStore.addFeature('line', geometry, { name: 'Line' })
+      await featuresStore.addFeature('line', geometry, { name: nextFeatureName('line') })
       cleanup()
       startLine()
     }
@@ -312,7 +338,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       if (points.length < 3) return
       const coords = [...points, points[0]]
       const geometry = { type: 'Polygon', coordinates: [coords] }
-      await featuresStore.addFeature('polygon', geometry, { name: 'Polygon' })
+      await featuresStore.addFeature('polygon', geometry, { name: nextFeatureName('polygon') })
       cleanup()
       startPolygon()
     }
@@ -338,7 +364,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         const center = points[0]
         const radius = distanceBetween(center, pt)
         const geometry = circlePolygon(center, radius)
-        featuresStore.addFeature('circle', geometry, { name: 'Circle', center, radius })
+        featuresStore.addFeature('circle', geometry, { name: nextFeatureName('circle'), center, radius })
         cleanup()
         startCircle()
       }
@@ -381,7 +407,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         const endAngle = bearingBetween(points[0], pt)
         const geometry = sectorPolygon(points[0], radius, startAngle, endAngle)
         featuresStore.addFeature('sector', geometry, {
-          name: 'Sector',
+          name: nextFeatureName('sector'),
           center: points[0],
           radius,
           startAngle,
@@ -430,7 +456,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         const radiusMinor = distanceBetween(points[0], pt)
         const geometry = ellipsePolygon(points[0], radiusMajor, radiusMinor, rotation)
         featuresStore.addFeature('ellipse', geometry, {
-          name: 'Ellipse',
+          name: nextFeatureName('ellipse'),
           center: points[0],
           radiusMajor,
           radiusMinor,
@@ -472,7 +498,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       } else {
         const sw = [Math.min(points[0][0], pt[0]), Math.min(points[0][1], pt[1])]
         const ne = [Math.max(points[0][0], pt[0]), Math.max(points[0][1], pt[1])]
-        featuresStore.addFeature('box', boxPolygon(sw, ne), { name: 'Box', sw, ne, rotationDeg: 0 })
+        featuresStore.addFeature('box', boxPolygon(sw, ne), { name: nextFeatureName('box'), sw, ne, rotationDeg: 0 })
         cleanup()
         startBox()
       }
@@ -510,7 +536,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       await featuresStore.addFeature(
         'image',
         { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] },
-        { name: 'Image', src, widthMeters: 500, naturalWidth, naturalHeight }
+        { name: nextFeatureName('image'), src, widthMeters: 500, naturalWidth, naturalHeight }
       )
     }
 
@@ -767,7 +793,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
 
     clickHandler = async (e) => {
       const geometry = { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] }
-      await featuresStore.addFeature('point', geometry, { name: 'Point' })
+      await featuresStore.addFeature('point', geometry, { name: nextFeatureName('point') })
       cleanup()
       startPoint()
     }
