@@ -1,12 +1,11 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, inject } from 'vue'
 import { useFeaturesStore } from '@/stores/features'
-import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
-import { formatCoordinate } from '@/services/coordinates'
 import { labelFromCotType } from '@/services/trackTypes'
 import TrackTypePicker from './TrackTypePicker.vue'
+import CoordInput from './CoordInput.vue'
 
 const props = defineProps({
   featureId: { type: Number, required: true },
@@ -16,7 +15,11 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const featuresStore = useFeaturesStore()
-const settingsStore = useSettingsStore()
+
+// Live drag broadcast from `useMapManualTracks` — lets the coord grid
+// refresh every mousemove frame without store writes (mirrors the
+// `draggingFeature` pattern used by the draw feature panel).
+const draggingTrack = inject('draggingTrack', null)
 
 const minimized   = ref(false)
 const positioned  = ref(false)
@@ -57,11 +60,36 @@ const affilLabel  = computed(() => AFFIL_LABELS[affiliation.value] ?? 'Unknown')
 const cotType     = computed(() => featureProps.value?.cotType     ?? null)
 const typeLabel   = computed(() => labelFromCotType(cotType.value) ?? '—')
 
-const coordLabel = computed(() => {
+// `coordVal` holds the [lng, lat] the CoordInput renders. It's the feature's
+// committed geometry *except* during an in-flight drag, when we swap in the
+// live position broadcast by `useMapManualTracks` so the sub-fields move with
+// the cursor.
+const coordVal = ref(null)
+
+function syncCoord() {
   const coords = featureGeometry.value?.coordinates
-  if (!coords) return '—'
-  return formatCoordinate(coords[0], coords[1], settingsStore.coordinateFormat)
-})
+  coordVal.value = coords ? [coords[0], coords[1]] : null
+}
+
+watch(featureGeometry, syncCoord, { immediate: true })
+
+if (draggingTrack) {
+  watch(draggingTrack, (d) => {
+    if (!d) { syncCoord(); return }
+    if (d._dbId !== props.featureId) return
+    coordVal.value = [d.lng, d.lat]
+  })
+}
+
+async function commitCoord([lng, lat]) {
+  if (!featureRow.value) return
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+  await featuresStore.updateFeature(
+    featureRow.value.id,
+    { type: 'Point', coordinates: [lng, lat] },
+    { ...featureProps.value }
+  )
+}
 
 // Attribute display values
 const haeDisplay = computed(() => {
@@ -257,9 +285,8 @@ watch(() => props.focusedId, (id) => {
 
       <!-- Position -->
       <div class="section-label">Position</div>
-      <div class="attr-grid">
-        <span class="attr-key">COORD</span>
-        <span class="attr-val attr-val--mono">{{ coordLabel }}</span>
+      <div class="coord-row" @pointerdown.stop>
+        <CoordInput :model-value="coordVal" @commit="commitCoord" />
       </div>
 
       <div class="divider" />
@@ -459,6 +486,10 @@ watch(() => props.focusedId, (id) => {
   font-family: monospace;
   letter-spacing: 0.02em;
   font-size: 10px;
+}
+
+.coord-row {
+  margin-bottom: 2px;
 }
 
 .attr-val--editable {

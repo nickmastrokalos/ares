@@ -103,10 +103,22 @@ const bloodhoundApi = useMapBloodhound(() => map)
 const { bloodhounding } = bloodhoundApi
 const perimeterApi = useMapPerimeters(() => map)
 const { perimeterSelecting } = perimeterApi
-const bullseyeApi  = useMapBullseye(() => map, props.missionId, () => { bullseyePanelOpen.value = true })
+// Proxy ref pattern: bullseye + annotations need `suppressEntityClicks` to
+// guard their drag handlers, but that computed can only be defined after
+// their own `*Selecting` refs exist. We hand them a shared ref now and keep
+// it in sync with the computed below via watch().
+const entitySuppressRef = ref(false)
+const bullseyeApi  = useMapBullseye(() => map, props.missionId, () => { bullseyePanelOpen.value = true }, entitySuppressRef)
 const { bullseyeSelecting } = bullseyeApi
-const annotationsApi = useMapAnnotations(() => map, props.missionId, () => { annotationsPanelOpen.value = true })
+const annotationsApi = useMapAnnotations(() => map, props.missionId, () => { annotationsPanelOpen.value = true }, entitySuppressRef)
 const { annotationSelecting } = annotationsApi
+// Selection-driven panel close: when the composable clears `selectedId`
+// (click-away on the map), close the panel too. Panel-close also clears
+// `selectedId` — the two directions don't loop because setting the panel
+// boolean to its current value is a no-op.
+watch(annotationsApi.selectedId, (id) => {
+  if (id == null && annotationsPanelOpen.value) annotationsPanelOpen.value = false
+})
 const interceptApi = useMapIntercepts(() => map)
 const mapAlerts    = useMapAlerts()
 const { capture: captureSnapshotRaw } = useMapSnapshot({
@@ -167,7 +179,11 @@ const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, clo
 const suppressEntityClicks = computed(
   () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || placing.value != null
 )
-const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
+const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, draggingTrack, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
+// Back-fill the proxy ref handed to bullseye/annotations at construction —
+// must run after `useMapManualTracks` since `suppressEntityClicks` reads
+// `placing.value`, which only exists past that destructure.
+watch(suppressEntityClicks, (val) => { entitySuppressRef.value = val }, { immediate: true })
 const pluginRegistry = usePluginRegistry({ flyToGeometry })
 const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
@@ -189,6 +205,7 @@ useAssistantTools(
 provide('flyToGeometry', flyToGeometry)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
+provide('draggingTrack', draggingTrack)
 provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
@@ -543,7 +560,7 @@ onUnmounted(async () => {
         />
         <AnnotationsPanel
           v-if="annotationsPanelOpen"
-          @close="annotationsPanelOpen = false"
+          @close="annotationsPanelOpen = false; annotationsApi.selectedId.value = null"
         />
         <AisTrackPanel
           v-for="mmsi in aisStore.openPanelList"

@@ -137,10 +137,14 @@ The type picker is always visible (disabled until affiliation is chosen) so a ty
 
 Floating draggable panel opened on track click. Multiple panels can be open simultaneously — `openPanelIds` (a `Set`) in `useMapManualTracks` tracks which ids are open.
 
+On-map repositioning uses the same two-step select-then-drag flow as annotations and draw features. A first mousedown on a track whose `focusedId` is not its own falls through to the click handler (which focuses it and opens its panel). A subsequent mousedown on the already-focused track begins the drag — `setupTrackDrag` in `useMapManualTracks.js` gates the drag start on `focusedId.value === id`. Live preview patches `manual-tracks`; the DB write happens once on `mouseup`. Escape reverts.
+
+A `manual-tracks-selected` circle layer filtered by `focusedId` draws a blue ring around the currently-focused track so the user can see which one is armed. The ring clears when the user clicks empty space or another feature domain (via the click dispatcher's `onMiss` callback) and when the focused panel is closed.
+
 Sections:
 
 - **Identity** — callsign (inline rename), affiliation dot + label, TYPE row with inline `TrackTypePicker` that expands on click.
-- **Position** — coordinate formatted via `coordinateFormat` setting.
+- **Position** — editable `CoordInput` bound to the feature geometry. Sub-fields follow the user's `coordinateFormat` (DD / DMS / MGRS) and commit on Enter / blur. During an on-map drag the input reflects the live cursor position — `useMapManualTracks` exposes a `draggingTrack` ref (`{ _dbId, lng, lat }`) that `MapView.vue` provides as `draggingTrack`; the panel injects it and watches to update its coord on every frame without hitting the store. On drag release the real commit happens once and the input snaps back to the stored value.
 - **Attributes** — altitude (m), heading (°, with compass rose label), speed (kts). All three are inline-editable.
 
 Writes go through `featuresStore.updateFeature()`. Delete removes the feature and closes the panel.

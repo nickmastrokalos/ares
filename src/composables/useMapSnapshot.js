@@ -20,10 +20,11 @@ export function useMapSnapshot({
   featuresStore
 }) {
 
-  // HTML markers (bullseye / bloodhound / perimeter / measure labels,
-  // annotation pins, etc.) live in the DOM overlay, so `map.getCanvas()`
-  // alone misses them. Rasterise each visible marker at its current screen
-  // position so the PNG matches what the user sees on-screen.
+  // HTML text labels (bullseye / bloodhound / perimeter / measure) live
+  // in the DOM overlay, so `map.getCanvas()` alone misses them. Rasterise
+  // each visible text marker at its current screen position. Map-layer
+  // features (tracks, annotations, bullseye handle, etc.) are already in
+  // the canvas readback and need no special handling.
   function drawHtmlMarkers(ctx, map, dpr) {
     const container = map.getContainer()
     const cRect = container.getBoundingClientRect()
@@ -31,15 +32,6 @@ export function useMapSnapshot({
     for (const el of markers) {
       if (el.style.display === 'none' || el.style.visibility === 'hidden') continue
 
-      // Annotation pin — render a coloured circle at the pin's position.
-      // Tooltip is hover-only, intentionally excluded from snapshots.
-      const pin = el.querySelector('.annotation-marker-pin')
-      if (pin) {
-        drawAnnotationPin(ctx, pin, cRect, dpr)
-        continue
-      }
-
-      // Generic text label pill (bullseye, bloodhound, measure, etc.).
       const text = (el.textContent ?? '').trim()
       if (!text) continue  // skip ornamental markers (dots, crosses)
       drawTextPill(ctx, el, text, cRect, dpr)
@@ -70,24 +62,6 @@ export function useMapSnapshot({
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'center'
     ctx.fillText(text, x + w / 2, y + h / 2 + Math.round(dpr))
-  }
-
-  function drawAnnotationPin(ctx, pin, cRect, dpr) {
-    const rect = pin.getBoundingClientRect()
-    if (!rect.width || !rect.height) return
-    const style = window.getComputedStyle(pin)
-    const bg = style.backgroundColor || '#ffeb3b'
-    const cx = Math.round((rect.left + rect.width  / 2 - cRect.left) * dpr)
-    const cy = Math.round((rect.top  + rect.height / 2 - cRect.top)  * dpr)
-    const r  = Math.round((rect.width / 2) * dpr)
-
-    ctx.beginPath()
-    ctx.arc(cx, cy, r, 0, Math.PI * 2)
-    ctx.fillStyle = bg
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)'
-    ctx.lineWidth = Math.max(1, Math.round(dpr))
-    ctx.stroke()
   }
 
   function roundRect(ctx, x, y, w, h, r) {
