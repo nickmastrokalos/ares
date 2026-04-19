@@ -191,7 +191,9 @@ export function useMapPerimeters(getMap) {
         type: 'circle',
         source: HALOS_SOURCE,
         paint: {
-          'circle-radius': 14,
+          // Radius 22 matches the manual-track selection ring so the halo
+          // wraps rectangular MIL-STD-2525 icons without clipping the frame.
+          'circle-radius': 22,
           'circle-color': 'rgba(0,0,0,0)',
           'circle-stroke-width': 2,
           'circle-stroke-color': '#e53935'
