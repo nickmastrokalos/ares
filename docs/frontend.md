@@ -223,7 +223,7 @@ Fillable types (shapes that have a fill and opacity control): `polygon`, `box`, 
 - **`point` / `circle` / `ellipse` / `sector`:** a single `center` handle at the shape's anchor point.
 - **`line`:** one `vertex` handle per coordinate.
 - **`polygon`:** one `vertex` handle per ring vertex + one `center` handle at the ring's bounding-box centroid. Dragging the center translates all vertices.
-- **`box`:** `sw` and `ne` corner handles + one `center` handle at the midpoint. Dragging a corner reshapes; dragging the center translates.
+- **`box`:** four `corner` handles, one `center` handle at the midpoint, and one `rotation` handle placed outside the box along the current rotation bearing (1.3× half-diagonal from center). Dragging a corner reshapes in the rotated frame; dragging the center translates; dragging the rotation handle sets `rotationDeg` to the bearing from center to cursor. The rotation handle paints amber (`#ffb84a`) to distinguish it from the white resize / translate handles.
 - **`ellipse`:** `center`, `majorTip` (at bearing `rotation` from center), and `minorTip` (at bearing `rotation + 90°`). Dragging tips resizes each axis independently.
 
 Drag state is exposed as the `draggingFeature` reactive ref (provided from `MapView` as `'draggingFeature'`). `AttributesPanel` injects it and watches for changes to live-update field values while the user drags.

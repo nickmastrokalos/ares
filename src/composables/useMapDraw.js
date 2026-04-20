@@ -229,8 +229,18 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         source: VERTEX_HANDLES_SOURCE,
         paint: {
           'circle-radius': 6,
-          'circle-color': '#ffffff',
-          'circle-stroke-color': '#4a9ade',
+          // Rotation handles paint amber so the operator distinguishes them
+          // from resize / translate handles at a glance.
+          'circle-color': [
+            'match', ['get', 'kind'],
+            'rotation', '#ffb84a',
+            '#ffffff'
+          ],
+          'circle-stroke-color': [
+            'match', ['get', 'kind'],
+            'rotation', '#b37a1f',
+            '#4a9ade'
+          ],
           'circle-stroke-width': 2
         }
       })
@@ -940,7 +950,15 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       // Center handle lets the user translate the whole box.
       const bSw = sw ?? [Math.min(...geom.coordinates[0].map(c => c[0])), Math.min(...geom.coordinates[0].map(c => c[1]))]
       const bNe = ne ?? [Math.max(...geom.coordinates[0].map(c => c[0])), Math.max(...geom.coordinates[0].map(c => c[1]))]
-      handles.push({ lng: (bSw[0] + bNe[0]) / 2, lat: (bSw[1] + bNe[1]) / 2, kind: 'center', index: 4 })
+      const cx = (bSw[0] + bNe[0]) / 2
+      const cy = (bSw[1] + bNe[1]) / 2
+      handles.push({ lng: cx, lat: cy, kind: 'center', index: 4 })
+      // Rotation handle: placed outside the box along the bearing equal to the
+      // current rotationDeg, so bearingBetween(center, handle) round-trips back
+      // to rotationDeg on drag. 1.3× half-diagonal keeps it clear of the corners.
+      const halfDiagonal = distanceBetween([cx, cy], bNe)
+      const [rlng, rlat] = destinationPoint([cx, cy], halfDiagonal * 1.3, rotationDeg)
+      handles.push({ lng: rlng, lat: rlat, kind: 'rotation', index: 5 })
     } else if (type === 'image') {
       handles.push({ lng: geom.coordinates[0], lat: geom.coordinates[1], kind: 'anchor', index: 0 })
     }
@@ -1046,6 +1064,16 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         return {
           geometry: rotatedBoxPolygon(newSw, newNe, rotationDeg),
           properties: { ...props, sw: newSw, ne: newNe, rotationDeg }
+        }
+      }
+      if (kind === 'rotation') {
+        // Bearing from center to drag point becomes the new rotationDeg.
+        const cx = (sw[0] + ne[0]) / 2
+        const cy = (sw[1] + ne[1]) / 2
+        const newRotation = ((bearingBetween([cx, cy], [lng, lat]) % 360) + 360) % 360
+        return {
+          geometry: rotatedBoxPolygon(sw, ne, newRotation),
+          properties: { ...props, sw, ne, rotationDeg: newRotation }
         }
       }
       // Reverse-rotate the drag point into the box's unrotated frame so sw/ne
