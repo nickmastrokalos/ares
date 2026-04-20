@@ -8,16 +8,19 @@ export function boxPolygon(a, b) {
 }
 
 // Build a box polygon from canonical SW/NE corners, optionally rotated by
-// `rotationDeg` degrees clockwise around the box's center. Rotation is
-// applied in a cosine-corrected local plane so it looks correct on the map
-// regardless of latitude.
+// `rotationDeg` degrees clockwise around the box's center (compass bearing
+// convention — positive angle spins the box east-of-north, matching the
+// Rot° field and the on-map rotation handle). Rotation is applied in a
+// cosine-corrected local plane so it looks correct at any latitude.
 export function rotatedBoxPolygon(sw, ne, rotationDeg = 0) {
   const cx = (sw[0] + ne[0]) / 2
   const cy = (sw[1] + ne[1]) / 2
   const corners = [sw, [ne[0], sw[1]], ne, [sw[0], ne[1]]]
   const rotated = corners.map(([lng, lat]) => {
     if (rotationDeg === 0) return [lng, lat]
-    const rad = (rotationDeg * Math.PI) / 180
+    // Negative sign makes positive rotationDeg a clockwise (compass) rotation
+    // in the east/north local plane.
+    const rad = -(rotationDeg * Math.PI) / 180
     const cosA = Math.cos(rad)
     const sinA = Math.sin(rad)
     const cosLat = Math.cos(cy * Math.PI / 180)
@@ -276,12 +279,14 @@ export function parseDistanceToMeters(value, units = 'metric') {
 }
 
 // Inverse of the cosine-corrected rotation applied by rotatedBoxPolygon.
-// Rotates `point` around `center` by -deg degrees (same math, transposed
-// matrix) and returns a new [lng, lat]. Used by vertex drag to convert a
-// screen-dragged corner back into the box's unrotated axis-aligned frame.
+// Rotates `point` around `center` by -deg degrees (compass convention) and
+// returns a new [lng, lat]. Used by vertex drag to convert a screen-dragged
+// corner back into the box's unrotated axis-aligned frame.
 export function inverseRotateAroundCenter([lng, lat], [cx, cy], deg) {
   if (deg === 0) return [lng, lat]
-  const rad = (deg * Math.PI) / 180
+  // Matches the negated sign convention in rotatedBoxPolygon so this stays
+  // the true inverse.
+  const rad = -(deg * Math.PI) / 180
   const cosA = Math.cos(rad)
   const sinA = Math.sin(rad)
   const cosLat = Math.cos(cy * Math.PI / 180)
