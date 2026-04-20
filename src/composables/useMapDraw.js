@@ -66,6 +66,32 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
   // AttributesPanel can sync its fields in real-time without a DB round-trip.
   const draggingFeature = ref(null)
 
+  // Returns the next default name for a new feature of `type`, numbered so it
+  // is unique within the active mission (e.g. "Polygon 1", "Polygon 2", …).
+  // Mirrors the scan-and-increment strategy used by useMapManualTracks so the
+  // UX is consistent across draw features and manual tracks.
+  const FEATURE_LABELS = {
+    line: 'Line', polygon: 'Polygon', circle: 'Circle', sector: 'Sector',
+    ellipse: 'Ellipse', box: 'Box', image: 'Image', point: 'Point'
+  }
+  function nextFeatureName(type) {
+    const base = FEATURE_LABELS[type] ?? type
+    const re = new RegExp(`^${base}\\s+(\\d+)$`)
+    let max = 0
+    for (const f of featuresStore.features) {
+      if (f.type !== type) continue
+      try {
+        const props = JSON.parse(f.properties)
+        const m = String(props.name ?? '').match(re)
+        if (m) {
+          const n = parseInt(m[1])
+          if (!isNaN(n) && n > max) max = n
+        }
+      } catch { /* skip malformed row */ }
+    }
+    return `${base} ${max + 1}`
+  }
+
   const SELECTABLE_LAYERS = [
     'draw-features-fill',
     'draw-features-line',
@@ -203,8 +229,18 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         source: VERTEX_HANDLES_SOURCE,
         paint: {
           'circle-radius': 6,
-          'circle-color': '#ffffff',
-          'circle-stroke-color': '#4a9ade',
+          // Rotation handles paint amber so the operator distinguishes them
+          // from resize / translate handles at a glance.
+          'circle-color': [
+            'match', ['get', 'kind'],
+            'rotation', '#ffb84a',
+            '#ffffff'
+          ],
+          'circle-stroke-color': [
+            'match', ['get', 'kind'],
+            'rotation', '#b37a1f',
+            '#4a9ade'
+          ],
           'circle-stroke-width': 2
         }
       })
@@ -270,7 +306,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       points.pop()
       if (points.length < 2) return
       const geometry = { type: 'LineString', coordinates: [...points] }
-      await featuresStore.addFeature('line', geometry, { name: 'Line' })
+      await featuresStore.addFeature('line', geometry, { name: nextFeatureName('line') })
       cleanup()
       startLine()
     }
@@ -312,7 +348,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       if (points.length < 3) return
       const coords = [...points, points[0]]
       const geometry = { type: 'Polygon', coordinates: [coords] }
-      await featuresStore.addFeature('polygon', geometry, { name: 'Polygon' })
+      await featuresStore.addFeature('polygon', geometry, { name: nextFeatureName('polygon') })
       cleanup()
       startPolygon()
     }
@@ -338,7 +374,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         const center = points[0]
         const radius = distanceBetween(center, pt)
         const geometry = circlePolygon(center, radius)
-        featuresStore.addFeature('circle', geometry, { name: 'Circle', center, radius })
+        featuresStore.addFeature('circle', geometry, { name: nextFeatureName('circle'), center, radius })
         cleanup()
         startCircle()
       }
@@ -381,7 +417,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         const endAngle = bearingBetween(points[0], pt)
         const geometry = sectorPolygon(points[0], radius, startAngle, endAngle)
         featuresStore.addFeature('sector', geometry, {
-          name: 'Sector',
+          name: nextFeatureName('sector'),
           center: points[0],
           radius,
           startAngle,
@@ -430,7 +466,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         const radiusMinor = distanceBetween(points[0], pt)
         const geometry = ellipsePolygon(points[0], radiusMajor, radiusMinor, rotation)
         featuresStore.addFeature('ellipse', geometry, {
-          name: 'Ellipse',
+          name: nextFeatureName('ellipse'),
           center: points[0],
           radiusMajor,
           radiusMinor,
@@ -472,7 +508,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       } else {
         const sw = [Math.min(points[0][0], pt[0]), Math.min(points[0][1], pt[1])]
         const ne = [Math.max(points[0][0], pt[0]), Math.max(points[0][1], pt[1])]
-        featuresStore.addFeature('box', boxPolygon(sw, ne), { name: 'Box', sw, ne, rotationDeg: 0 })
+        featuresStore.addFeature('box', boxPolygon(sw, ne), { name: nextFeatureName('box'), sw, ne, rotationDeg: 0 })
         cleanup()
         startBox()
       }
@@ -510,7 +546,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       await featuresStore.addFeature(
         'image',
         { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] },
-        { name: 'Image', src, widthMeters: 500, naturalWidth, naturalHeight }
+        { name: nextFeatureName('image'), src, widthMeters: 500, naturalWidth, naturalHeight }
       )
     }
 
@@ -767,7 +803,7 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
 
     clickHandler = async (e) => {
       const geometry = { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] }
-      await featuresStore.addFeature('point', geometry, { name: 'Point' })
+      await featuresStore.addFeature('point', geometry, { name: nextFeatureName('point') })
       cleanup()
       startPoint()
     }
@@ -914,7 +950,15 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
       // Center handle lets the user translate the whole box.
       const bSw = sw ?? [Math.min(...geom.coordinates[0].map(c => c[0])), Math.min(...geom.coordinates[0].map(c => c[1]))]
       const bNe = ne ?? [Math.max(...geom.coordinates[0].map(c => c[0])), Math.max(...geom.coordinates[0].map(c => c[1]))]
-      handles.push({ lng: (bSw[0] + bNe[0]) / 2, lat: (bSw[1] + bNe[1]) / 2, kind: 'center', index: 4 })
+      const cx = (bSw[0] + bNe[0]) / 2
+      const cy = (bSw[1] + bNe[1]) / 2
+      handles.push({ lng: cx, lat: cy, kind: 'center', index: 4 })
+      // Rotation handle: placed outside the box along the bearing equal to the
+      // current rotationDeg, so bearingBetween(center, handle) round-trips back
+      // to rotationDeg on drag. 1.3× half-diagonal keeps it clear of the corners.
+      const halfDiagonal = distanceBetween([cx, cy], bNe)
+      const [rlng, rlat] = destinationPoint([cx, cy], halfDiagonal * 1.3, rotationDeg)
+      handles.push({ lng: rlng, lat: rlat, kind: 'rotation', index: 5 })
     } else if (type === 'image') {
       handles.push({ lng: geom.coordinates[0], lat: geom.coordinates[1], kind: 'anchor', index: 0 })
     }
@@ -1020,6 +1064,16 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
         return {
           geometry: rotatedBoxPolygon(newSw, newNe, rotationDeg),
           properties: { ...props, sw: newSw, ne: newNe, rotationDeg }
+        }
+      }
+      if (kind === 'rotation') {
+        // Bearing from center to drag point becomes the new rotationDeg.
+        const cx = (sw[0] + ne[0]) / 2
+        const cy = (sw[1] + ne[1]) / 2
+        const newRotation = ((bearingBetween([cx, cy], [lng, lat]) % 360) + 360) % 360
+        return {
+          geometry: rotatedBoxPolygon(sw, ne, newRotation),
+          properties: { ...props, sw, ne, rotationDeg: newRotation }
         }
       }
       // Reverse-rotate the drag point into the box's unrotated frame so sw/ne

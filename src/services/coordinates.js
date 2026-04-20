@@ -92,6 +92,22 @@ export function parseCoordinate(str, format = 'dd') {
   return parseDd(trimmed)
 }
 
+// Format-agnostic parse. Tries MGRS → DMS → DD (most specific first, so a
+// stray apostrophe or degree mark in a DMS string doesn't get swallowed by
+// the looser DD regex). Returns `{ lngLat, format }` on success so callers
+// can report the detected format to the user, or null if no parser matches.
+export function parseCoordinateAuto(str) {
+  const trimmed = String(str ?? '').trim()
+  if (!trimmed) return null
+  const mgrs = parseMgrs(trimmed)
+  if (mgrs) return { lngLat: mgrs, format: 'mgrs' }
+  const dms = parseDms(trimmed)
+  if (dms) return { lngLat: dms, format: 'dms' }
+  const dd = parseDd(trimmed)
+  if (dd) return { lngLat: dd, format: 'dd' }
+  return null
+}
+
 export function formatCoordinate(lng, lat, format = 'dd') {
   if (format === 'dms') return formatDms(lng, lat)
   if (format === 'mgrs') return formatMgrs(lng, lat)

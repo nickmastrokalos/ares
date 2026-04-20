@@ -76,7 +76,13 @@ function commitCenter([lng, lat]) {
   be?.updateBullseye({ lat, lon: lng })
 }
 
+// Prefer the live drag coords while a drag is in progress so the CoordInput
+// (and therefore the operator's view of the centre) tracks the cursor rather
+// than the last committed value. Mirrors how ManualTrackPanel consumes the
+// `draggingTrack` broadcast.
 const centerLngLat = computed(() => {
+  const d = be?.draggingBullseye?.value
+  if (d) return [d.lng, d.lat]
   const b = bullseye.value
   if (!b) return null
   return [b.lon, b.lat]

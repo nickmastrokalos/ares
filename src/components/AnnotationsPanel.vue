@@ -140,7 +140,6 @@ onMounted(() => {
           :ref="bindRow(a.id)"
           class="row"
           :class="{ selected: a.id === selectedId }"
-          @pointerdown="selectedId = a.id"
         >
           <div class="row-top">
             <span class="color-dot" :style="{ background: a.color }" />

@@ -208,6 +208,8 @@ Every drawn or imported feature has a `type` string stored in the `features` tab
 
 Manual track placement, editing, listing, and rendering are fully documented in [tracks.md](./tracks.md) — including the `TrackDropPanel` two-step placement flow, `ManualTrackPanel`, `TrackTypePicker`, and the MIL-STD-2525 dual-layer pipeline. `cotType` is optional; tracks without one render as affiliation-colored circles regardless of the 2525 symbology setting.
 
+Newly drawn features receive a numbered default `name` scoped to the active mission (`Polygon 1`, `Polygon 2`, `Circle 1`, …). `nextFeatureName(type)` in `useMapDraw.js` scans `featuresStore.features` for existing names matching `^{Label}\s+(\d+)$` and returns `{Label} {max+1}` — the same scan-and-increment strategy used by `useMapManualTracks::nextName` so the two systems stay consistent.
+
 Geometry for parametric shapes (`box`, `circle`, `ellipse`, `sector`) is stored **both** as a pre-computed polygon (for rendering) and as canonical parameters in `properties` (for editing and re-export). When a user edits parameters, the polygon geometry is recalculated and both are written back to SQLite atomically.
 
 The `featureCollection` computed in `useFeaturesStore` always tags every feature with `_dbId` (the SQLite row id) and `_type` (the type string) so map layers and UI components can filter without additional queries.
@@ -221,7 +223,7 @@ Fillable types (shapes that have a fill and opacity control): `polygon`, `box`, 
 - **`point` / `circle` / `ellipse` / `sector`:** a single `center` handle at the shape's anchor point.
 - **`line`:** one `vertex` handle per coordinate.
 - **`polygon`:** one `vertex` handle per ring vertex + one `center` handle at the ring's bounding-box centroid. Dragging the center translates all vertices.
-- **`box`:** `sw` and `ne` corner handles + one `center` handle at the midpoint. Dragging a corner reshapes; dragging the center translates.
+- **`box`:** four `corner` handles, one `center` handle at the midpoint, and one `rotation` handle placed outside the box along the current rotation bearing (1.3× half-diagonal from center). Dragging a corner reshapes in the rotated frame; dragging the center translates; dragging the rotation handle sets `rotationDeg` to the bearing from center to cursor. The rotation handle paints amber (`#ffb84a`) to distinguish it from the white resize / translate handles.
 - **`ellipse`:** `center`, `majorTip` (at bearing `rotation` from center), and `minorTip` (at bearing `rotation + 90°`). Dragging tips resizes each axis independently.
 
 Drag state is exposed as the `draggingFeature` reactive ref (provided from `MapView` as `'draggingFeature'`). `AttributesPanel` injects it and watches for changes to live-update field values while the user drags.

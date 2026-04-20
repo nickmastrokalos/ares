@@ -22,6 +22,9 @@ Distances are rendered on-map using the user's preferred distance unit (`setting
 
 - **Toolbar button** (`mdi-bullseye`, Analysis group, alongside Measure / Bloodhound / Perimeter): opens / closes `BullseyePanel.vue`. Closing the panel does not clear the bullseye.
 - The panel's **Set bullseye** button puts the map into click-to-place mode; one click anywhere on the map places (or replaces) the bullseye.
+- **Clicking the bullseye centre on the map** opens `BullseyePanel.vue` and reveals the white handle dot. This is a two-step select-then-drag flow that matches annotations and manual tracks: the first click just selects (panel opens, handle appears); a subsequent mousedown on the now-visible handle starts a drag. The handle is a 6 px white circle with a blue ring, matching the shape-vertex handle visual language.
+- **Dragging the handle** (once visible) moves the bullseye. Rings, cardinal spokes, and every label follow the cursor live via source-data updates (no DB write per frame). On release `setBullseye({ lat, lon })` commits the new position.
+- **Clicking empty map** hides the handle. Unlike annotations, the panel stays open — the user asked that bullseye settings remain accessible across handle deselection.
 
 ## Panel UX
 
@@ -40,16 +43,31 @@ Distances are rendered on-map using the user's preferred distance unit (`setting
 
 ## Map rendering
 
-Two geojson sources drive the static overlay:
+Three geojson sources drive the overlay:
 
-| Source               | Layer                    | Role                                      |
-|----------------------|--------------------------|-------------------------------------------|
-| `bullseye-rings`     | `bullseye-rings-line`    | One polygon per ring (`ringCount` total). Dashed neutral grey stroke. |
-| `bullseye-cardinals` | `bullseye-cardinals-line`| Four lines from center to outer ring. Only populated when `showCardinals` is true. |
+| Source               | Layer                         | Role                                      |
+|----------------------|-------------------------------|-------------------------------------------|
+| `bullseye-rings`     | `bullseye-rings-line`         | One polygon per ring (`ringCount` total). Dashed neutral grey stroke. |
+| `bullseye-cardinals` | `bullseye-cardinals-line`     | Four lines from center to outer ring. Only populated when `showCardinals` is true. |
+| `bullseye-handle`    | `bullseye-hit-target-layer`   | Invisible (`circle-opacity: 0`) 18 px circle — the click / hover target. Absorbs first-click selection, hover cursor, and click-away hit-testing so the 6 px handle doesn't have to be pixel-perfect to hit. |
+| `bullseye-handle`    | `bullseye-handle-layer`       | Single Point feature at the centre. Rendered as a circle with paint identical to the shape-vertex handle (white fill, blue stroke). Starts with `layout.visibility: 'none'` — the composable's `isHandleShown` watch toggles it on once the bullseye is selected. |
 
-MapLibre HTML markers render the ring distance labels, cardinal letters (N / E / S / W), the bullseye name, and a small + cross at the center. HTML markers avoid dependence on the glyph server for text — perimeter / measure use the same pattern.
+MapLibre HTML markers render the ring distance labels, cardinal letters (N / E / S / W), and the bullseye name. HTML markers avoid dependence on the glyph server for text — perimeter / measure use the same pattern.
 
-The overlay is static: nothing watches any live store. Only programmatic mutations (`setBullseye`, `updateBullseye`, `clearBullseye`) trigger a rebuild.
+The overlay is mostly static: nothing watches any live store. Programmatic mutations (`setBullseye`, `updateBullseye`, `clearBullseye`) trigger a full rebuild; drag-to-move patches the three sources + repositions the label markers in place so it stays smooth.
+
+### Select-then-drag
+
+Interaction follows the same two-step flow as annotations and manual tracks:
+
+1. **First click** on `bullseye-hit-target-layer` fires the `mousedown` handler with `isHandleShown === false`. It flips the flag to `true` (which reveals `bullseye-handle-layer` via the visibility watch) and calls `onRequestOpenPanel`. No drag, no mutation.
+2. **Second mousedown** on the hit target (with the handle already visible) starts the drag. It mirrors the shape-vertex / manual-track pattern: `dragPan.disable()`, window-level `mousemove` / `mouseup` / `keydown` listeners take over, each frame re-runs `circlePolygon` / `destinationPoint` for the new centre and `setData`s all three sources; label markers are repositioned via `setLngLat` rather than torn down. Escape reverts to the committed centre; `mouseup` commits via `setBullseye`.
+
+`suppressNextClick` still runs during drag commit so the trailing click doesn't re-enter Set/Move placement and doesn't fire the click-away handler that would hide the handle.
+
+### Click-away
+
+A separate `map.on('click')` handler (`setupDeselectOnMapClick`) runs `queryRenderedFeatures` against the hit-target layer. If the click lands on empty space (or any non-bullseye feature), `isHandleShown` flips to `false` and the watch hides the visible handle. The panel deliberately stays open — `BullseyePanel.vue` is modal-lite, not bound to selection, so the user can keep editing ring count / name while the on-map handle is hidden.
 
 ### Label declutter
 
@@ -57,19 +75,20 @@ At wide zooms the rings collapse to a few pixels across and the text labels stac
 
 - **Ring distances + name** — hidden when ring spacing < 28 px.
 - **Cardinal letters (N/E/S/W)** — hidden when the outer-ring radius < 48 px (they get further from center so survive slightly longer).
-- **Center cross** — always visible.
+- **Handle dot** — only visible when `isHandleShown` is true. Zoom has no effect on it.
 
 Projection (rather than zoom level) handles the globe-projection case: 1 nm near the pole looks much smaller on screen than 1 nm at the equator.
 
 ## Programmatic API
 
-`useMapBullseye(getMap, missionId)` returns:
+`useMapBullseye(getMap, missionId, onRequestOpenPanel?, suppress?)` returns:
 
 ```js
 {
   bullseye,            // ComputedRef<Bullseye | null>
   bullseyeCount,       // ComputedRef<0 | 1>
   bullseyeSelecting,   // ComputedRef<boolean> — panel-exposed click-to-place state
+  draggingBullseye,    // Ref<{ lng, lat } | null> — live cursor coords during a drag; null otherwise
   toggleSelecting,     // enter / exit click-to-place mode
   setBullseye(patch),  // place or replace; patch must include lat + lon (or merge onto an existing bullseye)
   updateBullseye(patch), // merge patch into the existing bullseye; no-op if none placed
@@ -79,6 +98,10 @@ Projection (rather than zoom level) handles the globe-projection case: 1 nm near
 ```
 
 `missionId` scopes persistence. Pass `null` to disable persistence entirely (useful for tests or non-mission views). `init()` must be invoked after the MapLibre style has loaded — `MapView.vue` calls it from `map.on('load')` alongside the other composable `initLayers` functions.
+
+`onRequestOpenPanel` is an optional callback fired on the **first** click of the bullseye centre (the one that reveals the handle dot). `MapView.vue` passes `() => { bullseyePanelOpen.value = true }`; ignored if omitted.
+
+`suppress` is a ref-like `{ value: boolean }` consulted at drag start. When true (another entity mode active, a draw tool selected, etc.) the map-layer drag is ignored so it doesn't steal interactions from the currently-active tool. `MapView.vue` passes a shared `entitySuppressRef` kept in sync with `suppressEntityClicks` via `watch`.
 
 `Bullseye` is:
 ```js
@@ -94,6 +117,8 @@ The composable instance is provided under the `'bullseyeApi'` inject key from `M
 ## Coexistence with click dispatcher
 
 Bullseye's click-to-place handler is a raw `map.on('click', …)` handler, like bloodhound / perimeter. Other entity composables must continue to gate their click actions when `bullseyeSelecting` is true. `MapView.vue` OR's `bullseyeSelecting` into both `entitySelecting` (for draw / route) and `suppressEntityClicks` (for tracks / AIS / manual tracks).
+
+The select-then-drag handler is its own `map.on('mousedown', 'bullseye-hit-target-layer', …)` binding, not routed through the click dispatcher — the hit target has no ambiguity with other entity layers. The click-away handler (`map.on('click')`) is similarly separate; it only cares whether the click landed on the bullseye hit target, so it doesn't need the dispatcher's cross-domain resolution. The dispatcher's `suppress` signal and bullseye's `suppress` ref share the same source so both handlers are silenced during draw / route / track-drop modes automatically.
 
 ## Assistant tools
 
