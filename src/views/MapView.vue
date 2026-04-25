@@ -21,6 +21,7 @@ import { useMapAnnotations } from '@/composables/useMapAnnotations'
 import { useMapIntercepts } from '@/composables/useMapIntercepts'
 import { useMapAlerts } from '@/composables/useMapAlerts'
 import { useMapSnapshot } from '@/composables/useMapSnapshot'
+import { useMapVideo } from '@/composables/useMapVideo'
 import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
@@ -145,6 +146,15 @@ async function captureSnapshotToDesktop({ filename } = {}) {
   return captureSnapshotRaw({ destination: 'desktop', filename })
 }
 
+const { record: recordVideoRaw } = useMapVideo({ getMap: () => map })
+
+// Same shape as `captureSnapshotToDesktop` — the agent's
+// `map_capture_video` tool calls this directly and the user has
+// approved via the confirm card.
+async function captureVideoToDesktop({ durationSeconds, filename } = {}) {
+  return recordVideoRaw({ destination: 'desktop', durationSeconds, filename })
+}
+
 // Perimeter breaches are aggregated into a single alert so the chip stays
 // compact regardless of how many perimeters are breached. Each breaching
 // perimeter contributes one line to the aggregate message; the chip's
@@ -204,7 +214,8 @@ useAssistantTools(
     featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
     flyToGeometry, flyTo, switchBasemap,
     bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi,
-    captureSnapshotToDesktop
+    captureSnapshotToDesktop,
+    captureVideoToDesktop
   }),
   'Map assistant'
 )

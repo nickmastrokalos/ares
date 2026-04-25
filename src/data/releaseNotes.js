@@ -22,6 +22,7 @@ export const RELEASES = [
     version: 'unreleased',
     added: [
       'Assistant can now snapshot the map via `map_capture_snapshot` (write tool). PNG is written directly to the user\'s Desktop as `ares_screen_capture_<UTC ISO timestamp>.png` — no native save dialog, since the confirm card is the user-approval gate. The toolbar button still uses the save-dialog flow.',
+      'Assistant can now record a video clip of the map via `map_capture_video` (write tool). Allowed durations: 5, 10, 30, or 60 seconds. Output is written to the user\'s Desktop as `ares_map_video_<UTC ISO timestamp>.<ext>`; the extension (WebM / MP4) is picked at runtime based on the host webview\'s codec support, so the same code works on Windows / macOS / modern Linux. Caveat: only the WebGL canvas is captured — HTML overlay text (bullseye / bloodhound / perimeter labels) is not in the video.',
       'Assistant panel: new help button (?) in the header opens a popover of example prompts grouped by category — Routes, Drawing, Queries — focused on the more complex flows (water-only, via, multi-side via, AIS avoidance, stacked constraints). Click an example to insert its template into the input with placeholders to fill in.',
       'Track cards now show m/s alongside the unit-formatted speed (e.g. "24.3 kts (12.5 m/s)").',
       'Releases tab on the Settings page (sidebar) showing per-version notes.',
