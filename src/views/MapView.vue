@@ -175,7 +175,7 @@ watch(
 const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value)
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute: toggleRouteRaw, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
 const suppressEntityClicks = computed(
   () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || appending.value || placing.value != null
 )
@@ -236,8 +236,60 @@ async function switchBasemap(id) {
 }
 provide('switchBasemap', switchBasemap)
 
+// Disarm every "active" tool except the named one. Called from each
+// toolbar-driven entry point so picking a new tool always replaces
+// whatever was previously armed (route building, draw shape, measure,
+// manual-track placement, bloodhound/perimeter/bullseye/annotations
+// selection, …) and the open tool panels that own those armed states.
+// Passive panels (track list, AIS, ghost, settings, IO, layers,
+// listeners, intercept) are left alone — they don't interact with map
+// clicks, so they're safe to coexist with anything.
+function exitOtherTools(keep) {
+  if (keep !== 'route' && routing.value) toggleRouteRaw()
+
+  if (keep !== 'draw') {
+    cancel()
+    if (drawPanelOpen.value) drawPanelOpen.value = false
+  }
+
+  if (keep !== 'measure' && measuring.value) cancelMeasure()
+
+  if (keep !== 'trackDrop') {
+    if (placing.value != null) setPlacing(null)
+    if (trackDropPanelOpen.value) trackDropPanelOpen.value = false
+  }
+
+  if (keep !== 'bloodhound') {
+    if (bloodhounding.value) bloodhoundApi.toggleSelecting()
+    if (bloodhoundPanelOpen.value) bloodhoundPanelOpen.value = false
+  }
+
+  if (keep !== 'perimeter') {
+    if (perimeterSelecting.value) perimeterApi.toggleSelecting()
+    if (perimeterPanelOpen.value) perimeterPanelOpen.value = false
+  }
+
+  if (keep !== 'bullseye') {
+    if (bullseyeSelecting.value) bullseyeApi.toggleSelecting()
+    if (bullseyePanelOpen.value) bullseyePanelOpen.value = false
+  }
+
+  if (keep !== 'annotations') {
+    if (annotationSelecting.value) annotationsApi.toggleSelecting()
+    if (annotationsPanelOpen.value) annotationsPanelOpen.value = false
+  }
+}
+
+function toggleRoute() {
+  // Entering build mode kicks every other armed tool; cancelling does nothing
+  // to others (toggleRouteRaw flips routing.value off when already on).
+  if (!routing.value) exitOtherTools('route')
+  toggleRouteRaw()
+}
+
 function toggleDrawPanel() {
-  cancelMeasure()
+  const opening = !drawPanelOpen.value
+  if (opening) exitOtherTools('draw')
   drawPanelOpen.value = !drawPanelOpen.value
   if (!drawPanelOpen.value) cancel()
 }
@@ -250,13 +302,14 @@ function toggleMeasure() {
   if (measuring.value) {
     cancelMeasure()
   } else {
-    cancel()
-    drawPanelOpen.value = false
+    exitOtherTools('measure')
     startMeasure()
   }
 }
 
 function toggleTrackDrop() {
+  const opening = !trackDropPanelOpen.value
+  if (opening) exitOtherTools('trackDrop')
   trackDropPanelOpen.value = !trackDropPanelOpen.value
   if (!trackDropPanelOpen.value) setPlacing(null)
 }
@@ -274,35 +327,33 @@ function toggleAisPanel() {
 }
 
 function toggleBloodhoundPanel() {
-  // Mirror the panel's X-button close: if we're closing the panel while
-  // selection mode is on, drop it so the crosshair cursor doesn't stick.
-  if (bloodhoundPanelOpen.value && bloodhounding.value) {
-    bloodhoundApi.toggleSelecting()
-  }
-  bloodhoundPanelOpen.value = !bloodhoundPanelOpen.value
+  const isOpen = bloodhoundPanelOpen.value
+  // Closing while selecting → drop the crosshair (matches the panel's X
+  // button). Opening → kick every other armed tool first.
+  if (isOpen && bloodhounding.value) bloodhoundApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('bloodhound')
+  bloodhoundPanelOpen.value = !isOpen
 }
 
 function togglePerimeterPanel() {
-  // Mirror the panel's X-button close: drop selection mode if we're closing
-  // while it's on, so the crosshair cursor doesn't stick.
-  if (perimeterPanelOpen.value && perimeterSelecting.value) {
-    perimeterApi.toggleSelecting()
-  }
-  perimeterPanelOpen.value = !perimeterPanelOpen.value
+  const isOpen = perimeterPanelOpen.value
+  if (isOpen && perimeterSelecting.value) perimeterApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('perimeter')
+  perimeterPanelOpen.value = !isOpen
 }
 
 function toggleBullseyePanel() {
-  if (bullseyePanelOpen.value && bullseyeSelecting.value) {
-    bullseyeApi.toggleSelecting()
-  }
-  bullseyePanelOpen.value = !bullseyePanelOpen.value
+  const isOpen = bullseyePanelOpen.value
+  if (isOpen && bullseyeSelecting.value) bullseyeApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('bullseye')
+  bullseyePanelOpen.value = !isOpen
 }
 
 function toggleAnnotationsPanel() {
-  if (annotationsPanelOpen.value && annotationSelecting.value) {
-    annotationsApi.toggleSelecting()
-  }
-  annotationsPanelOpen.value = !annotationsPanelOpen.value
+  const isOpen = annotationsPanelOpen.value
+  if (isOpen && annotationSelecting.value) annotationsApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('annotations')
+  annotationsPanelOpen.value = !isOpen
 }
 
 function toggleInterceptPanel() {
@@ -310,6 +361,9 @@ function toggleInterceptPanel() {
 }
 
 function onToolSelect(toolId) {
+  // Selecting a draw tool disarms every other tool. Deselecting (toolId
+  // null) doesn't need to disarm anything else.
+  if (toolId != null) exitOtherTools('draw')
   setTool(toolId)
 }
 
