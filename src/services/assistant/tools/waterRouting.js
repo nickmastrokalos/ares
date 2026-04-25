@@ -48,7 +48,7 @@ export function waterRoutingTools({ featuresStore }) {
 
     {
       name: 'map_draw_route_water_only',
-      description: 'Plan a route from `start` to `end` that stays in water (no land crossings) and draw it on the map. Use this when the user explicitly asks to avoid land, asks for a maritime / naval / sea route, or when the start and end are clearly over water with land between them. The planner uses Natural Earth 10m coastlines and a grid A* with line-of-sight smoothing — the returned polyline may include intermediate waypoints to detour around land. If start or end is on land with no nearby water, returns an error instead of drawing.',
+      description: 'Plan a route from `start` to `end` that stays in water (no land crossings) and draw it on the map. Use this when the user explicitly asks to avoid land, asks for a maritime / naval / sea route, or when the start and end are clearly over water with land between them. The planner uses Natural Earth 10m coastlines (~1:10M scale) and grid A* with capped line-of-sight smoothing. RELIABLE for ocean-crossing and large-bay routes. AT COASTAL SCALES (routes shorter than ~5 km, or routes inside small bays / through narrow inlets / near barrier islands) the dataset is too coarse and the route may visibly clip land per the basemap. When start and end are within ~5 km of each other, briefly tell the user the result may not be accurate at this scale and suggest they either accept the rough plan, supply intermediate waypoints manually via `route_add_waypoint`, or use the regular `map_draw_route` and place waypoints themselves. If start or end is on land with no nearby water, returns an error instead of drawing.',
       readonly: false,
       inputSchema: {
         type: 'object',
