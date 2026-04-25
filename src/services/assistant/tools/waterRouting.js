@@ -8,13 +8,38 @@
 // `map_draw_route_avoiding_features`    — write: plans a polyline from start
 //                                         to end with stacked constraints —
 //                                         avoid named features, pass
-//                                         through named features (one
-//                                         waypoint at each shape's center,
-//                                         in order), and/or avoid land.
+//                                         through named features, avoid
+//                                         land, and/or avoid AIS vessel
+//                                         projected paths (current
+//                                         course/speed × horizon).
 
 import { checkRouteCrossesLand, planWaterRoute, planRouteAvoidingObstacles, planRouteThroughVias } from '@/services/landRouting'
 import { nameOrDefault } from '@/services/featureNaming'
-import { geometryBounds } from '@/services/geometry'
+import { geometryBounds, destinationPoint, circlePolygon, corridorPolygon } from '@/services/geometry'
+
+// Knots → metres per second.
+const KTS_TO_MPS = 1852 / 3600
+
+// Below this speed, vessel is treated as stationary (point keepout instead
+// of corridor). Avoids degenerate ~zero-length corridors and, more
+// importantly, avoids drawing a corridor from a drifting vessel along the
+// last reported (unreliable) heading.
+const AIS_MIN_MOVING_KTS = 0.5
+
+// Build an obstacle polygon for a single AIS vessel projected
+// `horizonSeconds` forward along its current course/speed, with
+// `standoffMeters` clearance on either side.
+function vesselObstaclePolygon(vessel, horizonSeconds, standoffMeters) {
+  const here = [vessel.longitude, vessel.latitude]
+  const sog  = Number(vessel.SOG)
+  const cog  = vessel.COG
+  if (Number.isFinite(sog) && sog > AIS_MIN_MOVING_KTS && cog != null && cog >= 0) {
+    const distance = sog * KTS_TO_MPS * horizonSeconds
+    const there = destinationPoint(here, distance, cog)
+    return corridorPolygon(here, there, standoffMeters)
+  }
+  return circlePolygon(here, standoffMeters)
+}
 
 // "Go through" point for a feature: most natural single waypoint that
 // puts a route inside the shape. Circles / ellipses / sectors store
@@ -48,7 +73,7 @@ function rebuildWaypointMeta(count) {
   })
 }
 
-export function waterRoutingTools({ featuresStore }) {
+export function waterRoutingTools({ featuresStore, aisStore }) {
   return [
 
     {
@@ -119,7 +144,7 @@ export function waterRoutingTools({ featuresStore }) {
 
     {
       name: 'map_draw_route_avoiding_features',
-      description: 'Plan and draw a route from `start` to `end` with one or more constraints stacked: AVOID named features (`avoid_feature_ids`, e.g. keepout boxes / no-go polygons), AVOID land (`avoid_land: true`), and/or PASS THROUGH named features (`via_feature_ids`, e.g. "go through Polygon 1"). Each via feature contributes one intermediate waypoint at its center, in the order given, so the route reads SP → via₁ → via₂ → … → EP, with each leg avoiding the same obstacles. Resolve area names to ids first via `map_find_entity`. Both via and avoid features must be polygon-shaped — `polygon`, `box`, `circle`, `ellipse`, or `sector`. Other types (point, line, route, manual-track) produce an error. Optional `buffer_meters` adds a standoff distance from each AVOIDED user feature (no effect on via features or land — land has its own ~555 m coastline buffer). PREFER THIS TOOL whenever the user names ANY area to avoid OR pass through; only fall back to `map_draw_route_water_only` when there are no named areas at all.',
+      description: 'Plan and draw a route from `start` to `end` with any combination of constraints stacked: AVOID named features (`avoid_feature_ids`, e.g. keepout boxes), AVOID land (`avoid_land: true`), AVOID AIS vessel paths (`avoid_ais: true` — projects each vessel forward along its current course/speed and treats the swept corridor as an obstacle), and/or PASS THROUGH named features (`via_feature_ids`, e.g. "go through Polygon 1"). Each via feature contributes one intermediate waypoint at its center; legs are planned independently with the same avoidance constraints. Resolve named features to ids via `map_find_entity` first. Avoid/via features must be polygon-shaped (`polygon`, `box`, `circle`, `ellipse`, `sector`). For `avoid_ais`, you can override the projection horizon (`ais_horizon_minutes`, default 30) and clearance (`ais_standoff_meters`, default 1852 = 1 nm) when the user is explicit ("within 5 nm" → 9260 m, "for the next hour" → 60 min). Otherwise leave the defaults alone. PREFER THIS TOOL whenever the user names ANY area to avoid, ANY area to pass through, or asks to avoid land or AIS; fall back to `map_draw_route_water_only` only when none of those constraints apply.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -140,22 +165,34 @@ export function waterRoutingTools({ featuresStore }) {
           via_feature_ids: {
             type: 'array',
             items: { type: 'integer' },
-            description: 'Mission feature ids the route must pass through (in the order given). Each adds one intermediate waypoint at the feature\'s center. Use when the user says "through", "via", "stopping at", or similar. Resolve names to ids via `map_find_entity` first.'
+            description: 'Mission feature ids the route must pass through (in the order given). Each adds one intermediate waypoint at the feature\'s center. Use when the user says "through", "via", "stopping at", or similar.'
           },
           avoid_land: {
             type: 'boolean',
             description: 'Also avoid bundled coastline data (Natural Earth 10m). Set true when the user asks the route to stay over water / not cross land. Default false.'
           },
+          avoid_ais: {
+            type: 'boolean',
+            description: 'Also avoid AIS vessel projected paths. Each vessel currently in `aisStore` is projected `ais_horizon_minutes` forward along its course (COG) and speed (SOG); the corridor of width `ais_standoff_meters` around that projection becomes an obstacle. Stationary vessels (SOG ≤ 0.5 kts or no COG) become a circular keepout at their current position. Default false.'
+          },
+          ais_horizon_minutes: {
+            type: 'number',
+            description: 'Projection horizon for AIS vessels in MINUTES. Default 30. Set when the user gives a time window ("for the next hour" → 60).'
+          },
+          ais_standoff_meters: {
+            type: 'number',
+            description: 'Clearance distance from each AIS vessel\'s projected path in METERS. Default 1852 (1 nm). Set when the user gives an explicit distance — convert: 1 nm = 1852 m, 1 mi = 1609.344 m, 1 km = 1000 m.'
+          },
           buffer_meters: {
             type: 'number',
-            description: 'Optional standoff distance from each AVOIDED user-feature obstacle in meters. Default 0 (route may hug obstacle edges). Has no effect on via features or land.'
+            description: 'Optional standoff distance from each AVOIDED user-feature obstacle in meters. Default 0 (route may hug obstacle edges). Has no effect on via features, land, or AIS — those have their own buffers.'
           },
           name:  { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the route. Otherwise OMIT — the system auto-generates a default like `route-a3f9`. Do NOT invent descriptive names from context.' },
           color: { type: 'string', description: 'Optional hex color. Defaults to white.' }
         },
         required: ['start', 'end']
       },
-      previewRender({ start, end, avoid_feature_ids, via_feature_ids, avoid_land, name }) {
+      previewRender({ start, end, avoid_feature_ids, via_feature_ids, avoid_land, avoid_ais, name }) {
         const label = name ? `"${name}" · ` : ''
         const fmt = ([x, y]) => `${y.toFixed(4)}, ${x.toFixed(4)}`
         const parts = []
@@ -166,10 +203,11 @@ export function waterRoutingTools({ featuresStore }) {
           parts.push(avoid_feature_ids.length === 1 ? 'avoiding 1 obstacle' : `avoiding ${avoid_feature_ids.length} obstacles`)
         }
         if (avoid_land) parts.push('avoiding land')
+        if (avoid_ais) parts.push('avoiding AIS')
         const what = parts.length ? parts.join(' · ') : 'direct'
         return `${label}Route · ${what} · ${fmt(start)} → ${fmt(end)}`
       },
-      async handler({ start, end, avoid_feature_ids = [], via_feature_ids = [], avoid_land = false, buffer_meters = 0, name, color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ start, end, avoid_feature_ids = [], via_feature_ids = [], avoid_land = false, avoid_ais = false, ais_horizon_minutes = 30, ais_standoff_meters = 1852, buffer_meters = 0, name, color = DEFAULT_FEATURE_COLOR }) {
         const SUPPORTED = new Set(['polygon', 'box', 'circle', 'ellipse', 'sector'])
 
         function resolvePolygonFeature(fid, role) {
@@ -201,8 +239,24 @@ export function waterRoutingTools({ featuresStore }) {
           vias.push(c)
         }
 
+        // Project AIS vessels into the obstacle list. Each moving vessel
+        // becomes a corridor (current → projected position over the
+        // horizon, ± standoff); stationary vessels become a circle.
+        let aisObstacleCount = 0
+        if (avoid_ais && aisStore?.vessels) {
+          const horizonSeconds = Math.max(0, Number(ais_horizon_minutes) || 0) * 60
+          const standoff = Math.max(0, Number(ais_standoff_meters) || 0)
+          if (horizonSeconds > 0 && standoff > 0) {
+            for (const vessel of aisStore.vessels.values()) {
+              if (vessel.longitude == null || vessel.latitude == null) continue
+              obstacles.push(vesselObstaclePolygon(vessel, horizonSeconds, standoff))
+              aisObstacleCount++
+            }
+          }
+        }
+
         if (obstacles.length === 0 && vias.length === 0 && !avoid_land) {
-          return { error: 'Pass at least one of `avoid_feature_ids`, `via_feature_ids`, or `avoid_land: true` — otherwise this is just a direct route and `map_draw_route` should be used instead.' }
+          return { error: 'Pass at least one of `avoid_feature_ids`, `via_feature_ids`, `avoid_land: true`, or `avoid_ais: true` — otherwise this is just a direct route and `map_draw_route` should be used instead.' }
         }
 
         // buffer_meters → degrees: planar 1° ≈ 111 km.
@@ -224,9 +278,10 @@ export function waterRoutingTools({ featuresStore }) {
           success: true,
           waypointCount: coords.length,
           lengthMeters: plan.lengthMeters,
-          avoidedFeatureCount: obstacles.length,
+          avoidedFeatureCount: avoid_feature_ids.length,
           viaFeatureCount: vias.length,
-          avoidedLand: avoid_land
+          avoidedLand: avoid_land,
+          avoidedAisCount: aisObstacleCount
         }
       }
     }

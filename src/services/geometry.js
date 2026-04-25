@@ -59,6 +59,24 @@ export function ellipsePolygon(center, radiusMajor, radiusMinor, rotationDeg = 0
   return { type: 'Polygon', coordinates: [coords] }
 }
 
+// Rectangular corridor polygon centred on the line `start → end`, extending
+// `halfWidthMeters` perpendicular to it on each side. Used as a route
+// obstacle when projecting a moving entity (AIS vessel, etc.) forward
+// along its course: feed the current and projected positions as endpoints
+// and the corridor stands in for "anywhere this vessel will be over the
+// horizon ± standoff." Square ends — no rounded caps — which is fine for
+// the rasterizer.
+export function corridorPolygon(start, end, halfWidthMeters) {
+  const bearing = bearingBetween(start, end)
+  const left  = (bearing + 270) % 360  // -90°
+  const right = (bearing +  90) % 360
+  const aL = destinationPoint(start, halfWidthMeters, left)
+  const aR = destinationPoint(start, halfWidthMeters, right)
+  const bL = destinationPoint(end,   halfWidthMeters, left)
+  const bR = destinationPoint(end,   halfWidthMeters, right)
+  return { type: 'Polygon', coordinates: [[aL, bL, bR, aR, aL]] }
+}
+
 export function sectorPolygon(center, radiusMeters, startAngle, endAngle, steps = 64) {
   const coords = [center]
   let sweep = endAngle - startAngle
