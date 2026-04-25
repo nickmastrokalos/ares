@@ -1,21 +1,30 @@
 // Water-only route planner used by the `map_draw_route_water_only` and
 // `route_check_land_crossing` assistant tools.
 //
-// Approach: grid-based A* over a bbox containing both endpoints, with land
-// cells (centers inside any land polygon) marked impassable. Final path is
-// smoothed by greedy line-of-sight to drop redundant waypoints, capped so
-// no single merged leg is longer than `MAX_SMOOTHED_LEG_M` — keeps the
-// smoother from bridging across an island when the polygon underneath is
-// too generalized to flag the crossing. The dataset is dynamic-imported on
-// first use so the asset isn't part of the initial bundle.
+// Approach: rasterize the relevant land polygons into a Uint8Array bitmap
+// covering the query bbox at the planner's grid resolution, dilate by the
+// `LAND_BUFFER_DEG` standoff, then run grid A* on the bitmap. Final path
+// is smoothed by greedy line-of-sight, capped so no single merged leg is
+// longer than `MAX_SMOOTHED_LEG_M` — keeps the smoother from bridging
+// across an island when the polygon underneath is too generalized to flag
+// the crossing.
+//
+// Why rasterize: NE 10m's continental polygons can have hundreds of
+// thousands of vertices. Per-cell `pointInPolygon` against those polygons
+// times tens of thousands of A* cells froze the UI. Scanline
+// rasterization is `O(rows × edges_in_band)` once up front, after which
+// A* and the smoother are O(1) bitmap lookups.
+//
+// The dataset is dynamic-imported on first use so the asset isn't part
+// of the initial bundle.
 //
 // Land polygons: Natural Earth 10m. ~10 MB. Fidelity is roughly 1:10M
 // scale: fine for ocean-crossing and large-bay routes, but generalizes
 // small bays / barrier islands / narrow peninsulas at the city scale —
 // the planner can therefore produce routes that visually clip land at
-// zoom levels finer than ~1 km/pixel even though the math says no
-// crossing. The leg-length cap mitigates the worst case but does not fix
-// the underlying data fidelity.
+// zoom levels finer than ~1 km/pixel even though the bitmap says no
+// crossing. The buffer + leg-length cap mitigate the worst case but do
+// not fix the underlying data fidelity.
 //
 // Caveats:
 //   - Planar lng/lat distance metric. Fine at coastal scales; degrades for
@@ -25,7 +34,6 @@
 //     results; out of scope here.
 
 import {
-  pointInPolygon,
   findLandCrossingIndex,
   geometryBounds,
   distanceBetween
@@ -135,49 +143,113 @@ class MinHeap {
   }
 }
 
-function anyPolyContains(polygons, pt) {
+// Rasterize the polygons into a Uint8Array land/water bitmap covering the
+// query bbox at the planner's grid resolution. Two passes:
+//
+// 1. Scanline rasterization: for each y row, find which polygon edges
+//    span y, compute their x intercepts, and fill cells between
+//    even-odd intercept pairs. Only edges whose y-range overlaps the
+//    bbox are considered (continental polygons can have hundreds of
+//    thousands of vertices; the y-prefilter cuts this to ~1000s).
+//    All rings (outer + holes) contribute edges so even-odd fill
+//    correctly punches holes for inland features.
+//
+// 2. Dilation by `LAND_BUFFER_DEG / step` cells: each land cell marks
+//    its surrounding cells out to that radius. This is a
+//    Minkowski-style inflation that absorbs NE 10m's ~250-500 m
+//    coastline generalization error, so the planner stays a margin
+//    offshore from the simplified coast.
+//
+// After this, every cell test in A* and every sample test in the
+// smoother is an O(1) bitmap lookup. The naïve "9 PIPs per cell × big
+// continental polygon" path that froze the UI is gone.
+function buildLandBitmap(polygons, bbox, step) {
+  const [[w, s], [e, n]] = bbox
+  const cellsX = Math.round((e - w) / step) + 1
+  const cellsY = Math.round((n - s) / step) + 1
+
+  // Collect edges spanning the bbox y range. Skip horizontal edges
+  // (they have no y crossings and break the intercept formula).
+  const edges = []
   for (const g of polygons) {
-    if (pointInPolygon(pt, g)) return true
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates
+    for (const rings of polys) {
+      for (const ring of rings) {
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const [x1, y1] = ring[j]
+          const [x2, y2] = ring[i]
+          if (y1 === y2) continue
+          const yLo = y1 < y2 ? y1 : y2
+          const yHi = y1 < y2 ? y2 : y1
+          if (yHi <= s || yLo >= n) continue
+          edges.push({ x1, y1, x2, y2, yLo, yHi })
+        }
+      }
+    }
   }
-  return false
+
+  const raw = new Uint8Array(cellsX * cellsY)
+  for (let yi = 0; yi < cellsY; yi++) {
+    const y = s + yi * step
+    const intercepts = []
+    for (const eedge of edges) {
+      if (y < eedge.yLo || y >= eedge.yHi) continue
+      const t = (y - eedge.y1) / (eedge.y2 - eedge.y1)
+      intercepts.push(eedge.x1 + t * (eedge.x2 - eedge.x1))
+    }
+    intercepts.sort((a, b) => a - b)
+    for (let k = 0; k + 1 < intercepts.length; k += 2) {
+      const xiStart = Math.max(0, Math.ceil((intercepts[k] - w) / step))
+      const xiEnd   = Math.min(cellsX - 1, Math.floor((intercepts[k + 1] - w) / step))
+      const off = yi * cellsX
+      for (let xi = xiStart; xi <= xiEnd; xi++) raw[off + xi] = 1
+    }
+  }
+
+  // Dilate by buffer radius (in cells).
+  const bufferCells = Math.max(0, Math.round(LAND_BUFFER_DEG / step))
+  if (bufferCells === 0) return { grid: raw, cellsX, cellsY }
+  const buffered = new Uint8Array(raw)
+  for (let yi = 0; yi < cellsY; yi++) {
+    for (let xi = 0; xi < cellsX; xi++) {
+      if (!raw[yi * cellsX + xi]) continue
+      const yLo = Math.max(0, yi - bufferCells)
+      const yHi = Math.min(cellsY - 1, yi + bufferCells)
+      const xLo = Math.max(0, xi - bufferCells)
+      const xHi = Math.min(cellsX - 1, xi + bufferCells)
+      for (let dy = yLo; dy <= yHi; dy++) {
+        const off = dy * cellsX
+        for (let dx = xLo; dx <= xHi; dx++) buffered[off + dx] = 1
+      }
+    }
+  }
+  return { grid: buffered, cellsX, cellsY }
 }
 
-// True if the point — or any of 8 ring points at LAND_BUFFER_DEG around it
-// — sits inside a land polygon. The ring acts as a Minkowski inflation of
-// the polygon set, which absorbs NE 10m's coastline generalization error.
-function isInBufferedLand(coord, polygons) {
-  if (anyPolyContains(polygons, coord)) return true
-  for (const [dx, dy] of BUFFER_RING_OFFSETS) {
-    if (anyPolyContains(polygons, [coord[0] + dx, coord[1] + dy])) return true
-  }
-  return false
-}
-
-// Lazy buffered-land test cached per coordinate hash. Hash precision (~1 m
-// at the equator) keeps the cache hit rate high during A* expansion.
-function makeLandTest(polygons) {
-  const cache = new Map()
+// Cell-index land lookup against a precomputed bitmap. Out-of-bbox
+// queries return false (treated as water) — A* clamps neighbours to
+// the bbox separately, so this only fires for samples beyond the edge.
+function makeLandTest(bitmap, bbox, step) {
+  const { grid, cellsX, cellsY } = bitmap
+  const [[w, s]] = bbox
   return (coord) => {
-    const key = `${coord[0].toFixed(5)},${coord[1].toFixed(5)}`
-    if (cache.has(key)) return cache.get(key)
-    const onLand = isInBufferedLand(coord, polygons)
-    cache.set(key, onLand)
-    return onLand
+    const xi = Math.round((coord[0] - w) / step)
+    const yi = Math.round((coord[1] - s) / step)
+    if (xi < 0 || xi >= cellsX || yi < 0 || yi >= cellsY) return false
+    return grid[yi * cellsX + xi] === 1
   }
 }
 
-// True if any sample along the open segment a-b lands in buffered land.
-// Sample interval is half the buffer so the segment can't slip past a
-// buffer-sized obstacle between samples. Used by the smoother in place of
-// `segmentCrossesPolygon` so its line-of-sight test honors the same
-// standoff distance the cell-level test enforces.
-function segmentInBufferedLand(a, b, polygons) {
+// True if any sample along the open segment a-b lands in buffered
+// land per the bitmap. Sample interval = step (one cell) so a
+// cell-sized obstacle can't slip past two samples.
+function segmentInLand(a, b, isLand, step) {
   const dx = b[0] - a[0], dy = b[1] - a[1]
   const len = Math.hypot(dx, dy)
-  const steps = Math.max(2, Math.ceil(len / (LAND_BUFFER_DEG / 2)))
-  for (let s = 0; s <= steps; s++) {
-    const t = s / steps
-    if (isInBufferedLand([a[0] + dx * t, a[1] + dy * t], polygons)) return true
+  const samples = Math.max(2, Math.ceil(len / step))
+  for (let s = 0; s <= samples; s++) {
+    const t = s / samples
+    if (isLand([a[0] + dx * t, a[1] + dy * t])) return true
   }
   return false
 }
@@ -221,18 +293,12 @@ const MAX_SMOOTHED_LEG_M = 1000
 // narrow channels, smaller = threads channels but clips more land.
 const LAND_BUFFER_DEG = 0.005
 
-// 8-neighbour ring offsets at LAND_BUFFER_DEG distance. Combined with the
-// center, a 9-point Minkowski-style inflation of the polygons.
-const BUFFER_RING_OFFSETS = (() => {
-  const r = LAND_BUFFER_DEG
-  const d = LAND_BUFFER_DEG * 0.7071  // ~r/√2 for diagonals
-  return [[r, 0], [-r, 0], [0, r], [0, -r], [d, d], [d, -d], [-d, d], [-d, -d]]
-})()
-
 // Greedy line-of-sight smoother. Drops intermediate waypoints whose direct
-// connection to a later waypoint stays out of buffered land AND whose
-// length stays under MAX_SMOOTHED_LEG_M.
-function smoothPath(coords, polygons) {
+// connection to a later waypoint stays out of (buffered) land AND whose
+// length stays under MAX_SMOOTHED_LEG_M. Both checks read the bitmap via
+// `isLand`, so smoothing a path of N waypoints is O(N²) bitmap lookups —
+// trivial relative to the rasterization cost.
+function smoothPath(coords, isLand, step) {
   if (coords.length <= 2) return coords
   const out = [coords[0]]
   let i = 0
@@ -241,7 +307,7 @@ function smoothPath(coords, polygons) {
     while (j > i + 1) {
       const a = coords[i], b = coords[j]
       if (distanceBetween(a, b) > MAX_SMOOTHED_LEG_M) { j--; continue }
-      if (!segmentInBufferedLand(a, b, polygons)) break
+      if (!segmentInLand(a, b, isLand, step)) break
       j--
     }
     out.push(coords[j])
@@ -312,7 +378,8 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
   }
 
   const step = chooseStep(bbox, gridSize)
-  const isLand = makeLandTest(polygons)
+  const bitmap = buildLandBitmap(polygons, bbox, step)
+  const isLand = makeLandTest(bitmap, bbox, step)
 
   let startIdx = toIndex(start, bbox, step)
   let endIdx   = toIndex(end,   bbox, step)
@@ -379,7 +446,7 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
   path[0] = start
   path[path.length - 1] = end
 
-  const smoothed = smoothPath(path, polygons)
+  const smoothed = smoothPath(path, isLand, step)
   let len = 0
   for (let i = 1; i < smoothed.length; i++) {
     len += distanceBetween(smoothed[i - 1], smoothed[i])
