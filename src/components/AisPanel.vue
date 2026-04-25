@@ -136,11 +136,11 @@ function formatLastFetch(date) {
       </div>
 
       <div class="toggle-row" @pointerdown.stop>
-        <span class="toggle-label">Heading tails</span>
+        <span class="toggle-label">Heading arrows</span>
         <button
           class="toggle-btn"
-          :class="{ 'toggle-btn--on': aisStore.aisBreadcrumbs }"
-          @click="aisStore.setAisBreadcrumbs(!aisStore.aisBreadcrumbs)"
+          :class="{ 'toggle-btn--on': aisStore.headingArrows }"
+          @click="aisStore.setHeadingArrows(!aisStore.headingArrows)"
         >
           <span class="toggle-knob" />
         </button>
@@ -156,12 +156,12 @@ function formatLastFetch(date) {
         </div>
 
         <div v-else-if="aisStore.lastFetch" class="status-ok">
-          <v-icon size="13" color="#ffeb3b">mdi-check-circle-outline</v-icon>
+          <v-icon size="13" class="text-medium-emphasis">mdi-check-circle-outline</v-icon>
           {{ aisStore.vesselCount }} vessels · {{ formatLastFetch(aisStore.lastFetch) }}
         </div>
 
         <div v-else-if="aisStore.loading" class="status-loading">
-          <v-progress-circular indeterminate size="12" width="1" color="#ffeb3b" />
+          <v-progress-circular indeterminate size="12" width="1" color="primary" />
           Fetching…
         </div>
 
@@ -219,8 +219,7 @@ function formatLastFetch(date) {
 }
 
 .status-dot--active {
-  background: #ffeb3b;
-  box-shadow: 0 0 4px rgba(38, 198, 218, 0.7);
+  background: rgb(var(--v-theme-primary));
 }
 
 .status-dot--loading {
@@ -333,7 +332,7 @@ function formatLastFetch(date) {
 }
 
 .toggle-btn--on {
-  background: #ffeb3b;
+  background: rgb(var(--v-theme-primary));
 }
 
 .toggle-knob {
