@@ -32,6 +32,7 @@ export const RELEASES = [
     ],
     fixed: [
       'Water-only routing: planner now stays a buffer offshore from the simplified coastline (Natural Earth 10m generalizes by ~250-500 m, so a buffer of ~555 m absorbs that error) and tightens the smoothing cap to 1 km per merged leg. Long across-the-peninsula clipping shouldn\'t recur; very narrow channels may now be refused — that\'s the trade-off.',
+      'Water-only routing no longer freezes the UI when the route bbox covers a continent-sized polygon. The planner now rasterizes the land polygons into a bitmap once (scanline rasterization with edge-bucket pre-filter) and runs A* + smoothing on the bitmap, replacing what used to be hundreds of thousands of `pointInPolygon` calls per request.',
       'Bloodhound, perimeter, bullseye, and annotations: turning the tool off via the toolbar button now drops the crosshair cursor and exits selection mode, matching the panel\'s close button.',
       'Bloodhounds and perimeters now auto-remove when their CoT track or AIS vessel anchor is removed or pruned, instead of freezing at the last-known position. Hiding a track via the track-list eye icon still keeps the bloodhound/perimeter alive — visibility is separate from deletion.',
       'Route waypoint append now keeps the crosshair cursor while the mouse moves over other map features (AIS vessels, draw shapes, etc.) instead of reverting to a pointer.',
