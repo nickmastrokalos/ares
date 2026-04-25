@@ -3,16 +3,21 @@
 //
 // Approach: grid-based A* over a bbox containing both endpoints, with land
 // cells (centers inside any land polygon) marked impassable. Final path is
-// smoothed by greedy line-of-sight to drop redundant waypoints. The 10m
-// land dataset is dynamic-imported on first use so the 9.7 MB asset isn't
-// part of the initial bundle.
+// smoothed by greedy line-of-sight to drop redundant waypoints. The land
+// dataset is dynamic-imported on first use so the asset isn't part of the
+// initial bundle.
+//
+// Land polygons: OpenStreetMap simplified-land-polygons (osmdata.openstreet
+// map.de), reprojected to WGS84. ~58 MB, 67k polygons. Significantly finer
+// than Natural Earth 10m at coastal scales — captures small inlets, barrier
+// islands, and similar features that NE 10m generalizes away. © OSM
+// contributors, ODbL license.
 //
 // Caveats:
 //   - Planar lng/lat distance metric. Fine at coastal scales; degrades for
 //     ocean-crossing routes near the poles or the antimeridian.
-//   - Lakes are still "land" in Natural Earth's land file (which models
-//     "land = not ocean"). For inland lake routing this would produce odd
-//     results; out of scope here.
+//   - Inland lakes are not in this dataset (it models the ocean coastline,
+//     so a route through a continent is unconstrained — out of scope).
 
 import {
   pointInPolygon,
@@ -28,7 +33,7 @@ let polygonCache = null     // [{ geometry, bbox: [[w,s],[e,n]] }, …]
 async function loadAllPolygons() {
   if (polygonCache) return polygonCache
   if (!landPromise) {
-    landPromise = import('@/assets/ne-land-10m.json').then(m => m.default ?? m)
+    landPromise = import('@/assets/osm-land-simplified.json').then(m => m.default ?? m)
   }
   const fc = await landPromise
   polygonCache = []
