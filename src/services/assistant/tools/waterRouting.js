@@ -6,12 +6,35 @@
 // `map_draw_route_water_only`           — write: plans a polyline from start
 //                                         to end that stays in water.
 // `map_draw_route_avoiding_features`    — write: plans a polyline from start
-//                                         to end that does not enter the
-//                                         supplied user-drawn features
-//                                         (keepouts, no-go boxes, etc.).
+//                                         to end with stacked constraints —
+//                                         avoid named features, pass
+//                                         through named features (one
+//                                         waypoint at each shape's center,
+//                                         in order), and/or avoid land.
 
-import { checkRouteCrossesLand, planWaterRoute, planRouteAvoidingObstacles } from '@/services/landRouting'
+import { checkRouteCrossesLand, planWaterRoute, planRouteAvoidingObstacles, planRouteThroughVias } from '@/services/landRouting'
 import { nameOrDefault } from '@/services/featureNaming'
+import { geometryBounds } from '@/services/geometry'
+
+// "Go through" point for a feature: most natural single waypoint that
+// puts a route inside the shape. Circles / ellipses / sectors store
+// their explicit center; boxes store sw/ne; polygons fall back to bbox
+// midpoint. Bbox midpoint can lie outside very concave polygons (e.g.
+// L-shapes) but works for every shape the avoid-features tool already
+// accepts.
+function shapeCenter(geometry, properties) {
+  if (Array.isArray(properties?.center) && properties.center.length === 2) return properties.center
+  if (Array.isArray(properties?.sw) && Array.isArray(properties?.ne)) {
+    return [
+      (properties.sw[0] + properties.ne[0]) / 2,
+      (properties.sw[1] + properties.ne[1]) / 2
+    ]
+  }
+  const bounds = geometryBounds(geometry)
+  if (!bounds) return null
+  const [[w, s], [e, n]] = bounds
+  return [(w + e) / 2, (s + n) / 2]
+}
 
 const DEFAULT_FEATURE_COLOR = '#ffffff'
 
@@ -96,7 +119,7 @@ export function waterRoutingTools({ featuresStore }) {
 
     {
       name: 'map_draw_route_avoiding_features',
-      description: 'Plan a route from `start` to `end` that does not enter the bounding shape of any feature in `avoid_feature_ids` (keepout boxes, no-go polygons / circles / sectors, etc.) AND optionally also stays off land, then draw it on the map. Use this whenever the user asks to avoid one or more named areas — and set `avoid_land: true` if they also ask the route to stay over water / not cross land. Resolve area names to ids first via `map_find_entity`. The avoided features must be polygon-shaped — `polygon`, `box`, `circle`, `ellipse`, or `sector`. Other types (point, line, route, manual-track) cannot be used as obstacles and produce an error. Optional `buffer_meters` adds a standoff distance from each user obstacle. PREFER THIS TOOL OVER `map_draw_route_water_only` whenever the user has named a specific area to avoid, even if they also ask to avoid land — set both `avoid_feature_ids` and `avoid_land: true` in a single call. Use `map_draw_route_water_only` only when there are no named areas to avoid.',
+      description: 'Plan and draw a route from `start` to `end` with one or more constraints stacked: AVOID named features (`avoid_feature_ids`, e.g. keepout boxes / no-go polygons), AVOID land (`avoid_land: true`), and/or PASS THROUGH named features (`via_feature_ids`, e.g. "go through Polygon 1"). Each via feature contributes one intermediate waypoint at its center, in the order given, so the route reads SP → via₁ → via₂ → … → EP, with each leg avoiding the same obstacles. Resolve area names to ids first via `map_find_entity`. Both via and avoid features must be polygon-shaped — `polygon`, `box`, `circle`, `ellipse`, or `sector`. Other types (point, line, route, manual-track) produce an error. Optional `buffer_meters` adds a standoff distance from each AVOIDED user feature (no effect on via features or land — land has its own ~555 m coastline buffer). PREFER THIS TOOL whenever the user names ANY area to avoid OR pass through; only fall back to `map_draw_route_water_only` when there are no named areas at all.',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -112,54 +135,81 @@ export function waterRoutingTools({ featuresStore }) {
           avoid_feature_ids: {
             type: 'array',
             items: { type: 'integer' },
-            description: 'Mission feature ids to treat as obstacles. Resolve names to ids via `map_find_entity` first. Pass an empty array if avoiding land only (and prefer `map_draw_route_water_only` in that case).'
+            description: 'Mission feature ids to treat as obstacles (route will not enter them). Resolve names to ids via `map_find_entity` first. Pass an empty array (or omit) if there are no named keepouts.'
+          },
+          via_feature_ids: {
+            type: 'array',
+            items: { type: 'integer' },
+            description: 'Mission feature ids the route must pass through (in the order given). Each adds one intermediate waypoint at the feature\'s center. Use when the user says "through", "via", "stopping at", or similar. Resolve names to ids via `map_find_entity` first.'
           },
           avoid_land: {
             type: 'boolean',
-            description: 'Also avoid bundled coastline data (Natural Earth 10m). Set true when the user asks to stay over water / not cross land. Default false.'
+            description: 'Also avoid bundled coastline data (Natural Earth 10m). Set true when the user asks the route to stay over water / not cross land. Default false.'
           },
           buffer_meters: {
             type: 'number',
-            description: 'Optional standoff distance from each user-feature obstacle in meters. Default 0 (route may hug obstacle edges). Land polygons get their own ~555 m coastline buffer regardless of this.'
+            description: 'Optional standoff distance from each AVOIDED user-feature obstacle in meters. Default 0 (route may hug obstacle edges). Has no effect on via features or land.'
           },
           name:  { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the route. Otherwise OMIT — the system auto-generates a default like `route-a3f9`. Do NOT invent descriptive names from context.' },
           color: { type: 'string', description: 'Optional hex color. Defaults to white.' }
         },
-        required: ['start', 'end', 'avoid_feature_ids']
+        required: ['start', 'end']
       },
-      previewRender({ start, end, avoid_feature_ids, avoid_land, name }) {
+      previewRender({ start, end, avoid_feature_ids, via_feature_ids, avoid_land, name }) {
         const label = name ? `"${name}" · ` : ''
         const fmt = ([x, y]) => `${y.toFixed(4)}, ${x.toFixed(4)}`
         const parts = []
-        if (avoid_feature_ids?.length) {
-          parts.push(avoid_feature_ids.length === 1 ? '1 obstacle' : `${avoid_feature_ids.length} obstacles`)
+        if (via_feature_ids?.length) {
+          parts.push(via_feature_ids.length === 1 ? 'via 1 feature' : `via ${via_feature_ids.length} features`)
         }
-        if (avoid_land) parts.push('land')
-        const what = parts.length ? `avoiding ${parts.join(' + ')}` : ''
-        return `${label}Route ${what} · ${fmt(start)} → ${fmt(end)}`
+        if (avoid_feature_ids?.length) {
+          parts.push(avoid_feature_ids.length === 1 ? 'avoiding 1 obstacle' : `avoiding ${avoid_feature_ids.length} obstacles`)
+        }
+        if (avoid_land) parts.push('avoiding land')
+        const what = parts.length ? parts.join(' · ') : 'direct'
+        return `${label}Route · ${what} · ${fmt(start)} → ${fmt(end)}`
       },
-      async handler({ start, end, avoid_feature_ids = [], avoid_land = false, buffer_meters = 0, name, color = DEFAULT_FEATURE_COLOR }) {
-        const obstacles = []
-        for (const fid of avoid_feature_ids) {
+      async handler({ start, end, avoid_feature_ids = [], via_feature_ids = [], avoid_land = false, buffer_meters = 0, name, color = DEFAULT_FEATURE_COLOR }) {
+        const SUPPORTED = new Set(['polygon', 'box', 'circle', 'ellipse', 'sector'])
+
+        function resolvePolygonFeature(fid, role) {
           const row = featuresStore.features.find(f => f.id === fid)
-          if (!row) return { error: `Feature ${fid} not found.` }
-          const SUPPORTED = new Set(['polygon', 'box', 'circle', 'ellipse', 'sector'])
+          if (!row) return { error: `Feature ${fid} (${role}) not found.` }
           if (!SUPPORTED.has(row.type)) {
-            return { error: `Feature ${fid} is type "${row.type}"; only polygon / box / circle / ellipse / sector can be used as obstacles.` }
+            return { error: `Feature ${fid} (${role}) is type "${row.type}"; only polygon / box / circle / ellipse / sector are accepted.` }
           }
           const geom = JSON.parse(row.geometry)
           if (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon') {
-            return { error: `Feature ${fid} has unexpected geometry type "${geom.type}".` }
+            return { error: `Feature ${fid} (${role}) has unexpected geometry type "${geom.type}".` }
           }
-          obstacles.push(geom)
+          return { row, geom, props: JSON.parse(row.properties) }
         }
-        if (obstacles.length === 0 && !avoid_land) {
-          return { error: 'Pass at least one feature id in `avoid_feature_ids`, or set `avoid_land: true`.' }
+
+        const obstacles = []
+        for (const fid of avoid_feature_ids) {
+          const r = resolvePolygonFeature(fid, 'avoid')
+          if (r.error) return { error: r.error }
+          obstacles.push(r.geom)
         }
-        // buffer_meters → degrees: planar 1° ≈ 111 km. Adequate at coastal
-        // scales for the buffer-as-standoff use case.
+
+        const vias = []
+        for (const fid of via_feature_ids) {
+          const r = resolvePolygonFeature(fid, 'via')
+          if (r.error) return { error: r.error }
+          const c = shapeCenter(r.geom, r.props)
+          if (!c) return { error: `Could not determine a center point for via feature ${fid}.` }
+          vias.push(c)
+        }
+
+        if (obstacles.length === 0 && vias.length === 0 && !avoid_land) {
+          return { error: 'Pass at least one of `avoid_feature_ids`, `via_feature_ids`, or `avoid_land: true` — otherwise this is just a direct route and `map_draw_route` should be used instead.' }
+        }
+
+        // buffer_meters → degrees: planar 1° ≈ 111 km.
         const bufferDeg = (Number(buffer_meters) || 0) / 111000
-        const plan = await planRouteAvoidingObstacles(start, end, obstacles, { bufferDeg, includeLand: avoid_land })
+        const plan = vias.length
+          ? await planRouteThroughVias(start, end, vias, obstacles, { bufferDeg, includeLand: avoid_land })
+          : await planRouteAvoidingObstacles(start, end, obstacles, { bufferDeg, includeLand: avoid_land })
         if (!plan.ok) return { error: plan.reason }
         const coords = plan.coordinates
         const geometry = { type: 'LineString', coordinates: coords }
@@ -175,6 +225,7 @@ export function waterRoutingTools({ featuresStore }) {
           waypointCount: coords.length,
           lengthMeters: plan.lengthMeters,
           avoidedFeatureCount: obstacles.length,
+          viaFeatureCount: vias.length,
           avoidedLand: avoid_land
         }
       }
