@@ -31,6 +31,7 @@ export const RELEASES = [
       'Assistant input field is taller by default (two rows) and has a bit more padding so prompts feel less cramped.'
     ],
     fixed: [
+      'Water-only routing: planner now stays a buffer offshore from the simplified coastline (Natural Earth 10m generalizes by ~250-500 m, so a buffer of ~555 m absorbs that error) and tightens the smoothing cap to 1 km per merged leg. Long across-the-peninsula clipping shouldn\'t recur; very narrow channels may now be refused — that\'s the trade-off.',
       'Bloodhound, perimeter, bullseye, and annotations: turning the tool off via the toolbar button now drops the crosshair cursor and exits selection mode, matching the panel\'s close button.',
       'Bloodhounds and perimeters now auto-remove when their CoT track or AIS vessel anchor is removed or pruned, instead of freezing at the last-known position. Hiding a track via the track-list eye icon still keeps the bloodhound/perimeter alive — visibility is separate from deletion.',
       'Route waypoint append now keeps the crosshair cursor while the mouse moves over other map features (AIS vessels, draw shapes, etc.) instead of reverting to a pointer.',
