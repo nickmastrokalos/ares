@@ -283,14 +283,25 @@ function toggleBloodhoundPanel() {
 }
 
 function togglePerimeterPanel() {
+  // Mirror the panel's X-button close: drop selection mode if we're closing
+  // while it's on, so the crosshair cursor doesn't stick.
+  if (perimeterPanelOpen.value && perimeterSelecting.value) {
+    perimeterApi.toggleSelecting()
+  }
   perimeterPanelOpen.value = !perimeterPanelOpen.value
 }
 
 function toggleBullseyePanel() {
+  if (bullseyePanelOpen.value && bullseyeSelecting.value) {
+    bullseyeApi.toggleSelecting()
+  }
   bullseyePanelOpen.value = !bullseyePanelOpen.value
 }
 
 function toggleAnnotationsPanel() {
+  if (annotationsPanelOpen.value && annotationSelecting.value) {
+    annotationsApi.toggleSelecting()
+  }
   annotationsPanelOpen.value = !annotationsPanelOpen.value
 }
 

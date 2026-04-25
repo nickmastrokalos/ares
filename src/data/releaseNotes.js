@@ -29,7 +29,7 @@ export const RELEASES = [
       'Track-card speed display (CoT and manual track panels) now honors the Distance Units setting; the manual-track inline edit input adapts placeholder + parsing to the current unit.'
     ],
     fixed: [
-      'Bloodhound: turning the tool off via the toolbar button now drops the crosshair cursor and exits selection mode, matching the panel\'s close button.'
+      'Bloodhound, perimeter, bullseye, and annotations: turning the tool off via the toolbar button now drops the crosshair cursor and exits selection mode, matching the panel\'s close button.'
     ]
   },
   {
