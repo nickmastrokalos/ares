@@ -298,13 +298,16 @@ export function useMapPerimeters(getMap) {
   function reresolveAll() {
     if (!perimeters.size) return
 
-    // 1. Drop perimeters whose feature owner was deleted. CoT/AIS disappearance
-    //    freezes at last-known coord — matches bloodhound's compromise.
+    // 1. Drop perimeters whose owner anchor disappeared — deleted manual
+    //    feature, removed/stale-pruned CoT track, or aged-out AIS vessel.
+    //    Mirrors bloodhound; hidden anchors stay (visibility != removal).
     for (const [ownerKey, p] of [...perimeters]) {
-      if (p.owner.kind === 'feature' &&
-          !featuresStore.features.some(f => f.id === p.owner.featureId)) {
-        perimeters.delete(ownerKey)
-      }
+      const o = p.owner
+      const gone =
+        (o.kind === 'feature' && !featuresStore.features.some(f => f.id === o.featureId)) ||
+        (o.kind === 'cot'     && !tracksStore.tracks.get(o.uid)) ||
+        (o.kind === 'ais'     && !aisStore.vessels.get(o.mmsi))
+      if (gone) perimeters.delete(ownerKey)
     }
 
     // 2. Re-resolve owner coord.

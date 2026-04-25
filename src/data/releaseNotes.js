@@ -29,7 +29,8 @@ export const RELEASES = [
       'Track-card speed display (CoT and manual track panels) now honors the Distance Units setting; the manual-track inline edit input adapts placeholder + parsing to the current unit.'
     ],
     fixed: [
-      'Bloodhound, perimeter, bullseye, and annotations: turning the tool off via the toolbar button now drops the crosshair cursor and exits selection mode, matching the panel\'s close button.'
+      'Bloodhound, perimeter, bullseye, and annotations: turning the tool off via the toolbar button now drops the crosshair cursor and exits selection mode, matching the panel\'s close button.',
+      'Bloodhounds and perimeters now auto-remove when their CoT track or AIS vessel anchor is removed or pruned, instead of freezing at the last-known position. Hiding a track via the track-list eye icon still keeps the bloodhound/perimeter alive — visibility is separate from deletion.'
     ]
   },
   {

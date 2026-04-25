@@ -49,7 +49,7 @@ Owner refs are typed, resolved to coordinates on every source-store tick:
 
 `useMapPerimeters` installs three watchers — one each on `tracksStore.tracks`, `aisStore.vessels`, `featuresStore.features`. Any one firing triggers `reresolveAll()`, which:
 
-1. **Drops** any perimeter whose feature owner was deleted (same authoritative-deletion rule as bloodhound). CoT / AIS owner disappearance does **not** drop the perimeter — the ring freezes at the last-known coord, matching the compromise in bloodhound for noisy AIS feeds and pruned CoT tracks.
+1. **Drops** any perimeter whose owner anchor is gone — deleted manual / draw feature, removed or stale-pruned CoT track, or aged-out AIS vessel. Hidden anchors (track-list eye toggle) are still in their store and do **not** trigger removal — visibility is separate from deletion. Mirrors the bloodhound rule.
 2. **Re-resolves** each surviving owner's `coord`.
 3. **Recomputes breaches** for every alert-enabled perimeter (see below).
 4. **Rebuilds** the rings and halos sources in one batch.
