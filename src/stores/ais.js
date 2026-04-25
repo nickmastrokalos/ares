@@ -2,7 +2,16 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getStore } from '@/plugins/store'
+import { destinationPoint } from '@/services/geometry'
 import { useSettingsStore } from '@/stores/settings'
+
+// Knots → metres per second.
+const KTS_TO_MPS = 1852 / 3600
+
+// Below this speed the backward heading-trail is suppressed: AIS COG
+// values are noisy at near-zero speed and the tail would jitter
+// directionally. Mirrors the prior 0.2 kt floor.
+const AIS_MIN_MOVING_KTS = 0.2
 
 export const useAisStore = defineStore('ais', () => {
   const settingsStore = useSettingsStore()
@@ -20,16 +29,10 @@ export const useAisStore = defineStore('ais', () => {
   const headingArrows = ref(false)
 
   // ---- Runtime state ----
-  const vessels    = ref(new Map())  // mmsi string → raw item (with `history`)
+  const vessels    = ref(new Map())  // mmsi string → raw item
   const lastFetch  = ref(null)       // Date | null
   const fetchError = ref(null)       // string | null
   const loading    = ref(false)
-
-  // Maximum history window kept in memory per vessel. The shared breadcrumb
-  // length setting controls how much of this is *shown* — we keep more so
-  // the user can extend the window without losing data. Mirrors the CoT
-  // history strategy in `stores/tracks.js`.
-  const MAX_HISTORY_MS = 30 * 60 * 1000
 
   // ---- Computed ----
 
@@ -52,24 +55,35 @@ export const useAisStore = defineStore('ais', () => {
       : []
   }))
 
-  // Vessel position history rendered as fading polylines, gated by the
-  // shared `trackBreadcrumbs` toggle and clipped to the shared
-  // `trackBreadcrumbLength` (seconds). One feature per vessel with at
-  // least two history points within the window.
+  // Synthetic heading breadcrumb: a line projected backward from each
+  // vessel's current position along the reverse of its COG. The visual
+  // length is derived from the shared `trackBreadcrumbLength` (seconds)
+  // multiplied by the vessel's SOG, so faster vessels get proportionally
+  // longer tails for the same setting. We don't accumulate real position
+  // history for AIS — fetch is too sparse (~30 s) to be useful as a
+  // history sample, and the COG-based projection conveys "where this
+  // vessel has been recently, assuming constant heading" cleanly.
+  // Vessels below `AIS_MIN_MOVING_KTS` or without a valid COG are
+  // suppressed.
   const breadcrumbCollection = computed(() => {
     if (!settingsStore.trackBreadcrumbs || !visible.value) {
       return { type: 'FeatureCollection', features: [] }
     }
-    const cutoff = Date.now() - settingsStore.trackBreadcrumbLength * 1000
+    const seconds = Math.max(0, settingsStore.trackBreadcrumbLength)
+    if (seconds <= 0) return { type: 'FeatureCollection', features: [] }
     const features = []
     for (const v of vessels.value.values()) {
-      const coords = (v.history ?? [])
-        .filter(h => h.t >= cutoff)
-        .map(h => [h.lon, h.lat])
-      if (coords.length < 2) continue
+      const sog = Number(v.SOG)
+      if (!Number.isFinite(sog) || sog < AIS_MIN_MOVING_KTS) continue
+      if (v.COG == null || v.COG < 0) continue
+      const lengthMeters = sog * KTS_TO_MPS * seconds
+      if (lengthMeters <= 0) continue
+      const reverseCog = (v.COG + 180) % 360
+      const from = [v.longitude, v.latitude]
+      const to   = destinationPoint(from, lengthMeters, reverseCog)
       features.push({
         type: 'Feature',
-        geometry: { type: 'LineString', coordinates: coords },
+        geometry: { type: 'LineString', coordinates: [from, to] },
         properties: { mmsi: v.mmsi }
       })
     }
@@ -140,22 +154,11 @@ export const useAisStore = defineStore('ais', () => {
         minLat, maxLat, minLon, maxLon
       })
 
-      const now = Date.now()
-      const cutoff = now - MAX_HISTORY_MS
-      const previous = vessels.value
       const next = new Map()
       for (const item of data.items ?? []) {
-        if (item.mmsi == null || item.latitude == null || item.longitude == null) continue
-        const mmsi = String(item.mmsi)
-        // Carry forward any prior history for this vessel, append the
-        // current position, prune anything older than MAX_HISTORY_MS. If
-        // the vessel left the bbox between fetches its history is lost —
-        // matches the CoT behaviour and is acceptable for now.
-        const prior = previous.get(mmsi)
-        const history = prior?.history ? [...prior.history] : []
-        history.push({ lon: item.longitude, lat: item.latitude, t: now })
-        while (history.length > 0 && history[0].t < cutoff) history.shift()
-        next.set(mmsi, { ...item, history })
+        if (item.mmsi != null && item.latitude != null && item.longitude != null) {
+          next.set(String(item.mmsi), item)
+        }
       }
       vessels.value   = next
       lastFetch.value = new Date()
