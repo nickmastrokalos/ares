@@ -5,7 +5,6 @@ Running backlog for Ares. Not a strict roadmap — reorder as priorities shift. 
 ## Backlog — feature ideas
 
 - **Track prediction ghosts** — project each CoT / AIS / manual track forward by its current course + speed and render a semi-transparent "ghost" of where it'll be in N seconds. Per-track toggle, global time horizon. Related to `useMapGhosts` (existing, different feature). The route planner already projects AIS vessels into corridor obstacles (`vesselObstaclePolygon` in `tools/waterRouting.js`); the math + helpers (`destinationPoint`, `corridorPolygon`) can be reused for the visual layer.
-- **CoT track history trails** — render the recent path of each live CoT track as a fading polyline. **Design note** (already in memory): trail length scales with the track's current speed — faster tracks get longer trails so the visual span of the trail represents roughly the same time window.
 - **Replay / time scrub** — record incoming CoT + AIS positions over time and let the operator scrub a timeline to replay movement. Separate store for historical positions; draw layer in a "replay" styling.
 - **Speed unit: m/s setting** — `formatSpeed` / `speedUnitLabel` in `src/services/geometry.js` support `metric` (km/h), `nautical` (kts), `statute` (mph). Track cards already show m/s in parens alongside the unit-formatted value (shipped). The remaining work is making `m/s` a fourth choice in the setting itself, and the cleaner shape is splitting `distanceUnits` into separate `distanceUnits` + `speedUnits` so the operator can pick kts for speed with km for distance.
 
