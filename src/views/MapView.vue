@@ -177,7 +177,7 @@ const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
 const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
 const suppressEntityClicks = computed(
-  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || placing.value != null
+  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || appending.value || placing.value != null
 )
 const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, draggingTrack, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
 // Back-fill the proxy ref handed to bullseye/annotations at construction —
