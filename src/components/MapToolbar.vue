@@ -3,7 +3,7 @@ import { useDisplay } from 'vuetify'
 
 const { mdAndUp, smAndDown } = useDisplay()
 
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-bullseye', 'toggle-annotations', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io', 'snapshot'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-bullseye', 'toggle-annotations', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io', 'snapshot', 'capture-video'])
 
 const props = defineProps({
   drawPanelOpen: Boolean,
@@ -20,9 +20,17 @@ const props = defineProps({
   ghostPanelOpen: Boolean,
   interceptPanelOpen: Boolean,
   aisPanelOpen: Boolean,
+  recordingVideo: Boolean,
   missionName: { type: String, default: '' },
   pluginButtons: { type: Array, default: () => [] }
 })
+
+const VIDEO_DURATIONS = [
+  { label: '5 seconds',  seconds:  5 },
+  { label: '10 seconds', seconds: 10 },
+  { label: '30 seconds', seconds: 30 },
+  { label: '60 seconds', seconds: 60 }
+]
 
 // True when any button in that group is active — used to highlight the group activator in collapsed mode.
 const annotationActive = () => props.drawPanelOpen || props.layersPanelOpen || props.routing || props.trackDropPanelOpen || props.trackListOpen || props.annotationsPanelOpen
@@ -342,6 +350,32 @@ const feedsActive      = () => props.aisPanelOpen
         </template>
       </v-tooltip>
 
+      <v-menu location="bottom" :close-on-content-click="true" :disabled="recordingVideo">
+        <template #activator="{ props: menuProps }">
+          <v-tooltip :text="recordingVideo ? 'Recording…' : 'Video clip'" location="bottom">
+            <template #activator="{ props: tip }">
+              <v-btn
+                v-bind="{ ...tip, ...menuProps }"
+                :icon="recordingVideo ? 'mdi-record-circle-outline' : 'mdi-video-outline'"
+                size="small"
+                :color="recordingVideo ? 'error' : undefined"
+                :class="recordingVideo ? 'video-recording' : 'text-medium-emphasis'"
+                :disabled="recordingVideo"
+              />
+            </template>
+          </v-tooltip>
+        </template>
+        <v-list density="compact">
+          <v-list-item
+            v-for="opt in VIDEO_DURATIONS"
+            :key="opt.seconds"
+            @click="emit('capture-video', { durationSeconds: opt.seconds })"
+          >
+            <v-list-item-title class="text-body-2">{{ opt.label }}</v-list-item-title>
+          </v-list-item>
+        </v-list>
+      </v-menu>
+
       <v-divider vertical class="mx-2 toolbar-divider" />
 
       <v-tooltip text="Listeners" location="bottom">
@@ -377,5 +411,15 @@ const feedsActive      = () => props.aisPanelOpen
 
 .toolbar-divider {
   border-color: rgba(var(--v-theme-on-surface), 0.7) !important;
+}
+
+/* Keep the video button fully visible (not muted by the disabled state)
+   while it's in its "recording" red-circle look — the colour change is
+   the whole point of the state, so faded red would defeat it. */
+.video-recording.v-btn--disabled {
+  opacity: 1 !important;
+}
+.video-recording.v-btn--disabled :deep(.v-icon) {
+  color: rgb(var(--v-theme-error)) !important;
 }
 </style>
