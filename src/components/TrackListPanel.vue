@@ -119,6 +119,20 @@ async function removeTrack(track) {
   }
 }
 
+function isHidden(track) {
+  return track.kind === 'cot'
+    ? tracksStore.hiddenIds.has(track.id)
+    : featuresStore.hiddenManualIds.has(track.id)
+}
+
+function toggleVisibility(track) {
+  if (track.kind === 'cot') {
+    tracksStore.toggleVisibility(track.id)
+  } else {
+    featuresStore.toggleManualVisibility(track.id)
+  }
+}
+
 onMounted(() => {
   pos.value = { x: 12, y: 80 }
   positioned.value = true
@@ -257,6 +271,20 @@ onMounted(() => {
               class="text-medium-emphasis row-btn"
               @pointerdown.stop
               @click.stop="centerOnTrack(track)"
+            />
+          </template>
+        </v-tooltip>
+
+        <v-tooltip :text="isHidden(track) ? 'Show' : 'Hide'" location="top">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              :icon="isHidden(track) ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+              size="x-small"
+              variant="text"
+              class="text-medium-emphasis row-btn"
+              @pointerdown.stop
+              @click.stop="toggleVisibility(track)"
             />
           </template>
         </v-tooltip>

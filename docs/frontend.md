@@ -347,6 +347,10 @@ When adding a new core tool, place it in the appropriate group in *both* the `v-
 
 Third-party plugins extend the app with new toolbar buttons and mission data automation. The full authoring guide — including the plugin contract, `api` surface, lifecycle, and trust model — is in [plugins.md](./plugins.md). Relevant implementation files: `src/composables/usePluginRegistry.js`, `src/services/pluginLoader.js`, `src-tauri/src/plugins.rs`, `src/components/MapToolbar.vue` (plugin-buttons slot), `src/components/SettingsDialog.vue` (Plugins tab).
 
+## Release notes
+
+Per-version release notes are bundled with the app and surfaced in two places: the **Releases** tab on the sidebar Settings page (`SettingsView.vue`), and a "What's new" overlay shown automatically on the first launch after a version bump. Authoring and detection logic are documented in [release-notes.md](./release-notes.md). Single source of truth: `src/data/releaseNotes.js`.
+
 ## Scenes
 
 The Scenes dashboard engine is documented in [scenes.md](./scenes.md). Key concepts:

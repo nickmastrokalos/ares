@@ -89,7 +89,7 @@ A manual track is a `features` table row with `type = 'manual-track'` and `Point
 | `cotType` | no | Full CoT type string (e.g. `a-f-G-U-C-I`). `null` = untyped track |
 | `hae` | no | Altitude in meters |
 | `course` | no | Heading 0–359° |
-| `speed` | no | Speed in knots |
+| `speed` | no | Speed in knots (storage). The `ManualTrackPanel` display and edit input both follow the user's `distanceUnits` setting — conversion happens at the boundary, storage stays in knots. |
 
 Manual tracks are not exported via CoT or KML (see `frontend.md` — Import / Export).
 
@@ -145,7 +145,7 @@ Sections:
 
 - **Identity** — callsign (inline rename), affiliation dot + label, TYPE row with inline `TrackTypePicker` that expands on click.
 - **Position** — editable `CoordInput` bound to the feature geometry. Sub-fields follow the user's `coordinateFormat` (DD / DMS / MGRS) and commit on Enter / blur. During an on-map drag the input reflects the live cursor position — `useMapManualTracks` exposes a `draggingTrack` ref (`{ _dbId, lng, lat }`) that `MapView.vue` provides as `draggingTrack`; the panel injects it and watches to update its coord on every frame without hitting the store. On drag release the real commit happens once and the input snaps back to the stored value.
-- **Attributes** — altitude (m), heading (°, with compass rose label), speed (kts). All three are inline-editable.
+- **Attributes** — altitude (m), heading (°, with compass rose label), speed (formatted via `formatSpeed` per the user's `distanceUnits` setting, with the m/s equivalent appended in parens — e.g. `24.3 kts (12.5 m/s)`). All three are inline-editable. The speed input adapts its placeholder + parsing to the current unit; the value persists as knots.
 
 Writes go through `featuresStore.updateFeature()`. Delete removes the feature and closes the panel.
 
@@ -158,8 +158,17 @@ Floating draggable panel showing tracks from **both** systems in one list.
   - Type pills — All / COT / MAN. Switches between feed tracks, manual tracks, or both.
   - Callsign search — case-insensitive substring match on `callsign`. Updates live as you type.
   - Affiliation toggles — click a colored dot to include/exclude that affiliation. All active by default.
-- **Per-row actions:** center map on track (`flyToGeometry`), open detail panel (`openManualTrackPanel` or `tracksStore.openPanel`), remove/dismiss.
+- **Per-row actions:** center map on track (`flyToGeometry`), toggle map visibility (eye icon), open detail panel (`openManualTrackPanel` or `tracksStore.openPanel`), remove/dismiss.
 - Header count shows `{visible} / {total}` when any filter is active, plain total otherwise.
+
+#### Per-track map visibility
+
+A hidden track is removed from the map (points, symbols, labels, and — for CoT — breadcrumb trail) but remains in the list so the user can show it again. Visibility is session-only — no persistence — and is stored as a `Set` of ids in the owning store:
+
+- `useTracksStore.hiddenIds` — CoT uids. `toggleVisibility(uid)` flips state. Cleared for a uid when `removeTrack()` runs (and wholesale by `clearTracks()`) so a re-appearing uid doesn't stay hidden.
+- `useFeaturesStore.hiddenManualIds` — manual-track feature ids. `toggleManualVisibility(id)` flips state. Cleared for an id when `removeFeatures()` runs.
+
+The filtering happens at the GeoJSON-source layer — `tracksStore.trackCollection`, the `breadcrumbCollection` computed in `useMapTracks`, and `manualTrackCollection` in `useMapManualTracks` all skip hidden ids. No MapLibre layer filters are involved.
 
 ### Rendering pipeline — `useMapManualTracks.js`
 

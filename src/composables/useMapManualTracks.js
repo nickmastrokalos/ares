@@ -53,7 +53,7 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
   const manualTrackCollection = computed(() => ({
     type: 'FeatureCollection',
     features: featuresStore.features
-      .filter(f => f.type === 'manual-track')
+      .filter(f => f.type === 'manual-track' && !featuresStore.hiddenManualIds.has(f.id))
       .map(f => {
         const props = JSON.parse(f.properties)
         const cotType = props.cotType ?? null

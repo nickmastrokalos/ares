@@ -19,7 +19,10 @@ const DEFAULTS = {
   enabledPlugins: [],         // plugin ids the operator has opted into
   assistantProvider: 'anthropic',
   assistantModel: 'claude-sonnet-4-6',
-  assistantApiKey: ''
+  assistantApiKey: '',
+  // Last app version the user dismissed the "what's new" overlay for.
+  // null = never seen (i.e. fresh install) — see App.vue mount logic.
+  lastSeenVersion: null
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -38,6 +41,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const assistantProvider = ref(DEFAULTS.assistantProvider)
   const assistantModel = ref(DEFAULTS.assistantModel)
   const assistantApiKey = ref(DEFAULTS.assistantApiKey)
+  const lastSeenVersion = ref(DEFAULTS.lastSeenVersion)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
   // without a growing switch statement as we add more settings.
@@ -54,7 +58,8 @@ export const useSettingsStore = defineStore('settings', () => {
     enabledPlugins,
     assistantProvider,
     assistantModel,
-    assistantApiKey
+    assistantApiKey,
+    lastSeenVersion
   }
 
   // Promise cache: `load()` may be called from multiple places during boot
@@ -129,6 +134,7 @@ export const useSettingsStore = defineStore('settings', () => {
     assistantProvider,
     assistantModel,
     assistantApiKey,
+    lastSeenVersion,
     load,
     setSetting,
     addCotListener,

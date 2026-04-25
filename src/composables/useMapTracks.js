@@ -55,6 +55,7 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
 
     const features = []
     for (const t of tracksStore.tracks.values()) {
+      if (tracksStore.hiddenIds.has(t.uid)) continue
       const coords = (t.history ?? [])
         .filter(h => h.t >= cutoff)
         .map(h => [h.lon, h.lat])

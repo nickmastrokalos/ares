@@ -1,11 +1,15 @@
 <script setup>
 import { ref, computed, watch, onMounted, inject } from 'vue'
 import { useFeaturesStore } from '@/stores/features'
+import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
 import { labelFromCotType } from '@/services/trackTypes'
+import { formatSpeed, speedUnitLabel, parseSpeedToMs } from '@/services/geometry'
 import TrackTypePicker from './TrackTypePicker.vue'
 import CoordInput from './CoordInput.vue'
+
+const KTS_TO_MS = 1852 / 3600
 
 const props = defineProps({
   featureId: { type: Number, required: true },
@@ -15,6 +19,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const featuresStore = useFeaturesStore()
+const settingsStore = useSettingsStore()
 
 // Live drag broadcast from `useMapManualTracks` — lets the coord grid
 // refresh every mousemove frame without store writes (mirrors the
@@ -106,8 +111,10 @@ const courseDisplay = computed(() => {
 })
 
 const speedDisplay = computed(() => {
-  const v = featureProps.value?.speed
-  return v != null ? `${v} kts` : '—'
+  const kts = featureProps.value?.speed
+  if (kts == null) return '—'
+  const ms = kts * KTS_TO_MS
+  return `${formatSpeed(ms, settingsStore.distanceUnits)} (${ms.toFixed(1)} m/s)`
 })
 
 // ---- Name editing ----
@@ -132,8 +139,20 @@ async function saveName() {
 // ---- Attribute editing ----
 
 function startEdit(field) {
-  const raw = featureProps.value?.[field]
-  editInput.value  = raw != null ? String(raw) : ''
+  if (field === 'speed') {
+    const kts = featureProps.value?.speed
+    if (kts == null) {
+      editInput.value = ''
+    } else {
+      const ms = kts * KTS_TO_MS
+      const u = settingsStore.distanceUnits
+      const factor = u === 'nautical' ? 1.94384 : u === 'statute' ? 2.23694 : 3.6
+      editInput.value = (ms * factor).toFixed(1)
+    }
+  } else {
+    const raw = featureProps.value?.[field]
+    editInput.value = raw != null ? String(raw) : ''
+  }
   editingField.value = field
 }
 
@@ -147,13 +166,22 @@ async function saveField() {
   const raw   = String(editInput.value).trim()  // String() guards against number coercion from type="number"
   cancelEdit()
   if (!field || !featureRow.value) return
-  let value = raw === '' ? null : parseFloat(raw)
-  if (value != null && isNaN(value)) return
 
-  // Clamp course to 0–359
-  if (field === 'course' && value != null) value = ((value % 360) + 360) % 360
-  // Speed must be non-negative
-  if (field === 'speed' && value != null && value < 0) value = 0
+  let value
+  if (field === 'speed') {
+    if (raw === '') {
+      value = null
+    } else {
+      const ms = parseSpeedToMs(raw, settingsStore.distanceUnits)
+      if (ms == null) return
+      value = ms / KTS_TO_MS  // store as knots
+    }
+  } else {
+    value = raw === '' ? null : parseFloat(raw)
+    if (value != null && isNaN(value)) return
+    // Clamp course to 0–359
+    if (field === 'course' && value != null) value = ((value % 360) + 360) % 360
+  }
 
   await featuresStore.updateFeature(
     featureRow.value.id,
@@ -349,7 +377,7 @@ watch(() => props.focusedId, (id) => {
           <input
             v-model="editInput"
             class="attr-input"
-            placeholder="knots"
+            :placeholder="speedUnitLabel(settingsStore.distanceUnits)"
             type="text"
             inputmode="decimal"
             @blur="saveField"
