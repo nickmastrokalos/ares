@@ -126,6 +126,7 @@ All map-surface bundles register together from `MapView.vue`.
 | `tools/bloodhound.js` | MapView | Live-tracking range lines (a.k.a. bloodhounds): `bloodhound_list`, `bloodhound_add`, `bloodhound_remove`, `bloodhound_clear`. Each endpoint is a typed ref — `from/to FeatureId` (mission feature), `from/to TrackUid` (CoT), `from/to VesselMmsi` (AIS), or `from/to Coordinate`. Lines follow their endpoints as tracks / vessels / features move. Backed by `useMapBloodhound`; full docs in `/docs/bloodhound.md`. |
 | `tools/ghosts.js` | MapView | Simulated motion along a route: `ghost_list`, `ghost_create`, `ghost_start`, `ghost_stop`, `ghost_reset`, `ghost_delete`, `ghost_set_speed`. `ghost_create` refuses if no routes exist on the map. |
 | `tools/scenes.js` | ScenesView, SceneEditorView | `scenes_list`, `scenes_create_scene` |
+| `tools/snapshot.js` | MapView | `map_capture_snapshot` (write) — composites the current MapLibre canvas with the standard legend strip and writes it to the user's Desktop as `ares_screen_capture_<UTC ISO timestamp>.png`. No native save dialog: the confirm card is the user-approval gate. Backed by `useMapSnapshot.capture({ destination: 'desktop' })`. The toolbar snapshot button still uses the dialog flow (`destination: 'dialog'`). |
 
 ## Configuration
 

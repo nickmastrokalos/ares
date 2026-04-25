@@ -127,7 +127,7 @@ const { capture: captureSnapshotRaw } = useMapSnapshot({
 })
 
 async function captureSnapshot() {
-  const res = await captureSnapshotRaw()
+  const res = await captureSnapshotRaw({ destination: 'dialog' })
   if (res.ok || res.cancelled) return
   mapAlerts.setAlert('snapshot-err', {
     source: 'snapshot', level: 'critical',
@@ -135,6 +135,12 @@ async function captureSnapshot() {
     timestamp: Date.now()
   })
   setTimeout(() => mapAlerts.clearAlert('snapshot-err'), 6000)
+}
+
+// Assistant entry point — saves directly to the Desktop with no native
+// dialog. The user has already approved the call via the confirm card.
+async function captureSnapshotToDesktop() {
+  return captureSnapshotRaw({ destination: 'desktop' })
 }
 
 // Perimeter breaches are aggregated into a single alert so the chip stays
@@ -195,7 +201,8 @@ useAssistantTools(
   () => buildMapToolBundles({
     featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
     flyToGeometry, flyTo, switchBasemap,
-    bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi
+    bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi,
+    captureSnapshotToDesktop
   }),
   'Map assistant'
 )
