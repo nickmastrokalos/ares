@@ -3,21 +3,26 @@
 //
 // Approach: grid-based A* over a bbox containing both endpoints, with land
 // cells (centers inside any land polygon) marked impassable. Final path is
-// smoothed by greedy line-of-sight to drop redundant waypoints. The land
-// dataset is dynamic-imported on first use so the asset isn't part of the
-// initial bundle.
+// smoothed by greedy line-of-sight to drop redundant waypoints, capped so
+// no single merged leg is longer than `MAX_SMOOTHED_LEG_M` — keeps the
+// smoother from bridging across an island when the polygon underneath is
+// too generalized to flag the crossing. The dataset is dynamic-imported on
+// first use so the asset isn't part of the initial bundle.
 //
-// Land polygons: OpenStreetMap simplified-land-polygons (osmdata.openstreet
-// map.de), reprojected to WGS84. ~58 MB, 67k polygons. Significantly finer
-// than Natural Earth 10m at coastal scales — captures small inlets, barrier
-// islands, and similar features that NE 10m generalizes away. © OSM
-// contributors, ODbL license.
+// Land polygons: Natural Earth 10m. ~10 MB. Fidelity is roughly 1:10M
+// scale: fine for ocean-crossing and large-bay routes, but generalizes
+// small bays / barrier islands / narrow peninsulas at the city scale —
+// the planner can therefore produce routes that visually clip land at
+// zoom levels finer than ~1 km/pixel even though the math says no
+// crossing. The leg-length cap mitigates the worst case but does not fix
+// the underlying data fidelity.
 //
 // Caveats:
 //   - Planar lng/lat distance metric. Fine at coastal scales; degrades for
 //     ocean-crossing routes near the poles or the antimeridian.
-//   - Inland lakes are not in this dataset (it models the ocean coastline,
-//     so a route through a continent is unconstrained — out of scope).
+//   - Lakes are still "land" in Natural Earth's land file (which models
+//     "land = not ocean"). For inland lake routing this would produce odd
+//     results; out of scope here.
 
 import {
   pointInPolygon,
@@ -33,7 +38,7 @@ let polygonCache = null     // [{ geometry, bbox: [[w,s],[e,n]] }, …]
 async function loadAllPolygons() {
   if (polygonCache) return polygonCache
   if (!landPromise) {
-    landPromise = import('@/assets/osm-land-simplified.json').then(m => m.default ?? m)
+    landPromise = import('@/assets/ne-land-10m.json').then(m => m.default ?? m)
   }
   const fc = await landPromise
   polygonCache = []
@@ -168,8 +173,17 @@ function heuristic(a, b, step) {
   return Math.hypot(dx, dy)
 }
 
+// Cap on a single merged leg after smoothing. The dataset (NE 10m) is too
+// coarse to reliably catch sub-km coastal features, so we never let the
+// smoother bridge more than this distance even if the line-of-sight check
+// says "clear" — that prevents a long leg from accidentally cutting across
+// a generalized peninsula. Tunable; smaller = more waypoints + safer at
+// coastal scales, larger = cleaner routes at ocean scale.
+const MAX_SMOOTHED_LEG_M = 1500
+
 // Greedy line-of-sight smoother. Drops intermediate waypoints whose direct
-// connection to the next-next waypoint doesn't cross any land polygon.
+// connection to the next-next waypoint doesn't cross any land polygon AND
+// whose length stays under MAX_SMOOTHED_LEG_M.
 function smoothPath(coords, polygons) {
   if (coords.length <= 2) return coords
   const out = [coords[0]]
@@ -178,6 +192,7 @@ function smoothPath(coords, polygons) {
     let j = coords.length - 1
     while (j > i + 1) {
       const a = coords[i], b = coords[j]
+      if (distanceBetween(a, b) > MAX_SMOOTHED_LEG_M) { j--; continue }
       let blocked = false
       for (const g of polygons) {
         if (segmentCrossesPolygon(a, b, g)) { blocked = true; break }

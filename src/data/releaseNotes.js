@@ -24,7 +24,7 @@ export const RELEASES = [
       'Track cards now show m/s alongside the unit-formatted speed (e.g. "24.3 kts (12.5 m/s)").',
       'Releases tab on the Settings page (sidebar) showing per-version notes.',
       'First-launch-after-update overlay listing every entry newer than what the user last dismissed.',
-      'Assistant can now plan water-only routes that avoid land. New tools: `route_check_land_crossing` (read) tests an existing route against bundled coastlines, and `map_draw_route_water_only` (write) plans and draws a route from start to end with detours around land. Backed by OpenStreetMap simplified land polygons (© OSM contributors, ODbL).'
+      'Assistant can now plan water-only routes that avoid land. New tools: `route_check_land_crossing` (read) tests an existing route against bundled coastlines, and `map_draw_route_water_only` (write) plans and draws a route from start to end with detours around land. Backed by Natural Earth 10m coastlines — reliable at ocean / large-bay scale; the tool description warns the user when the route is short enough for the dataset to be too coarse.'
     ],
     changed: [
       'Track-card speed display (CoT and manual track panels) now honors the Distance Units setting; the manual-track inline edit input adapts placeholder + parsing to the current unit.',
