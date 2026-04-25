@@ -29,7 +29,8 @@ export const RELEASES = [
     ],
     changed: [
       'Track-card speed display (CoT and manual track panels) now honors the Distance Units setting; the manual-track inline edit input adapts placeholder + parsing to the current unit.',
-      'Assistant input field is taller by default (two rows) and has a bit more padding so prompts feel less cramped.'
+      'Assistant input field is taller by default (two rows) and has a bit more padding so prompts feel less cramped.',
+      'Assistant confirm card: action buttons relabeled (Confirm → Execute) and colored — red for Cancel, green for Execute — to make commit/abort decisions read at a glance.'
     ],
     fixed: [
       'Route planner (water + feature-avoidance) no longer outputs hundreds of stair-step waypoints on long routes. The 1 km per-leg smoothing cap interacted badly with the cell size: when the bbox is large (~100 km), each cell is ~500 m, so the cap stopped the smoother from merging more than ~2 cells per leg. The cap is removed; the buffered bitmap line-of-sight test is the actual safety mechanism and is sufficient on its own.',
