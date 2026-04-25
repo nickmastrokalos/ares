@@ -158,8 +158,17 @@ Floating draggable panel showing tracks from **both** systems in one list.
   - Type pills — All / COT / MAN. Switches between feed tracks, manual tracks, or both.
   - Callsign search — case-insensitive substring match on `callsign`. Updates live as you type.
   - Affiliation toggles — click a colored dot to include/exclude that affiliation. All active by default.
-- **Per-row actions:** center map on track (`flyToGeometry`), open detail panel (`openManualTrackPanel` or `tracksStore.openPanel`), remove/dismiss.
+- **Per-row actions:** center map on track (`flyToGeometry`), toggle map visibility (eye icon), open detail panel (`openManualTrackPanel` or `tracksStore.openPanel`), remove/dismiss.
 - Header count shows `{visible} / {total}` when any filter is active, plain total otherwise.
+
+#### Per-track map visibility
+
+A hidden track is removed from the map (points, symbols, labels, and — for CoT — breadcrumb trail) but remains in the list so the user can show it again. Visibility is session-only — no persistence — and is stored as a `Set` of ids in the owning store:
+
+- `useTracksStore.hiddenIds` — CoT uids. `toggleVisibility(uid)` flips state. Cleared for a uid when `removeTrack()` runs (and wholesale by `clearTracks()`) so a re-appearing uid doesn't stay hidden.
+- `useFeaturesStore.hiddenManualIds` — manual-track feature ids. `toggleManualVisibility(id)` flips state. Cleared for an id when `removeFeatures()` runs.
+
+The filtering happens at the GeoJSON-source layer — `tracksStore.trackCollection`, the `breadcrumbCollection` computed in `useMapTracks`, and `manualTrackCollection` in `useMapManualTracks` all skip hidden ids. No MapLibre layer filters are involved.
 
 ### Rendering pipeline — `useMapManualTracks.js`
 

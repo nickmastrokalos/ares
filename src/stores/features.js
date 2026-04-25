@@ -16,6 +16,10 @@ export const useFeaturesStore = defineStore('features', () => {
   const features = ref([])
   const selectedFeatureId = ref(null)
 
+  // Session-only set of manual-track feature ids hidden from the map via the
+  // track list. Cleared on feature removal.
+  const hiddenManualIds = ref(new Set())
+
   const activeMission = computed(() =>
     missions.value.find(m => m.id === activeMissionId.value) || null
   )
@@ -233,10 +237,22 @@ export const useFeaturesStore = defineStore('features', () => {
       const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
       await db.execute(`DELETE FROM features WHERE id IN (${placeholders})`, ids)
       if (ids.includes(selectedFeatureId.value)) selectedFeatureId.value = null
+      if (ids.some(id => hiddenManualIds.value.has(id))) {
+        const next = new Set(hiddenManualIds.value)
+        for (const id of ids) next.delete(id)
+        hiddenManualIds.value = next
+      }
       await loadFeatures()
     } finally {
       appStore.endLoad()
     }
+  }
+
+  function toggleManualVisibility(id) {
+    const next = new Set(hiddenManualIds.value)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    hiddenManualIds.value = next
   }
 
   function selectFeature(id) {
@@ -263,6 +279,8 @@ export const useFeaturesStore = defineStore('features', () => {
     featureCollection,
     selectedFeatureId,
     selectedFeature,
+    hiddenManualIds,
+    toggleManualVisibility,
     loadMissions,
     createMission,
     renameMission,

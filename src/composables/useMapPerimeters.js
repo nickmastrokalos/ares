@@ -50,10 +50,12 @@ export function useMapPerimeters(getMap) {
   let clickHandler = null
   let moveHandler  = null
   let keyHandler   = null
-  let stopTrackWatch      = null
-  let stopAisWatch        = null
-  let stopAisVisibleWatch = null
-  let stopFeatureWatch    = null
+  let stopTrackWatch        = null
+  let stopTrackHiddenWatch  = null
+  let stopAisWatch          = null
+  let stopAisVisibleWatch   = null
+  let stopFeatureWatch      = null
+  let stopManualHiddenWatch = null
 
   // Reactive list for panel + assistant tools. Rebuilds on add/remove/clear
   // (perimeterCount bump) and on re-resolve ticks (bumpTick).
@@ -209,13 +211,16 @@ export function useMapPerimeters(getMap) {
   //
   // Hidden AIS vessels are skipped: a breach halo / red ring over empty
   // map is confusing, and an operator who has explicitly hidden AIS has
-  // opted out of AIS-driven alerting.
+  // opted out of AIS-driven alerting. Per-track hides (CoT uids in
+  // `tracksStore.hiddenIds`, manual feature ids in `featuresStore.hiddenManualIds`)
+  // are skipped for the same reason.
   function computeBreaches(p, ownerKey) {
     const breached = new Set()
     const center = p.owner.coord
     const r = p.radius
 
     for (const t of tracksStore.tracks.values()) {
+      if (tracksStore.hiddenIds.has(t.uid)) continue
       const key = `cot:${t.uid}`
       if (key === ownerKey) continue
       if (distanceBetween([t.lon, t.lat], center) < r) breached.add(key)
@@ -229,6 +234,7 @@ export function useMapPerimeters(getMap) {
     }
     for (const f of featuresStore.features) {
       if (f.type !== 'manual-track') continue
+      if (featuresStore.hiddenManualIds.has(f.id)) continue
       const key = `feature:${f.id}`
       if (key === ownerKey) continue
       const geom = JSON.parse(f.geometry)
@@ -323,6 +329,9 @@ export function useMapPerimeters(getMap) {
     if (!stopTrackWatch) {
       stopTrackWatch = watch(() => tracksStore.tracks, reresolveAll, { deep: false })
     }
+    if (!stopTrackHiddenWatch) {
+      stopTrackHiddenWatch = watch(() => tracksStore.hiddenIds, reresolveAll)
+    }
     if (!stopAisWatch) {
       stopAisWatch = watch(() => aisStore.vessels, reresolveAll, { deep: false })
     }
@@ -332,13 +341,18 @@ export function useMapPerimeters(getMap) {
     if (!stopFeatureWatch) {
       stopFeatureWatch = watch(() => featuresStore.features, reresolveAll, { deep: false })
     }
+    if (!stopManualHiddenWatch) {
+      stopManualHiddenWatch = watch(() => featuresStore.hiddenManualIds, reresolveAll)
+    }
   }
 
   function stopWatchers() {
-    if (stopTrackWatch)      { stopTrackWatch();      stopTrackWatch      = null }
-    if (stopAisWatch)        { stopAisWatch();        stopAisWatch        = null }
-    if (stopAisVisibleWatch) { stopAisVisibleWatch(); stopAisVisibleWatch = null }
-    if (stopFeatureWatch)    { stopFeatureWatch();    stopFeatureWatch    = null }
+    if (stopTrackWatch)        { stopTrackWatch();        stopTrackWatch        = null }
+    if (stopTrackHiddenWatch)  { stopTrackHiddenWatch();  stopTrackHiddenWatch  = null }
+    if (stopAisWatch)          { stopAisWatch();          stopAisWatch          = null }
+    if (stopAisVisibleWatch)   { stopAisVisibleWatch();   stopAisVisibleWatch   = null }
+    if (stopFeatureWatch)      { stopFeatureWatch();      stopFeatureWatch      = null }
+    if (stopManualHiddenWatch) { stopManualHiddenWatch(); stopManualHiddenWatch = null }
   }
 
   function ensureKeyHandler() {

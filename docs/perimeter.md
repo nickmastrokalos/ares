@@ -66,6 +66,8 @@ For every perimeter with `alert=true`, on each tick:
 
 **AIS visibility gate** — the AIS loop is skipped entirely when `aisStore.visible === false`. A breach halo floating over empty map (with no vessel rendered) is confusing, and an operator who has explicitly hidden AIS has opted out of AIS-driven alerting. A watcher on `aisStore.visible` triggers `reresolveAll()` so breaches appear / disappear immediately on toggle.
 
+**Per-track visibility gate** — individual CoT uids in `tracksStore.hiddenIds` and manual-track ids in `featuresStore.hiddenManualIds` (toggled from the track list's eye button) are skipped in the same loop for the same reason. Watchers on each Set trigger `reresolveAll()` so toggling a track's visibility clears or re-fires any breach it was part of.
+
 Results drive two MapLibre sources:
 
 | Source            | Layer                  | Role                                                                                 |
