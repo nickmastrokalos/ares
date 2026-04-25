@@ -41,17 +41,17 @@ export function aisTools({ aisStore, featuresStore }) {
 
     {
       name: 'ais_get_status',
-      description: 'Report the current AIS configuration and feed state: whether the feed is enabled, whether vessels are visible on the map, whether heading tails are drawn, and whether the feed URL and API key are configured.',
+      description: 'Report the current AIS configuration and feed state: whether the feed is enabled, whether vessels are visible on the map, whether heading-arrow icons are on, and whether the feed URL and API key are configured.',
       readonly: true,
       inputSchema: { type: 'object', properties: {}, required: [] },
       async handler() {
         return {
-          enabled:   aisStore.enabled,
-          visible:   aisStore.visible,
-          tails:     aisStore.aisBreadcrumbs,
-          configured: !configMissing(aisStore),
-          feedUrl:    aisStore.feedUrl || '',
-          vesselCount: aisStore.vesselCount
+          enabled:       aisStore.enabled,
+          visible:       aisStore.visible,
+          headingArrows: aisStore.headingArrows,
+          configured:    !configMissing(aisStore),
+          feedUrl:       aisStore.feedUrl || '',
+          vesselCount:   aisStore.vesselCount
         }
       }
     },
@@ -171,22 +171,22 @@ export function aisTools({ aisStore, featuresStore }) {
     },
 
     {
-      name: 'ais_set_tails',
-      description: 'Turn the AIS heading-tail overlay on or off. Tails are short lines drawn behind each moving vessel indicating direction of travel.',
+      name: 'ais_set_heading_arrows',
+      description: 'Switch the AIS vessel icon between plain circles and direction-aware arrows (rotated to each vessel\'s COG). The history-trail rendering — fading polylines behind each vessel — is governed by the global `Track breadcrumbs` setting (Settings → Tracks), not this tool.',
       readonly: false,
       inputSchema: {
         type: 'object',
         properties: {
-          tails: { type: 'boolean', description: 'True to show tails, false to hide them.' }
+          arrows: { type: 'boolean', description: 'True to render vessels as heading arrows, false to render as plain circles.' }
         },
-        required: ['tails']
+        required: ['arrows']
       },
-      previewRender({ tails }) {
-        return `AIS tails → ${tails ? 'on' : 'off'}`
+      previewRender({ arrows }) {
+        return `AIS heading arrows → ${arrows ? 'on' : 'off'}`
       },
-      async handler({ tails }) {
-        await aisStore.setAisBreadcrumbs(tails)
-        return { success: true, tails: aisStore.aisBreadcrumbs }
+      async handler({ arrows }) {
+        await aisStore.setHeadingArrows(arrows)
+        return { success: true, headingArrows: aisStore.headingArrows }
       }
     }
 

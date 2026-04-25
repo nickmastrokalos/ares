@@ -126,7 +126,7 @@ export function useMapAis(getMap, dispatcher = null, suppress = { value: false }
       type: 'circle',
       source: AIS_SOURCE,
       layout: {
-        'visibility': aisStore.aisBreadcrumbs ? 'none' : 'visible'
+        'visibility': aisStore.headingArrows ? 'none' : 'visible'
       },
       paint: {
         'circle-radius': 5,
@@ -149,7 +149,7 @@ export function useMapAis(getMap, dispatcher = null, suppress = { value: false }
         'icon-ignore-placement': true,
         'icon-rotation-alignment': 'map',
         'icon-rotate': ['coalesce', ['get', 'course'], 0],
-        'visibility': aisStore.aisBreadcrumbs ? 'visible' : 'none'
+        'visibility': aisStore.headingArrows ? 'visible' : 'none'
       }
     })
 
@@ -247,14 +247,17 @@ export function useMapAis(getMap, dispatcher = null, suppress = { value: false }
     }
   )
 
-  // When heading tails are toggled, swap between circle and arrow icon layers.
+  // Toggle between circle and arrow icon layers. The breadcrumb trail
+  // layer is independent — it's driven by `settingsStore.trackBreadcrumbs`
+  // through `aisStore.breadcrumbCollection`, so it doesn't need a local
+  // visibility watcher here.
   watch(
-    () => aisStore.aisBreadcrumbs,
-    (tails) => {
+    () => aisStore.headingArrows,
+    (arrows) => {
       const map = getMap()
       if (!map?.getLayer(AIS_LAYER)) return
-      map.setLayoutProperty(AIS_LAYER,        'visibility', tails ? 'none'    : 'visible')
-      map.setLayoutProperty(AIS_LAYER_ARROWS, 'visibility', tails ? 'visible' : 'none')
+      map.setLayoutProperty(AIS_LAYER,        'visibility', arrows ? 'none'    : 'visible')
+      map.setLayoutProperty(AIS_LAYER_ARROWS, 'visibility', arrows ? 'visible' : 'none')
     }
   )
 
