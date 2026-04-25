@@ -2,6 +2,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
+import { defaultFeatureName } from '@/services/featureNaming'
 
 const PREVIEW_SOURCE  = 'route-preview'
 const PREVIEW_LAYER   = 'route-preview-line'
@@ -349,12 +350,8 @@ export function useMapRoute(getMap, dispatcher = null, suppress = { value: false
 
     const geometry = { type: 'LineString', coordinates: [...buildPoints] }
 
-    // Count existing routes to pick a default name.
-    const existingCount = featuresStore.features.filter(f => f.type === 'route').length
-    const name = `Route ${existingCount + 1}`
-
     const id = await featuresStore.addFeature('route', geometry, {
-      name,
+      name: defaultFeatureName('route', featuresStore),
       color: ROUTE_COLOR,
       waypoints
     })

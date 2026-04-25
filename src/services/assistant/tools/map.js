@@ -12,6 +12,7 @@ import {
 import { DEFAULT_FEATURE_COLOR } from '@/stores/features'
 import { parseCoordinate } from '@/services/coordinates'
 import { BASEMAPS } from '@/services/basemaps'
+import { nameOrDefault } from '@/services/featureNaming'
 
 // Mirrors the track builder UI (ManualTrackPanel / useMapManualTracks).
 const AFFIL_ENUM   = ['friendly', 'hostile', 'civilian', 'unknown']
@@ -466,9 +467,11 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Point at ${lat.toFixed(4)}, ${lon.toFixed(4)}${col}`
       },
-      async handler({ coordinate, name = 'Point', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ coordinate, name, color = DEFAULT_FEATURE_COLOR }) {
         const geometry = { type: 'Point', coordinates: coordinate }
-        const id = await featuresStore.addFeature('point', geometry, { name, color })
+        const id = await featuresStore.addFeature('point', geometry, {
+          name: nameOrDefault(name, 'point', featuresStore), color
+        })
         return { id, success: true }
       }
     },
@@ -496,9 +499,11 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Line · ${points.length} points${col}`
       },
-      async handler({ points, name = 'Line', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ points, name, color = DEFAULT_FEATURE_COLOR }) {
         const geometry = { type: 'LineString', coordinates: points }
-        const id = await featuresStore.addFeature('line', geometry, { name, color })
+        const id = await featuresStore.addFeature('line', geometry, {
+          name: nameOrDefault(name, 'line', featuresStore), color
+        })
         return { id, success: true }
       }
     },
@@ -528,12 +533,14 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Polygon · ${points.length} points${col}`
       },
-      async handler({ points, name = 'Polygon', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ points, name, color = DEFAULT_FEATURE_COLOR }) {
         const ring = [...points]
         const first = ring[0], last = ring[ring.length - 1]
         if (first[0] !== last[0] || first[1] !== last[1]) ring.push([...first])
         const geometry = { type: 'Polygon', coordinates: [ring] }
-        const id = await featuresStore.addFeature('polygon', geometry, { name, color })
+        const id = await featuresStore.addFeature('polygon', geometry, {
+          name: nameOrDefault(name, 'polygon', featuresStore), color
+        })
         return { id, success: true }
       }
     },
@@ -561,9 +568,12 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Circle at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radiusMeters} m${col}`
       },
-      async handler({ center, radiusMeters, name = 'Circle', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ center, radiusMeters, name, color = DEFAULT_FEATURE_COLOR }) {
         const geometry = circlePolygon(center, radiusMeters)
-        const id = await featuresStore.addFeature('circle', geometry, { name, center, radius: radiusMeters, color })
+        const id = await featuresStore.addFeature('circle', geometry, {
+          name: nameOrDefault(name, 'circle', featuresStore),
+          center, radius: radiusMeters, color
+        })
         return { id, success: true }
       }
     },
@@ -592,10 +602,11 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const label = name ? `"${name}" · ` : ''
         return `${label}Ellipse at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radiusMajor}×${radiusMinor} m`
       },
-      async handler({ center, radiusMajor, radiusMinor, rotation = 0, name = 'Ellipse', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ center, radiusMajor, radiusMinor, rotation = 0, name, color = DEFAULT_FEATURE_COLOR }) {
         const geometry = ellipsePolygon(center, radiusMajor, radiusMinor, rotation)
         const id = await featuresStore.addFeature('ellipse', geometry, {
-          name, center, radiusMajor, radiusMinor, rotation, color
+          name: nameOrDefault(name, 'ellipse', featuresStore),
+          center, radiusMajor, radiusMinor, rotation, color
         })
         return { id, success: true }
       }
@@ -625,10 +636,11 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const label = name ? `"${name}" · ` : ''
         return `${label}Sector at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radius} m · ${startAngle}°–${endAngle}°`
       },
-      async handler({ center, radius, startAngle, endAngle, name = 'Sector', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ center, radius, startAngle, endAngle, name, color = DEFAULT_FEATURE_COLOR }) {
         const geometry = sectorPolygon(center, radius, startAngle, endAngle)
         const id = await featuresStore.addFeature('sector', geometry, {
-          name, center, radius, startAngle, endAngle, color
+          name: nameOrDefault(name, 'sector', featuresStore),
+          center, radius, startAngle, endAngle, color
         })
         return { id, success: true }
       }
@@ -660,9 +672,12 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const rot = rotationDeg ? ` · ${rotationDeg}°` : ''
         return `${label}Box SW ${sw[1].toFixed(4)}, ${sw[0].toFixed(4)} → NE ${ne[1].toFixed(4)}, ${ne[0].toFixed(4)}${rot}`
       },
-      async handler({ sw, ne, rotationDeg = 0, name = 'Box', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ sw, ne, rotationDeg = 0, name, color = DEFAULT_FEATURE_COLOR }) {
         const geometry = rotatedBoxPolygon(sw, ne, rotationDeg)
-        const id = await featuresStore.addFeature('box', geometry, { name, sw, ne, rotationDeg, color })
+        const id = await featuresStore.addFeature('box', geometry, {
+          name: nameOrDefault(name, 'box', featuresStore),
+          sw, ne, rotationDeg, color
+        })
         return { id, success: true }
       }
     },
@@ -692,7 +707,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const ids = featureIds.map(i => `#${i}`).join(', ')
         return `${label}Box around ${ids} · +${paddingMeters} m`
       },
-      async handler({ featureIds, paddingMeters = 500, name = 'Box', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ featureIds, paddingMeters = 500, name, color = DEFAULT_FEATURE_COLOR }) {
         const rows = featureIds
           .map(id => featuresStore.features.find(f => f.id === id))
           .filter(Boolean)
@@ -725,7 +740,10 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const sw = [minLng - dLng, minLat - dLat]
         const ne = [maxLng + dLng, maxLat + dLat]
         const geometry = rotatedBoxPolygon(sw, ne, 0)
-        const id = await featuresStore.addFeature('box', geometry, { name, sw, ne, rotationDeg: 0, color })
+        const id = await featuresStore.addFeature('box', geometry, {
+          name: nameOrDefault(name, 'box', featuresStore),
+          sw, ne, rotationDeg: 0, color
+        })
         return { id, success: true }
       }
     },
@@ -764,7 +782,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const label = name ? `"${name}" · ` : ''
         return `${label}Route · ${waypoints.length} waypoints`
       },
-      async handler({ waypoints, name = 'Route', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ waypoints, name, color = DEFAULT_FEATURE_COLOR }) {
         const total = waypoints.length
         const coords = waypoints.map(wp => wp.coordinate)
         const wps = waypoints.map((wp, i) => {
@@ -773,7 +791,10 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
           return { label: wp.label ?? defaultLabel, role }
         })
         const geometry = { type: 'LineString', coordinates: coords }
-        const id = await featuresStore.addFeature('route', geometry, { name, color, waypoints: wps })
+        const id = await featuresStore.addFeature('route', geometry, {
+          name: nameOrDefault(name, 'route', featuresStore),
+          color, waypoints: wps
+        })
         return { id, success: true }
       }
     },

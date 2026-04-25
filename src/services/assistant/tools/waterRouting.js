@@ -11,6 +11,7 @@
 //                                         (keepouts, no-go boxes, etc.).
 
 import { checkRouteCrossesLand, planWaterRoute, planRouteAvoidingObstacles } from '@/services/landRouting'
+import { nameOrDefault } from '@/services/featureNaming'
 
 const DEFAULT_FEATURE_COLOR = '#ffffff'
 
@@ -73,13 +74,13 @@ export function waterRoutingTools({ featuresStore }) {
         const fmt = ([x, y]) => `${y.toFixed(4)}, ${x.toFixed(4)}`
         return `${label}Water route · ${fmt(start)} → ${fmt(end)}`
       },
-      async handler({ start, end, name = 'Water route', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ start, end, name, color = DEFAULT_FEATURE_COLOR }) {
         const plan = await planWaterRoute(start, end)
         if (!plan.ok) return { error: plan.reason }
         const coords = plan.coordinates
         const geometry = { type: 'LineString', coordinates: coords }
         const properties = {
-          name,
+          name: nameOrDefault(name, 'route', featuresStore),
           color,
           waypoints: rebuildWaypointMeta(coords.length)
         }
@@ -137,7 +138,7 @@ export function waterRoutingTools({ featuresStore }) {
         const what = parts.length ? `avoiding ${parts.join(' + ')}` : ''
         return `${label}Route ${what} · ${fmt(start)} → ${fmt(end)}`
       },
-      async handler({ start, end, avoid_feature_ids = [], avoid_land = false, buffer_meters = 0, name = 'Route', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ start, end, avoid_feature_ids = [], avoid_land = false, buffer_meters = 0, name, color = DEFAULT_FEATURE_COLOR }) {
         const obstacles = []
         for (const fid of avoid_feature_ids) {
           const row = featuresStore.features.find(f => f.id === fid)
@@ -163,7 +164,8 @@ export function waterRoutingTools({ featuresStore }) {
         const coords = plan.coordinates
         const geometry = { type: 'LineString', coordinates: coords }
         const properties = {
-          name, color,
+          name: nameOrDefault(name, 'route', featuresStore),
+          color,
           waypoints: rebuildWaypointMeta(coords.length)
         }
         const id = await featuresStore.addFeature('route', geometry, properties)
