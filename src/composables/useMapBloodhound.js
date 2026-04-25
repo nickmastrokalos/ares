@@ -140,8 +140,9 @@ export function useMapBloodhound(getMap) {
   //
   // Returns the latest [lng, lat] for an endpoint ref, or null if the source
   // has disappeared (track pruned, feature deleted, vessel outside the AIS
-  // fetch window). Callers decide how to handle null — today we freeze the
-  // line at its last-known coord (ep.coord is not touched on null).
+  // fetch window). When any endpoint disappears, `reresolveAll` drops the
+  // bloodhound entirely — see `endpointGone` below. (`point` endpoints have
+  // no upstream and never disappear.)
   function resolveCoord(ep) {
     if (ep.kind === 'point') return ep.coord
     if (ep.kind === 'cot') {
@@ -240,6 +241,18 @@ export function useMapBloodhound(getMap) {
     if (r.markerB)   { r.markerB.remove();   r.markerB   = null }
   }
 
+  // True if an endpoint's anchor entity is no longer present in its store —
+  // a deleted manual / draw feature, a CoT track that was removed or pruned,
+  // or an AIS vessel that aged out. `point` endpoints have no upstream.
+  // Hidden anchors (track-list eye toggle) are still in the store, so this
+  // returns false for them — visibility is not removal.
+  function endpointGone(ep) {
+    if (ep.kind === 'cot')     return !tracksStore.tracks.get(ep.uid)
+    if (ep.kind === 'ais')     return !aisStore.vessels.get(ep.mmsi)
+    if (ep.kind === 'feature') return !featuresStore.features.some(f => f.id === ep.featureId)
+    return false
+  }
+
   // Re-resolve every endpoint against the current source stores and update
   // the map + markers if anything moved. Called from the combined watcher.
   function reresolveAll() {
@@ -247,10 +260,9 @@ export function useMapBloodhound(getMap) {
     let changed = false
     for (let i = committed.length - 1; i >= 0; i--) {
       const r = committed[i]
-      // If a feature endpoint's feature is gone, drop the line entirely —
-      // the feature system already cleans up its own panels on deletion.
-      if (r.epA.kind === 'feature' && !featuresStore.features.some(f => f.id === r.epA.featureId) ||
-          r.epB.kind === 'feature' && !featuresStore.features.some(f => f.id === r.epB.featureId)) {
+      // Drop the line if either anchor disappeared — matches user intent
+      // that a deleted track / vessel / feature takes its dependents with it.
+      if (endpointGone(r.epA) || endpointGone(r.epB)) {
         removeLineMarkers(r)
         committed.splice(i, 1)
         changed = true
