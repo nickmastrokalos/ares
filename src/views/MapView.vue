@@ -274,6 +274,11 @@ function toggleAisPanel() {
 }
 
 function toggleBloodhoundPanel() {
+  // Mirror the panel's X-button close: if we're closing the panel while
+  // selection mode is on, drop it so the crosshair cursor doesn't stick.
+  if (bloodhoundPanelOpen.value && bloodhounding.value) {
+    bloodhoundApi.toggleSelecting()
+  }
   bloodhoundPanelOpen.value = !bloodhoundPanelOpen.value
 }
 
