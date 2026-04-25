@@ -1,13 +1,11 @@
-// Water-only route planner used by the `map_draw_route_water_only` and
-// `route_check_land_crossing` assistant tools.
+// Route planner used by the `map_draw_route_water_only`,
+// `route_check_land_crossing`, and `map_draw_route_avoiding_features`
+// assistant tools.
 //
-// Approach: rasterize the relevant land polygons into a Uint8Array bitmap
-// covering the query bbox at the planner's grid resolution, dilate by the
-// `LAND_BUFFER_DEG` standoff, then run grid A* on the bitmap. Final path
-// is smoothed by greedy line-of-sight, capped so no single merged leg is
-// longer than `MAX_SMOOTHED_LEG_M` — keeps the smoother from bridging
-// across an island when the polygon underneath is too generalized to flag
-// the crossing.
+// Approach: rasterize the relevant obstacle polygons into a Uint8Array
+// bitmap covering the query bbox at the planner's grid resolution,
+// optionally dilate by a buffer, then run grid A* on the bitmap. Final
+// path is smoothed by greedy line-of-sight against the same bitmap.
 //
 // Why rasterize: NE 10m's continental polygons can have hundreds of
 // thousands of vertices. Per-cell `pointInPolygon` against those polygons
@@ -15,16 +13,24 @@
 // rasterization is `O(rows × edges_in_band)` once up front, after which
 // A* and the smoother are O(1) bitmap lookups.
 //
+// Two callers, two configs:
+//   - `planWaterRoute` — uses bundled NE 10m land + a `LAND_BUFFER_DEG`
+//     dilation to absorb the dataset's coastline generalization error.
+//   - `planRouteAvoidingObstacles` — takes user-drawn polygons (keepout
+//     boxes, no-go zones) and runs with no buffer by default since the
+//     polygons are exact.
+//
 // The dataset is dynamic-imported on first use so the asset isn't part
 // of the initial bundle.
 //
-// Land polygons: Natural Earth 10m. ~10 MB. Fidelity is roughly 1:10M
-// scale: fine for ocean-crossing and large-bay routes, but generalizes
-// small bays / barrier islands / narrow peninsulas at the city scale —
-// the planner can therefore produce routes that visually clip land at
-// zoom levels finer than ~1 km/pixel even though the bitmap says no
-// crossing. The buffer + leg-length cap mitigate the worst case but do
-// not fix the underlying data fidelity.
+// Caveats — water case only:
+//   - NE 10m fidelity is roughly 1:10M scale: fine for ocean-crossing and
+//     large-bay routes, but generalizes small bays / barrier islands /
+//     narrow peninsulas at the city scale — the planner can produce
+//     routes that visually clip land at zoom levels finer than ~1
+//     km/pixel even though the bitmap says no crossing. The buffer
+//     mitigates the worst case but does not fix the underlying data
+//     fidelity.
 //
 // Caveats:
 //   - Planar lng/lat distance metric. Fine at coastal scales; degrades for
@@ -284,14 +290,6 @@ function heuristic(a, b, step) {
   return Math.hypot(dx, dy)
 }
 
-// Cap on a single merged leg after smoothing. The dataset (NE 10m) is too
-// coarse to reliably catch sub-km coastal features, so we never let the
-// smoother bridge more than this distance even if the line-of-sight check
-// says "clear" — that prevents a long leg from accidentally cutting across
-// a generalized peninsula. Tunable; smaller = more waypoints + safer at
-// coastal scales, larger = cleaner routes at ocean scale.
-const MAX_SMOOTHED_LEG_M = 1000
-
 // Coastline buffer in degrees — applied at every land test (cell + smoother
 // LOS) to compensate for NE 10m's ~250-500 m coastline generalization. A
 // coordinate within this distance of any land polygon counts as land. At
@@ -302,10 +300,18 @@ const MAX_SMOOTHED_LEG_M = 1000
 const LAND_BUFFER_DEG = 0.005
 
 // Greedy line-of-sight smoother. Drops intermediate waypoints whose direct
-// connection to a later waypoint stays out of (buffered) land AND whose
-// length stays under MAX_SMOOTHED_LEG_M. Both checks read the bitmap via
-// `isLand`, so smoothing a path of N waypoints is O(N²) bitmap lookups —
+// connection to a later waypoint stays out of (buffered) land per the
+// bitmap. Smoothing a path of N waypoints is O(N²) bitmap lookups —
 // trivial relative to the rasterization cost.
+//
+// Earlier versions of this smoother applied an absolute distance cap
+// (`MAX_SMOOTHED_LEG_M = 1000`) intended as a belt-and-suspenders against
+// long bridges across NE 10m features the polygon missed. That cap turned
+// out to interact badly with the cell size: when the bbox is large (~100
+// km), `step` is ~500 m and 1 km caps merging at < 2 cells, leaving
+// hundreds of stair-step waypoints in the output. The buffered bitmap LOS
+// check is the real safety mechanism — the cap is removed and we trust
+// the LOS test.
 function smoothPath(coords, isLand, step) {
   if (coords.length <= 2) return coords
   const out = [coords[0]]
@@ -314,7 +320,6 @@ function smoothPath(coords, isLand, step) {
     let j = coords.length - 1
     while (j > i + 1) {
       const a = coords[i], b = coords[j]
-      if (distanceBetween(a, b) > MAX_SMOOTHED_LEG_M) { j--; continue }
       if (!segmentInLand(a, b, isLand, step)) break
       j--
     }
