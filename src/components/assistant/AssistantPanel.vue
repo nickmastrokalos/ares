@@ -55,10 +55,12 @@ const EXAMPLES = [
     ]
   },
   {
-    category: 'Snapshot',
+    category: 'Capture',
     items: [
       { label: 'Snapshot to Desktop',    prompt: 'create a snapshot of the current view' },
-      { label: 'Snapshot, named',        prompt: 'create a snapshot called <name>' }
+      { label: 'Snapshot, named',        prompt: 'create a snapshot called <name>' },
+      { label: 'Video clip (5/10/30/60s)', prompt: 'record a 30-second video of the current view' },
+      { label: 'Video, named',           prompt: 'record a 10-second video called <name>' }
     ]
   }
 ]
