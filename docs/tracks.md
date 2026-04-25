@@ -89,7 +89,7 @@ A manual track is a `features` table row with `type = 'manual-track'` and `Point
 | `cotType` | no | Full CoT type string (e.g. `a-f-G-U-C-I`). `null` = untyped track |
 | `hae` | no | Altitude in meters |
 | `course` | no | Heading 0–359° |
-| `speed` | no | Speed in knots |
+| `speed` | no | Speed in knots (storage). The `ManualTrackPanel` display and edit input both follow the user's `distanceUnits` setting — conversion happens at the boundary, storage stays in knots. |
 
 Manual tracks are not exported via CoT or KML (see `frontend.md` — Import / Export).
 
@@ -145,7 +145,7 @@ Sections:
 
 - **Identity** — callsign (inline rename), affiliation dot + label, TYPE row with inline `TrackTypePicker` that expands on click.
 - **Position** — editable `CoordInput` bound to the feature geometry. Sub-fields follow the user's `coordinateFormat` (DD / DMS / MGRS) and commit on Enter / blur. During an on-map drag the input reflects the live cursor position — `useMapManualTracks` exposes a `draggingTrack` ref (`{ _dbId, lng, lat }`) that `MapView.vue` provides as `draggingTrack`; the panel injects it and watches to update its coord on every frame without hitting the store. On drag release the real commit happens once and the input snaps back to the stored value.
-- **Attributes** — altitude (m), heading (°, with compass rose label), speed (kts). All three are inline-editable.
+- **Attributes** — altitude (m), heading (°, with compass rose label), speed (formatted via `formatSpeed` per the user's `distanceUnits` setting, with the m/s equivalent appended in parens — e.g. `24.3 kts (12.5 m/s)`). All three are inline-editable. The speed input adapts its placeholder + parsing to the current unit; the value persists as knots.
 
 Writes go through `featuresStore.updateFeature()`. Delete removes the feature and closes the panel.
 

@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
 import { formatCoordinate } from '@/services/coordinates'
+import { formatSpeed } from '@/services/geometry'
 
 const props = defineProps({
   uid: { type: String, required: true }
@@ -43,9 +44,10 @@ const position = computed(() => {
   return formatCoordinate(track.value.lon, track.value.lat, settingsStore.coordinateFormat)
 })
 
-const speedKnots = computed(() => {
+const speedDisplay = computed(() => {
   if (!track.value) return '—'
-  return `${(track.value.speed * 1.94384).toFixed(1)} kts`
+  const ms = track.value.speed
+  return `${formatSpeed(ms, settingsStore.distanceUnits)} (${ms.toFixed(1)} m/s)`
 })
 
 const courseDisplay = computed(() => {
@@ -171,7 +173,7 @@ watch(() => tracksStore.focusedUid, (uid) => {
         <span class="attr-key">COURSE</span>
         <span class="attr-val">{{ courseDisplay }}</span>
         <span class="attr-key">SPEED</span>
-        <span class="attr-val">{{ speedKnots }}</span>
+        <span class="attr-val">{{ speedDisplay }}</span>
       </div>
 
       <div class="divider" />

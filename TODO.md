@@ -7,6 +7,7 @@ Running backlog for Ares. Not a strict roadmap — reorder as priorities shift. 
 - **Track prediction ghosts** — project each CoT / AIS / manual track forward by its current course + speed and render a semi-transparent "ghost" of where it'll be in N seconds. Per-track toggle, global time horizon. Related to `useMapGhosts` (existing, different feature).
 - **CoT track history trails** — render the recent path of each live CoT track as a fading polyline. **Design note** (already in memory): trail length scales with the track's current speed — faster tracks get longer trails so the visual span of the trail represents roughly the same time window.
 - **Replay / time scrub** — record incoming CoT + AIS positions over time and let the operator scrub a timeline to replay movement. Separate store for historical positions; draw layer in a "replay" styling.
+- **Speed unit: m/s** — `formatSpeed` / `speedUnitLabel` in `src/services/geometry.js` currently support `metric` (km/h), `nautical` (kts), and `statute` (mph). Add `m/s` as a fourth option so the Settings dialog's speed unit can be set to raw SI, then thread it through everywhere `settingsStore.distanceUnits` flows into `formatSpeed` (track panels, AIS panel, CallInterceptorPanel, etc.). Note: today the speed unit is coupled to `distanceUnits` — splitting it into its own `speedUnits` setting is the cleaner shape if the user wants kts-for-speed with km-for-distance, etc.
 
 ## Follow-ups from recent work
 
