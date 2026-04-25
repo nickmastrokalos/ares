@@ -117,9 +117,9 @@ watch(
         <v-textarea
           v-model="inputText"
           placeholder="Ask the assistant…"
-          rows="1"
+          rows="2"
           auto-grow
-          :max-rows="4"
+          :max-rows="6"
           density="compact"
           variant="plain"
           hide-details
@@ -259,7 +259,7 @@ watch(
 
 .input-field :deep(.v-field__input) {
   font-size: 12px;
-  padding: 4px 0;
+  padding: 6px 4px;
   min-height: unset;
 }
 </style>
