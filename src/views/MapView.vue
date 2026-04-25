@@ -122,8 +122,7 @@ watch(annotationsApi.selectedId, (id) => {
 const interceptApi = useMapIntercepts(() => map)
 const mapAlerts    = useMapAlerts()
 const { capture: captureSnapshotRaw } = useMapSnapshot({
-  getMap: () => map,
-  featuresStore
+  getMap: () => map
 })
 
 async function captureSnapshot() {
