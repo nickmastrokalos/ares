@@ -15,6 +15,59 @@ const positioned = ref(false)
 
 const inputText = ref('')
 const logRef    = ref(null)
+const inputRef  = ref(null)
+const helpOpen  = ref(false)
+
+// Suggestive prompt library shown by the header help button. Skewed
+// toward the complex routing flows since the simple cases are
+// self-discoverable. Placeholders in <angle brackets> are meant to be
+// replaced before submitting.
+const EXAMPLES = [
+  {
+    category: 'Routes',
+    items: [
+      { label: 'Stay over water',          prompt: 'create a route from <start> to <end> that stays over water' },
+      { label: 'Avoid a shape',            prompt: 'create a route from <start> to <end> avoiding <shape name>' },
+      { label: 'Avoid + land',             prompt: 'create a route from <start> to <end> avoiding <shape name> and not crossing land' },
+      { label: 'Through a shape',          prompt: 'create a route from <start> to <end> through <shape name>' },
+      { label: 'Through, with entry/exit', prompt: 'create a route from <start> to <end> through <shape name> entering from the south and exiting at the north' },
+      { label: 'Avoid AIS',                prompt: 'create a route from <start> to <end> avoiding AIS tracks' },
+      { label: 'AIS, custom horizon',      prompt: 'create a route from <start> to <end> avoiding AIS tracks within 2 nm for the next hour' },
+      { label: 'Stacked constraints',      prompt: 'create a route from <start> to <end> through <shape A> avoiding <shape B>, land, and AIS tracks' }
+    ]
+  },
+  {
+    category: 'Drawing',
+    items: [
+      { label: 'Named polygon',          prompt: 'draw a polygon called Keepout with vertices at <coord 1>, <coord 2>, <coord 3>, <coord 4>' },
+      { label: 'Circle by radius',       prompt: 'draw a 5 km circle at <coord>' },
+      { label: 'Box around features',    prompt: 'draw a box around <feature 1> and <feature 2>' },
+      { label: 'Place a manual track',   prompt: 'place a hostile tank at <coord> called <callsign>' }
+    ]
+  },
+  {
+    category: 'Queries',
+    items: [
+      { label: 'Tracks within range',    prompt: 'list all hostile tracks within 10 nm of FRND-1' },
+      { label: 'AIS vessels nearby',     prompt: 'list AIS vessels within 5 nm of <coord>' },
+      { label: 'Resolve a name',         prompt: 'find <entity name>' },
+      { label: 'Distance + bearing',     prompt: 'what is the distance and bearing from <a> to <b>?' }
+    ]
+  }
+]
+
+function fillExample(prompt) {
+  inputText.value = prompt
+  helpOpen.value = false
+  nextTick(() => {
+    // Focus the textarea so the user can edit placeholders right away.
+    const el = inputRef.value?.$el?.querySelector('textarea')
+    if (el) {
+      el.focus()
+      el.setSelectionRange(prompt.length, prompt.length)
+    }
+  })
+}
 
 // Start docked bottom-right, matching the previous fixed position, then let
 // the user drag from there. Recomputed each time the panel is (re)opened
@@ -70,6 +123,48 @@ watch(
       <v-icon size="14" class="text-medium-emphasis" style="flex-shrink:0">mdi-robot-outline</v-icon>
       <span class="panel-title">{{ store.contextLabel }}</span>
       <v-spacer />
+      <v-menu
+        v-model="helpOpen"
+        :close-on-content-click="false"
+        location="bottom end"
+        offset="2"
+      >
+        <template #activator="{ props: menuProps }">
+          <v-btn
+            v-bind="menuProps"
+            icon="mdi-help-circle-outline"
+            size="x-small"
+            variant="text"
+            class="text-medium-emphasis header-btn"
+            title="Example prompts"
+            @click.stop
+            @pointerdown.stop
+          />
+        </template>
+        <div class="examples-popover" @pointerdown.stop>
+          <div class="examples-header">
+            <v-icon size="12" class="text-medium-emphasis">mdi-lightbulb-outline</v-icon>
+            <span class="text-caption">Example prompts · click to insert</span>
+          </div>
+          <div
+            v-for="group in EXAMPLES"
+            :key="group.category"
+            class="examples-group"
+          >
+            <div class="examples-group-label">{{ group.category }}</div>
+            <button
+              v-for="item in group.items"
+              :key="item.label"
+              type="button"
+              class="example-row"
+              @click="fillExample(item.prompt)"
+            >
+              <span class="example-label">{{ item.label }}</span>
+              <span class="example-prompt">{{ item.prompt }}</span>
+            </button>
+          </div>
+        </div>
+      </v-menu>
       <v-btn
         :icon="store.minimized ? 'mdi-chevron-up' : 'mdi-chevron-down'"
         size="x-small"
@@ -115,6 +210,7 @@ watch(
       <!-- Input -->
       <div class="input-row">
         <v-textarea
+          ref="inputRef"
           v-model="inputText"
           placeholder="Ask the assistant…"
           rows="2"
@@ -261,5 +357,81 @@ watch(
   font-size: 12px;
   padding: 6px 4px;
   min-height: unset;
+}
+
+/* ---- Help / examples popover ---- */
+
+.examples-popover {
+  width: 360px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-surface-variant));
+  border-radius: 4px;
+  padding: 6px 0;
+  user-select: text;
+}
+
+.examples-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.examples-group {
+  padding: 4px 0;
+}
+
+.examples-group + .examples-group {
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.examples-group-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(var(--v-theme-on-surface), 0.4);
+  padding: 4px 10px;
+}
+
+.example-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font-family: inherit;
+}
+
+.example-row:hover {
+  background: rgba(var(--v-theme-on-surface), 0.05);
+}
+
+.example-row:active {
+  background: rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.example-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(var(--v-theme-on-surface), 0.85);
+}
+
+.example-prompt {
+  font-size: 10px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  font-style: italic;
+  line-height: 1.35;
+  white-space: normal;
 }
 </style>

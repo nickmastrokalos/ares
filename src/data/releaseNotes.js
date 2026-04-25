@@ -21,6 +21,7 @@ export const RELEASES = [
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
     added: [
+      'Assistant panel: new help button (?) in the header opens a popover of example prompts grouped by category — Routes, Drawing, Queries — focused on the more complex flows (water-only, via, multi-side via, AIS avoidance, stacked constraints). Click an example to insert its template into the input with placeholders to fill in.',
       'Track cards now show m/s alongside the unit-formatted speed (e.g. "24.3 kts (12.5 m/s)").',
       'Releases tab on the Settings page (sidebar) showing per-version notes.',
       'First-launch-after-update overlay listing every entry newer than what the user last dismissed.',
