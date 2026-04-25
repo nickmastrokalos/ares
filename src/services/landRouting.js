@@ -564,3 +564,43 @@ export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, {
       : 'no path found around the supplied obstacles within the search bbox'
   })
 }
+
+/**
+ * Plans a polyline from `start` to `end` that passes through every
+ * `viaPoint` in order, optionally avoiding obstacle polygons / land on
+ * each leg. Implemented as a sequence of `planRouteAvoidingObstacles`
+ * calls (one per `[start, via1, via2, …, end]` consecutive pair),
+ * with the join points de-duplicated when concatenating.
+ *
+ * @param {[number, number]} start
+ * @param {[number, number]} end
+ * @param {Array<[number, number]>} viaPoints  Ordered intermediate points.
+ * @param {Array<{ type: string, coordinates: any }>} obstaclePolygons
+ * @param {{ gridSize?: number, bufferDeg?: number, includeLand?: boolean }} [opts]
+ */
+export async function planRouteThroughVias(start, end, viaPoints, obstaclePolygons, opts = {}) {
+  if (!Array.isArray(start) || !Array.isArray(end)) {
+    return { ok: false, reason: 'start and end must be [lng, lat] coordinates' }
+  }
+  const vias = Array.isArray(viaPoints) ? viaPoints : []
+  const sequence = [start, ...vias, end]
+  const out = []
+  let totalMeters = 0
+  for (let i = 0; i < sequence.length - 1; i++) {
+    const a = sequence[i]
+    const b = sequence[i + 1]
+    const leg = await planRouteAvoidingObstacles(a, b, obstaclePolygons, opts)
+    if (!leg.ok) {
+      return { ok: false, reason: `leg ${i + 1} of ${sequence.length - 1}: ${leg.reason}` }
+    }
+    if (i === 0) {
+      out.push(...leg.coordinates)
+    } else {
+      // Drop the first point of each follow-up leg — it duplicates the
+      // last point of the previous leg.
+      out.push(...leg.coordinates.slice(1))
+    }
+    totalMeters += leg.lengthMeters
+  }
+  return { ok: true, coordinates: out, lengthMeters: totalMeters }
+}
