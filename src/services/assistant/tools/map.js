@@ -766,7 +766,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
                   type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
                   description: '[longitude, latitude]'
                 },
-                label: { type: 'string', description: 'Optional waypoint label (e.g. "Alpha", "Bravo"). Defaults to SP/WP N/EP.' }
+                label: { type: 'string', description: 'OPTIONAL waypoint label. Pass ONLY when the user explicitly named this specific waypoint (e.g. "label this point Alpha"). If the user did not provide a label, OMIT this field — the system auto-labels SP / WP 1 / WP 2 / … / EP. Do NOT invent descriptive labels like "South entry", "Turning point", "Approach", or anything derived from prompt context.' }
               },
               required: ['coordinate']
             },
