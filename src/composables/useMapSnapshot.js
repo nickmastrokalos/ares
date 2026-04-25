@@ -16,10 +16,7 @@ const LEGEND_TEXT   = '#e3e6ee'
 const LEGEND_DIM    = '#8a92a8'
 const LEGEND_PAD    = 16
 
-export function useMapSnapshot({
-  getMap,
-  featuresStore
-}) {
+export function useMapSnapshot({ getMap }) {
 
   // HTML text labels (bullseye / bloodhound / perimeter / measure) live
   // in the DOM overlay, so `map.getCanvas()` alone misses them. Rasterise
@@ -135,7 +132,10 @@ export function useMapSnapshot({
     ctx.stroke()
 
     const pad = Math.round(LEGEND_PAD * dpr)
-    const title = featuresStore.activeMission?.name ?? 'Ares Mission'
+    // Fixed app-branded legend title. The mission name used to appear
+    // here, but it doubled as label and watermark and snapshots from
+    // missions with developer-scratch names (e.g. "Test") looked off.
+    const title = 'Ares Map Snapshot'
     const now = new Date()
     const ts = now.toISOString().slice(0, 19).replace('T', ' ') + 'Z'
 
