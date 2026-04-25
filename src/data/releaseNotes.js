@@ -27,7 +27,8 @@ export const RELEASES = [
       'Assistant can now plan water-only routes that avoid land. New tools: `route_check_land_crossing` (read) tests an existing route against bundled coastlines, and `map_draw_route_water_only` (write) plans and draws a route from start to end with detours around land. Backed by Natural Earth 10m land polygons.'
     ],
     changed: [
-      'Track-card speed display (CoT and manual track panels) now honors the Distance Units setting; the manual-track inline edit input adapts placeholder + parsing to the current unit.'
+      'Track-card speed display (CoT and manual track panels) now honors the Distance Units setting; the manual-track inline edit input adapts placeholder + parsing to the current unit.',
+      'Assistant input field is taller by default (two rows) and has a bit more padding so prompts feel less cramped.'
     ],
     fixed: [
       'Bloodhound, perimeter, bullseye, and annotations: turning the tool off via the toolbar button now drops the crosshair cursor and exits selection mode, matching the panel\'s close button.',
