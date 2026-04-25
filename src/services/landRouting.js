@@ -26,7 +26,6 @@
 
 import {
   pointInPolygon,
-  segmentCrossesPolygon,
   findLandCrossingIndex,
   geometryBounds,
   distanceBetween
@@ -136,19 +135,51 @@ class MinHeap {
   }
 }
 
-// Lazy land-cell test cached per coordinate hash.
+function anyPolyContains(polygons, pt) {
+  for (const g of polygons) {
+    if (pointInPolygon(pt, g)) return true
+  }
+  return false
+}
+
+// True if the point — or any of 8 ring points at LAND_BUFFER_DEG around it
+// — sits inside a land polygon. The ring acts as a Minkowski inflation of
+// the polygon set, which absorbs NE 10m's coastline generalization error.
+function isInBufferedLand(coord, polygons) {
+  if (anyPolyContains(polygons, coord)) return true
+  for (const [dx, dy] of BUFFER_RING_OFFSETS) {
+    if (anyPolyContains(polygons, [coord[0] + dx, coord[1] + dy])) return true
+  }
+  return false
+}
+
+// Lazy buffered-land test cached per coordinate hash. Hash precision (~1 m
+// at the equator) keeps the cache hit rate high during A* expansion.
 function makeLandTest(polygons) {
   const cache = new Map()
   return (coord) => {
     const key = `${coord[0].toFixed(5)},${coord[1].toFixed(5)}`
     if (cache.has(key)) return cache.get(key)
-    let onLand = false
-    for (const g of polygons) {
-      if (pointInPolygon(coord, g)) { onLand = true; break }
-    }
+    const onLand = isInBufferedLand(coord, polygons)
     cache.set(key, onLand)
     return onLand
   }
+}
+
+// True if any sample along the open segment a-b lands in buffered land.
+// Sample interval is half the buffer so the segment can't slip past a
+// buffer-sized obstacle between samples. Used by the smoother in place of
+// `segmentCrossesPolygon` so its line-of-sight test honors the same
+// standoff distance the cell-level test enforces.
+function segmentInBufferedLand(a, b, polygons) {
+  const dx = b[0] - a[0], dy = b[1] - a[1]
+  const len = Math.hypot(dx, dy)
+  const steps = Math.max(2, Math.ceil(len / (LAND_BUFFER_DEG / 2)))
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps
+    if (isInBufferedLand([a[0] + dx * t, a[1] + dy * t], polygons)) return true
+  }
+  return false
 }
 
 // Walk outward in a small spiral until a water cell is found. Used when an
@@ -179,11 +210,28 @@ function heuristic(a, b, step) {
 // says "clear" — that prevents a long leg from accidentally cutting across
 // a generalized peninsula. Tunable; smaller = more waypoints + safer at
 // coastal scales, larger = cleaner routes at ocean scale.
-const MAX_SMOOTHED_LEG_M = 1500
+const MAX_SMOOTHED_LEG_M = 1000
+
+// Coastline buffer in degrees — applied at every land test (cell + smoother
+// LOS) to compensate for NE 10m's ~250-500 m coastline generalization. A
+// coordinate within this distance of any land polygon counts as land. At
+// lat 36° that's ~555 m of standoff from the simplified coastline, which
+// is enough room for the *true* coastline (per the basemap) to fit inside
+// the buffered zone in most cases. Tunable; bigger = safer but refuses
+// narrow channels, smaller = threads channels but clips more land.
+const LAND_BUFFER_DEG = 0.005
+
+// 8-neighbour ring offsets at LAND_BUFFER_DEG distance. Combined with the
+// center, a 9-point Minkowski-style inflation of the polygons.
+const BUFFER_RING_OFFSETS = (() => {
+  const r = LAND_BUFFER_DEG
+  const d = LAND_BUFFER_DEG * 0.7071  // ~r/√2 for diagonals
+  return [[r, 0], [-r, 0], [0, r], [0, -r], [d, d], [d, -d], [-d, d], [-d, -d]]
+})()
 
 // Greedy line-of-sight smoother. Drops intermediate waypoints whose direct
-// connection to the next-next waypoint doesn't cross any land polygon AND
-// whose length stays under MAX_SMOOTHED_LEG_M.
+// connection to a later waypoint stays out of buffered land AND whose
+// length stays under MAX_SMOOTHED_LEG_M.
 function smoothPath(coords, polygons) {
   if (coords.length <= 2) return coords
   const out = [coords[0]]
@@ -193,11 +241,7 @@ function smoothPath(coords, polygons) {
     while (j > i + 1) {
       const a = coords[i], b = coords[j]
       if (distanceBetween(a, b) > MAX_SMOOTHED_LEG_M) { j--; continue }
-      let blocked = false
-      for (const g of polygons) {
-        if (segmentCrossesPolygon(a, b, g)) { blocked = true; break }
-      }
-      if (!blocked) break
+      if (!segmentInBufferedLand(a, b, polygons)) break
       j--
     }
     out.push(coords[j])
