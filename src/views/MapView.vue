@@ -155,6 +155,30 @@ async function captureVideoToDesktop({ durationSeconds, filename } = {}) {
   return recordVideoRaw({ destination: 'desktop', durationSeconds, filename })
 }
 
+const recordingVideo = ref(false)
+
+// Toolbar entry point — records for the requested duration and saves
+// via the native dialog (matching the snapshot button). The toolbar
+// keeps the button in a "recording" state for the duration so the
+// user has visible feedback that something is happening.
+async function captureVideo({ durationSeconds } = {}) {
+  if (recordingVideo.value) return
+  recordingVideo.value = true
+  try {
+    const res = await recordVideoRaw({ destination: 'dialog', durationSeconds })
+    if (!res.ok && !res.cancelled) {
+      mapAlerts.setAlert('video-err', {
+        source: 'snapshot', level: 'critical',
+        message: `Video capture failed: ${res.error}`,
+        timestamp: Date.now()
+      })
+      setTimeout(() => mapAlerts.clearAlert('video-err'), 6000)
+    }
+  } finally {
+    recordingVideo.value = false
+  }
+}
+
 // Perimeter breaches are aggregated into a single alert so the chip stays
 // compact regardless of how many perimeters are breached. Each breaching
 // perimeter contributes one line to the aggregate message; the chip's
@@ -580,6 +604,7 @@ onUnmounted(async () => {
       :ghost-panel-open="ghostPanelOpen"
       :intercept-panel-open="interceptPanelOpen"
       :ais-panel-open="aisPanelOpen"
+      :recording-video="recordingVideo"
       :mission-name="featuresStore.activeMission?.name || ''"
       :plugin-buttons="pluginRegistry.allToolbarButtons.value"
       @toggle-draw="toggleDrawPanel"
@@ -601,6 +626,7 @@ onUnmounted(async () => {
       @exit-mission="exitMission"
       @toggle-io="ioDialogOpen = true"
       @snapshot="captureSnapshot"
+      @capture-video="captureVideo"
     />
     <div class="map-body">
       <div ref="mapContainer" class="map-container">
