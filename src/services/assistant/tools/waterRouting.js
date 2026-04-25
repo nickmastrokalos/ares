@@ -1,14 +1,16 @@
-// Water-only routing tools.
+// Routing tools backed by the grid A* + bitmap planner in
+// `src/services/landRouting.js`.
 //
-// `route_check_land_crossing` — readonly: tests an existing route's polyline
-//                               against bundled coastline data.
-// `map_draw_route_water_only` — write: plans a polyline from start to end
-//                               that stays in water and creates the route.
-//
-// Both tools lazy-load the 10m land dataset on first use. See
-// `src/services/landRouting.js` for the planner internals.
+// `route_check_land_crossing`           — readonly: tests an existing route
+//                                         against bundled coastline data.
+// `map_draw_route_water_only`           — write: plans a polyline from start
+//                                         to end that stays in water.
+// `map_draw_route_avoiding_features`    — write: plans a polyline from start
+//                                         to end that does not enter the
+//                                         supplied user-drawn features
+//                                         (keepouts, no-go boxes, etc.).
 
-import { checkRouteCrossesLand, planWaterRoute } from '@/services/landRouting'
+import { checkRouteCrossesLand, planWaterRoute, planRouteAvoidingObstacles } from '@/services/landRouting'
 
 const DEFAULT_FEATURE_COLOR = '#ffffff'
 
@@ -87,6 +89,81 @@ export function waterRoutingTools({ featuresStore }) {
           success: true,
           waypointCount: coords.length,
           lengthMeters: plan.lengthMeters
+        }
+      }
+    },
+
+    {
+      name: 'map_draw_route_avoiding_features',
+      description: 'Plan a route from `start` to `end` that does not enter the bounding shape of any feature in `avoid_feature_ids` (keepout boxes, no-go polygons / circles / sectors, etc.) and draw it on the map. Use this when the user asks to avoid one or more named areas. Resolve the names to IDs first via `map_find_entity`. The avoided features must be polygon-shaped — `polygon`, `box`, `circle`, `ellipse`, or `sector`. Other types (point, line, route, manual-track) cannot be used as obstacles and produce an error. Optional `buffer_meters` adds a standoff distance from each obstacle. NOTE: this tool does NOT also avoid land — combine with `map_draw_route_water_only` only as a sequential request if both are needed (rare).',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          start: {
+            type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
+            description: 'Start [longitude, latitude].'
+          },
+          end: {
+            type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
+            description: 'End [longitude, latitude].'
+          },
+          avoid_feature_ids: {
+            type: 'array',
+            items: { type: 'integer' },
+            minItems: 1,
+            description: 'Mission feature ids to treat as obstacles. Resolve names to ids via `map_find_entity` first.'
+          },
+          buffer_meters: {
+            type: 'number',
+            description: 'Optional standoff distance from each obstacle in meters. Default 0 (route may hug obstacle edges).'
+          },
+          name:  { type: 'string', description: 'Optional route name. Defaults to "Route".' },
+          color: { type: 'string', description: 'Optional hex color. Defaults to white.' }
+        },
+        required: ['start', 'end', 'avoid_feature_ids']
+      },
+      previewRender({ start, end, avoid_feature_ids, name }) {
+        const label = name ? `"${name}" · ` : ''
+        const fmt = ([x, y]) => `${y.toFixed(4)}, ${x.toFixed(4)}`
+        const obs = avoid_feature_ids.length === 1
+          ? `1 obstacle`
+          : `${avoid_feature_ids.length} obstacles`
+        return `${label}Route avoiding ${obs} · ${fmt(start)} → ${fmt(end)}`
+      },
+      async handler({ start, end, avoid_feature_ids, buffer_meters = 0, name = 'Route', color = DEFAULT_FEATURE_COLOR }) {
+        const obstacles = []
+        for (const fid of avoid_feature_ids) {
+          const row = featuresStore.features.find(f => f.id === fid)
+          if (!row) return { error: `Feature ${fid} not found.` }
+          const SUPPORTED = new Set(['polygon', 'box', 'circle', 'ellipse', 'sector'])
+          if (!SUPPORTED.has(row.type)) {
+            return { error: `Feature ${fid} is type "${row.type}"; only polygon / box / circle / ellipse / sector can be used as obstacles.` }
+          }
+          const geom = JSON.parse(row.geometry)
+          if (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon') {
+            return { error: `Feature ${fid} has unexpected geometry type "${geom.type}".` }
+          }
+          obstacles.push(geom)
+        }
+        // buffer_meters → degrees: planar 1° ≈ 111 km. Cheap conversion;
+        // adequate for the buffer-as-standoff use case at coastal scales.
+        const bufferDeg = (Number(buffer_meters) || 0) / 111000
+        const plan = await planRouteAvoidingObstacles(start, end, obstacles, { bufferDeg })
+        if (!plan.ok) return { error: plan.reason }
+        const coords = plan.coordinates
+        const geometry = { type: 'LineString', coordinates: coords }
+        const properties = {
+          name, color,
+          waypoints: rebuildWaypointMeta(coords.length)
+        }
+        const id = await featuresStore.addFeature('route', geometry, properties)
+        return {
+          id,
+          success: true,
+          waypointCount: coords.length,
+          lengthMeters: plan.lengthMeters,
+          avoidedFeatureCount: obstacles.length
         }
       }
     }

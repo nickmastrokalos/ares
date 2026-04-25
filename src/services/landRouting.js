@@ -73,11 +73,18 @@ async function polygonsInBbox(queryBbox) {
   return all.filter(p => bboxesOverlap(p.bbox, queryBbox)).map(p => p.geometry)
 }
 
-function paddedBbox(start, end, padFraction = 0.25, padMin = 0.05) {
-  const w = Math.min(start[0], end[0])
-  const e = Math.max(start[0], end[0])
-  const s = Math.min(start[1], end[1])
-  const n = Math.max(start[1], end[1])
+function paddedBbox(start, end, obstacleBboxes = [], padFraction = 0.25, padMin = 0.05) {
+  let w = Math.min(start[0], end[0])
+  let e = Math.max(start[0], end[0])
+  let s = Math.min(start[1], end[1])
+  let n = Math.max(start[1], end[1])
+  for (const bb of obstacleBboxes) {
+    if (!bb) continue
+    if (bb[0][0] < w) w = bb[0][0]
+    if (bb[1][0] > e) e = bb[1][0]
+    if (bb[0][1] < s) s = bb[0][1]
+    if (bb[1][1] > n) n = bb[1][1]
+  }
   const padX = Math.max((e - w) * padFraction, padMin)
   const padY = Math.max((n - s) * padFraction, padMin)
   return [[w - padX, s - padY], [e + padX, n + padY]]
@@ -163,7 +170,7 @@ class MinHeap {
 // After this, every cell test in A* and every sample test in the
 // smoother is an O(1) bitmap lookup. The naïve "9 PIPs per cell × big
 // continental polygon" path that froze the UI is gone.
-function buildLandBitmap(polygons, bbox, step) {
+function buildLandBitmap(polygons, bbox, step, bufferCells) {
   const [[w, s], [e, n]] = bbox
   const cellsX = Math.round((e - w) / step) + 1
   const cellsY = Math.round((n - s) / step) + 1
@@ -206,9 +213,10 @@ function buildLandBitmap(polygons, bbox, step) {
     }
   }
 
-  // Dilate by buffer radius (in cells).
-  const bufferCells = Math.max(0, Math.round(LAND_BUFFER_DEG / step))
-  if (bufferCells === 0) return { grid: raw, cellsX, cellsY }
+  // Dilate by buffer radius (in cells). Caller supplies bufferCells so the
+  // same routine works for water (NE 10m buffer) and user-drawn obstacles
+  // (typically zero or a small standoff requested by the operator).
+  if (!bufferCells || bufferCells <= 0) return { grid: raw, cellsX, cellsY }
   const buffered = new Uint8Array(raw)
   for (let yi = 0; yi < cellsY; yi++) {
     for (let xi = 0; xi < cellsX; xi++) {
@@ -338,59 +346,24 @@ export async function checkRouteCrossesLand(coordinates) {
   return { crosses: idx >= 0, segmentIndex: idx }
 }
 
-/**
- * Plans a polyline from `start` to `end` that stays in water.
- * Returns `{ ok: true, coordinates }` on success, or `{ ok: false, reason }`
- * if no path exists (endpoint inside land with no nearby water, A* exhausts
- * the grid, etc.).
- *
- * @param {[number, number]} start  [lng, lat]
- * @param {[number, number]} end    [lng, lat]
- * @param {{ gridSize?: number }} [opts]
- * @returns {Promise<{ ok: true, coordinates: Array<[number, number]>, lengthMeters: number }
- *                  | { ok: false, reason: string }>}
- */
-export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
-  if (!Array.isArray(start) || !Array.isArray(end)) {
-    return { ok: false, reason: 'start and end must be [lng, lat] coordinates' }
-  }
-
-  // If the straight line is already water-clear, no planning needed.
-  const direct = await checkRouteCrossesLand([start, end])
-  if (!direct.crosses) {
-    return {
-      ok: true,
-      coordinates: [start, end],
-      lengthMeters: distanceBetween(start, end)
-    }
-  }
-
-  const bbox = paddedBbox(start, end)
-  const polygons = await polygonsInBbox(bbox)
-  if (polygons.length === 0) {
-    // Pre-filter says no land in the bbox — direct line must've been a
-    // false positive somehow; bail honestly.
-    return {
-      ok: true,
-      coordinates: [start, end],
-      lengthMeters: distanceBetween(start, end)
-    }
-  }
-
+// Shared core: bbox already chosen, obstacle polygons already filtered,
+// run rasterization + A* + smoothing. Both `planWaterRoute` and
+// `planRouteAvoidingObstacles` reach this with their own setup.
+function planOnBbox(start, end, bbox, polygons, { gridSize, bufferCells, noPathReason }) {
   const step = chooseStep(bbox, gridSize)
-  const bitmap = buildLandBitmap(polygons, bbox, step)
+  const bitmap = buildLandBitmap(polygons, bbox, step, bufferCells)
   const isLand = makeLandTest(bitmap, bbox, step)
 
   let startIdx = toIndex(start, bbox, step)
   let endIdx   = toIndex(end,   bbox, step)
   if (isLand(fromIndex(startIdx, bbox, step))) {
     const w = nearestWaterIndex(startIdx, bbox, step, isLand)
-    if (!w) return { ok: false, reason: 'start point is on land with no water nearby' }
+    if (!w) return { ok: false, reason: 'start point is inside an obstacle with no clear cell nearby' }
     startIdx = w
   }
   if (isLand(fromIndex(endIdx, bbox, step))) {
     const w = nearestWaterIndex(endIdx, bbox, step, isLand)
-    if (!w) return { ok: false, reason: 'end point is on land with no water nearby' }
+    if (!w) return { ok: false, reason: 'end point is inside an obstacle with no clear cell nearby' }
     endIdx = w
   }
 
@@ -404,7 +377,6 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
 
   const endKey = key(endIdx)
   let found = false
-  // Hard cap so a pathological case can't lock the UI.
   const maxNodes = gridSize * gridSize * 4
   let popped = 0
 
@@ -431,10 +403,9 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
   }
 
   if (!found) {
-    return { ok: false, reason: 'no water path found between start and end within the search bbox' }
+    return { ok: false, reason: noPathReason ?? 'no clear path found between start and end within the search bbox' }
   }
 
-  // Reconstruct.
   const path = []
   let walk = endKey
   while (walk) {
@@ -452,4 +423,90 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
     len += distanceBetween(smoothed[i - 1], smoothed[i])
   }
   return { ok: true, coordinates: smoothed, lengthMeters: len }
+}
+
+/**
+ * Plans a polyline from `start` to `end` that stays in water. Lazy-loads
+ * the bundled coastline data on first call.
+ *
+ * @param {[number, number]} start  [lng, lat]
+ * @param {[number, number]} end    [lng, lat]
+ * @param {{ gridSize?: number }} [opts]
+ * @returns {Promise<{ ok: true, coordinates: Array<[number, number]>, lengthMeters: number }
+ *                  | { ok: false, reason: string }>}
+ */
+export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
+  if (!Array.isArray(start) || !Array.isArray(end)) {
+    return { ok: false, reason: 'start and end must be [lng, lat] coordinates' }
+  }
+
+  // If the straight line is already water-clear, no planning needed.
+  const direct = await checkRouteCrossesLand([start, end])
+  if (!direct.crosses) {
+    return {
+      ok: true,
+      coordinates: [start, end],
+      lengthMeters: distanceBetween(start, end)
+    }
+  }
+
+  const bbox = paddedBbox(start, end)
+  const polygons = await polygonsInBbox(bbox)
+  if (polygons.length === 0) {
+    return {
+      ok: true,
+      coordinates: [start, end],
+      lengthMeters: distanceBetween(start, end)
+    }
+  }
+
+  const step = chooseStep(bbox, gridSize)
+  const bufferCells = Math.max(0, Math.round(LAND_BUFFER_DEG / step))
+  return planOnBbox(start, end, bbox, polygons, {
+    gridSize, bufferCells,
+    noPathReason: 'no water path found between start and end within the search bbox'
+  })
+}
+
+/**
+ * Plans a polyline from `start` to `end` that does not enter any of the
+ * supplied obstacle polygons. Used by the assistant's
+ * `map_draw_route_avoiding_features` tool to route around user-drawn
+ * keepouts. Does NOT use the bundled coastline data — caller must include
+ * coastline obstacles explicitly if they care.
+ *
+ * @param {[number, number]} start  [lng, lat]
+ * @param {[number, number]} end    [lng, lat]
+ * @param {Array<{ type: string, coordinates: any }>} obstaclePolygons
+ *   Polygon / MultiPolygon GeoJSON geometries to treat as impassable.
+ * @param {{ gridSize?: number, bufferDeg?: number }} [opts]
+ *   `bufferDeg` is an optional standoff distance from each obstacle in
+ *   degrees (NOT meters). Default 0 — route may hug obstacle edges.
+ */
+export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, { gridSize = 200, bufferDeg = 0 } = {}) {
+  if (!Array.isArray(start) || !Array.isArray(end)) {
+    return { ok: false, reason: 'start and end must be [lng, lat] coordinates' }
+  }
+  if (!Array.isArray(obstaclePolygons) || obstaclePolygons.length === 0) {
+    return {
+      ok: true,
+      coordinates: [start, end],
+      lengthMeters: distanceBetween(start, end)
+    }
+  }
+  if (findLandCrossingIndex([start, end], obstaclePolygons) === -1) {
+    return {
+      ok: true,
+      coordinates: [start, end],
+      lengthMeters: distanceBetween(start, end)
+    }
+  }
+  const obstacleBboxes = obstaclePolygons.map(geometryBounds).filter(Boolean)
+  const bbox = paddedBbox(start, end, obstacleBboxes)
+  const step = chooseStep(bbox, gridSize)
+  const bufferCells = Math.max(0, Math.round(bufferDeg / step))
+  return planOnBbox(start, end, bbox, obstaclePolygons, {
+    gridSize, bufferCells,
+    noPathReason: 'no path found around the supplied obstacles within the search bbox'
+  })
 }
