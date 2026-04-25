@@ -64,7 +64,7 @@ export function waterRoutingTools({ featuresStore }) {
             type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
             description: 'End [longitude, latitude].'
           },
-          name:  { type: 'string', description: 'Optional route name. Defaults to "Water route".' },
+          name:  { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the route in their request. Otherwise OMIT — the system auto-generates a default like `route-a3f9`. Do NOT invent descriptive names from context.' },
           color: { type: 'string', description: 'Optional hex color. Defaults to white.' }
         },
         required: ['start', 'end']
@@ -122,7 +122,7 @@ export function waterRoutingTools({ featuresStore }) {
             type: 'number',
             description: 'Optional standoff distance from each user-feature obstacle in meters. Default 0 (route may hug obstacle edges). Land polygons get their own ~555 m coastline buffer regardless of this.'
           },
-          name:  { type: 'string', description: 'Optional route name. Defaults to "Route".' },
+          name:  { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the route. Otherwise OMIT — the system auto-generates a default like `route-a3f9`. Do NOT invent descriptive names from context.' },
           color: { type: 'string', description: 'Optional hex color. Defaults to white.' }
         },
         required: ['start', 'end', 'avoid_feature_ids']

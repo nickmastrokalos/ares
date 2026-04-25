@@ -456,7 +456,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
             description: '[longitude, latitude]'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string', description: 'Hex color e.g. #ff0000' }
         },
         required: ['coordinate']
@@ -489,7 +489,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             minItems: 2,
             description: 'Ordered list of [longitude, latitude] pairs.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['points']
@@ -523,7 +523,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             minItems: 3,
             description: 'Ordered ring of [longitude, latitude] pairs. Auto-closed.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['points']
@@ -557,7 +557,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             description: 'Center [longitude, latitude].'
           },
           radiusMeters: { type: 'number', description: 'Radius in meters.' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['center', 'radiusMeters']
@@ -592,7 +592,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
           radiusMajor: { type: 'number', description: 'Major-axis radius in meters.' },
           radiusMinor: { type: 'number', description: 'Minor-axis radius in meters.' },
           rotation: { type: 'number', description: 'Rotation in degrees (azimuth of major axis from north). Default 0.' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['center', 'radiusMajor', 'radiusMinor']
@@ -626,7 +626,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
           radius: { type: 'number', description: 'Radius in meters.' },
           startAngle: { type: 'number', description: 'Start bearing in degrees (0 = north, clockwise).' },
           endAngle: { type: 'number', description: 'End bearing in degrees (clockwise from north).' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['center', 'radius', 'startAngle', 'endAngle']
@@ -662,7 +662,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             description: 'Northeast corner [longitude, latitude].'
           },
           rotationDeg: { type: 'number', description: 'Rotation in degrees. Default 0.' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['sw', 'ne']
@@ -697,7 +697,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             type: 'number',
             description: 'Margin (in meters) added around the tightest bounding box so the box stays visible. Defaults to 500.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['featureIds']
@@ -773,7 +773,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             minItems: 2,
             description: 'Ordered waypoints. First = SP, last = EP, rest = WP.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['waypoints']
