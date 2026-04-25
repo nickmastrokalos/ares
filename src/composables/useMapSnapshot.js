@@ -16,7 +16,13 @@ const LEGEND_TEXT   = '#e3e6ee'
 const LEGEND_DIM    = '#8a92a8'
 const LEGEND_PAD    = 16
 
-export function useMapSnapshot({ getMap }) {
+// Replace any character that's unsafe in cross-platform filenames with `_`.
+// Conservative — Windows is the strictest of the three platforms we ship to.
+function sanitizeFileName(name) {
+  return String(name).trim().replace(/[\/\\:*?"<>|]+/g, '_')
+}
+
+export function useMapSnapshot({ getMap, featuresStore }) {
 
   // HTML text labels (bullseye / bloodhound / perimeter / measure) live
   // in the DOM overlay, so `map.getCanvas()` alone misses them. Rasterise
@@ -88,17 +94,20 @@ export function useMapSnapshot({ getMap }) {
   /**
    * Capture the current map view as a PNG.
    *
-   * @param {{ destination?: 'dialog' | 'desktop' }} [opts]
-   *   `'dialog'` (default) — prompts the native save dialog with a
-   *   suggested filename. `'desktop'` — writes directly to the user's
-   *   Desktop with the suggested filename, no prompt. The agent's
-   *   `map_capture_snapshot` tool uses 'desktop'; the toolbar button
-   *   uses 'dialog'.
+   * @param {{ destination?: 'dialog' | 'desktop', filename?: string }} [opts]
+   *   `destination`: `'dialog'` (default) prompts the native save
+   *     dialog with a suggested filename; `'desktop'` writes directly
+   *     to the user's Desktop with no prompt. The agent's
+   *     `map_capture_snapshot` tool uses 'desktop'; the toolbar button
+   *     uses 'dialog'.
+   *   `filename`: optional override. Sanitised for cross-platform
+   *     filesystem safety. `.png` is appended if missing. Defaults to
+   *     `ares_screen_capture_<UTC ISO timestamp>.png`.
    *
    * @returns {Promise<{ ok: true, filePath: string }
    *                  | { ok: false, cancelled?: true, error?: string }>}
    */
-  async function capture({ destination = 'dialog' } = {}) {
+  async function capture({ destination = 'dialog', filename } = {}) {
     const map = getMap()
     if (!map) return { ok: false, error: 'Map not ready.' }
 
@@ -132,10 +141,7 @@ export function useMapSnapshot({ getMap }) {
     ctx.stroke()
 
     const pad = Math.round(LEGEND_PAD * dpr)
-    // Fixed app-branded legend title. The mission name used to appear
-    // here, but it doubled as label and watermark and snapshots from
-    // missions with developer-scratch names (e.g. "Test") looked off.
-    const title = 'Ares Map Snapshot'
+    const title = featuresStore.activeMission?.name ?? 'Ares Mission'
     const now = new Date()
     const ts = now.toISOString().slice(0, 19).replace('T', ' ') + 'Z'
 
@@ -164,8 +170,14 @@ export function useMapSnapshot({ getMap }) {
     const blob = await new Promise(resolve => composite.toBlob(resolve, 'image/png'))
     if (!blob) return { ok: false, error: 'Failed to encode PNG.' }
 
-    const stamp    = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const fileName = `ares_screen_capture_${stamp}.png`
+    let fileName
+    if (filename && String(filename).trim()) {
+      const safe = sanitizeFileName(filename)
+      fileName = safe.toLowerCase().endsWith('.png') ? safe : `${safe}.png`
+    } else {
+      const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      fileName = `ares_screen_capture_${stamp}.png`
+    }
 
     let filePath
     if (destination === 'desktop') {

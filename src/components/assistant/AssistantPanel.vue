@@ -53,6 +53,13 @@ const EXAMPLES = [
       { label: 'Resolve a name',         prompt: 'find <entity name>' },
       { label: 'Distance + bearing',     prompt: 'what is the distance and bearing from <a> to <b>?' }
     ]
+  },
+  {
+    category: 'Snapshot',
+    items: [
+      { label: 'Snapshot to Desktop',    prompt: 'create a snapshot of the current view' },
+      { label: 'Snapshot, named',        prompt: 'create a snapshot called <name>' }
+    ]
   }
 ]
 
