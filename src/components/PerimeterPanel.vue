@@ -25,6 +25,13 @@ const selecting = computed(() => pm?.perimeterSelecting.value ?? false)
 // v-model. Committed back on blur / Enter so the user can type freely.
 const defaultRadiusInput = ref(pm?.defaultRadius.value ?? 500)
 
+// Per-row typed-radius mirror. The perimeter list re-computes on every
+// reresolveAll (track moves, AIS updates, etc.), and Vue's `:value` bind
+// can clobber the typed string back to the store number. While a row's
+// entry is present here, it takes precedence over `r.radius` for display;
+// committing (blur / Enter / change) clears it so the store value resumes.
+const radiusInputs = ref({})
+
 const KIND_ICON = {
   cot:     'mdi-radio-tower',
   ais:     'mdi-ferry',
@@ -49,7 +56,18 @@ function commitDefaultRadius() {
   pm?.setDefaultRadius(n)
 }
 
+function rowDisplayValue(r) {
+  return radiusInputs.value[r.ownerKey] ?? r.radius
+}
+
+function onRadiusInput(ownerKey, raw) {
+  radiusInputs.value = { ...radiusInputs.value, [ownerKey]: raw }
+}
+
 function commitRowRadius(ownerKey, raw) {
+  const next = { ...radiusInputs.value }
+  delete next[ownerKey]
+  radiusInputs.value = next
   const n = Number(raw)
   if (!Number.isFinite(n) || n <= 0) return
   pm?.setRadius(ownerKey, n)
@@ -170,11 +188,12 @@ onMounted(() => {
 
           <div class="controls-line">
             <input
-              :value="r.radius"
+              :value="rowDisplayValue(r)"
               type="number"
               min="1"
               step="50"
               class="radius-input-inline"
+              @input="e => onRadiusInput(r.ownerKey, e.target.value)"
               @change="e => commitRowRadius(r.ownerKey, e.target.value)"
               @blur="e => commitRowRadius(r.ownerKey, e.target.value)"
               @keydown.enter="e => commitRowRadius(r.ownerKey, e.target.value)"
