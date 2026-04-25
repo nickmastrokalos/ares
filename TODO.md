@@ -43,8 +43,6 @@ Map functionality the operator has in the UI but the assistant cannot drive. Eac
 
 - **Scenes: update / delete / apply** — `scenesTools` covers `scenes_list` + `scenes_create_scene`. The store exposes `updateScene` (label / description / icon), `deleteScene`, and `saveSceneCards`; none are surfaced. "Load/apply a scene" has no semantics today either — if scenes are meant to be recallable, that's a store design decision before it's a tool.
 
-- **Snapshot capture** — `useMapSnapshot.capture()` exists but has no tool. The agent can't be asked to "export a PNG brief of the current view". One tool, one call; write-op because it prompts the native save dialog.
-
 - **Measure (multi-segment chain)** — `map_measure_distance` handles a single pair of coordinates. The interactive measure tool in `useMapMeasure` accumulates a polyline chain of clicks; no tool surface for "total the route through these five points" beyond what `map_draw_route` would achieve. Low priority — probably subsumed by `map_draw_route` + `route_get` for most use cases.
 
 - **Alerts — programmatic read** — `useMapAlerts` aggregates perimeter breaches (and will pick up more sources). No tool to list active alerts, get a specific one, or acknowledge. Natural follow-up once more sources are wired per the "More alert-chip sources" item below.

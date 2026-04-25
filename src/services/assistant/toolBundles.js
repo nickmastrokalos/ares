@@ -8,6 +8,7 @@ import { perimeterTools }    from './tools/perimeter'
 import { ghostTools }        from './tools/ghosts'
 import { annotationTools }   from './tools/annotations'
 import { bullseyeTools }     from './tools/bullseye'
+import { snapshotTools }     from './tools/snapshot'
 
 // One place to aggregate every tool bundle that ships with MapView. Adding
 // a new bundle = import + spread here; MapView no longer churns when we
@@ -24,6 +25,7 @@ export function buildMapToolBundles(deps) {
     ...perimeterTools(deps),
     ...ghostTools(deps),
     ...annotationTools(deps),
-    ...bullseyeTools(deps)
+    ...bullseyeTools(deps),
+    ...snapshotTools(deps)
   ]
 }

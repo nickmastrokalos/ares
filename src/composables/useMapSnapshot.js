@@ -1,5 +1,6 @@
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
+import { desktopDir, join } from '@tauri-apps/api/path'
 
 // Map snapshot / brief export — composites the current MapLibre canvas
 // with a legend strip (mission, timestamp, overlay counts, view info) and
@@ -87,7 +88,20 @@ export function useMapSnapshot({
     })
   }
 
-  async function capture() {
+  /**
+   * Capture the current map view as a PNG.
+   *
+   * @param {{ destination?: 'dialog' | 'desktop' }} [opts]
+   *   `'dialog'` (default) — prompts the native save dialog with a
+   *   suggested filename. `'desktop'` — writes directly to the user's
+   *   Desktop with the suggested filename, no prompt. The agent's
+   *   `map_capture_snapshot` tool uses 'desktop'; the toolbar button
+   *   uses 'dialog'.
+   *
+   * @returns {Promise<{ ok: true, filePath: string }
+   *                  | { ok: false, cancelled?: true, error?: string }>}
+   */
+  async function capture({ destination = 'dialog' } = {}) {
     const map = getMap()
     if (!map) return { ok: false, error: 'Map not ready.' }
 
@@ -150,15 +164,24 @@ export function useMapSnapshot({
     const blob = await new Promise(resolve => composite.toBlob(resolve, 'image/png'))
     if (!blob) return { ok: false, error: 'Failed to encode PNG.' }
 
-    const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const safeTitle = title.replace(/[^\w\-]+/g, '_').toLowerCase() || 'mission'
-    const defaultName = `${safeTitle}_${stamp}.png`
+    const stamp    = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const fileName = `ares_screen_capture_${stamp}.png`
 
-    const filePath = await save({
-      defaultPath: defaultName,
-      filters: [{ name: 'PNG image', extensions: ['png'] }]
-    })
-    if (!filePath) return { ok: false, cancelled: true }
+    let filePath
+    if (destination === 'desktop') {
+      try {
+        const dir = await desktopDir()
+        filePath = await join(dir, fileName)
+      } catch (err) {
+        return { ok: false, error: `Could not resolve Desktop directory: ${err?.message ?? err}` }
+      }
+    } else {
+      filePath = await save({
+        defaultPath: fileName,
+        filters: [{ name: 'PNG image', extensions: ['png'] }]
+      })
+      if (!filePath) return { ok: false, cancelled: true }
+    }
 
     const bytes = new Uint8Array(await blob.arrayBuffer())
     await writeFile(filePath, bytes)
