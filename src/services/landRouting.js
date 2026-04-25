@@ -351,12 +351,34 @@ export async function checkRouteCrossesLand(coordinates) {
   return { crosses: idx >= 0, segmentIndex: idx }
 }
 
-// Shared core: bbox already chosen, obstacle polygons already filtered,
-// run rasterization + A* + smoothing. Both `planWaterRoute` and
-// `planRouteAvoidingObstacles` reach this with their own setup.
-function planOnBbox(start, end, bbox, polygons, { gridSize, bufferCells, noPathReason }) {
-  const step = chooseStep(bbox, gridSize)
-  const bitmap = buildLandBitmap(polygons, bbox, step, bufferCells)
+// Build a combined obstacle bitmap by rasterizing each layer with its
+// own buffer and OR-ing the results. Used when the planner needs to
+// avoid multiple obstacle types with different buffer requirements
+// (e.g. user-drawn polygons with no buffer + bundled coastline data
+// with the LAND_BUFFER_DEG standoff).
+function buildCombinedBitmap(layers, bbox, step) {
+  let combined = null
+  for (const layer of layers) {
+    if (!layer.polygons?.length) continue
+    const bufferCells = Math.max(0, Math.round((layer.bufferDeg ?? 0) / step))
+    const b = buildLandBitmap(layer.polygons, bbox, step, bufferCells)
+    if (!combined) {
+      combined = { grid: new Uint8Array(b.grid), cellsX: b.cellsX, cellsY: b.cellsY }
+    } else {
+      const len = combined.grid.length
+      for (let i = 0; i < len; i++) {
+        if (b.grid[i]) combined.grid[i] = 1
+      }
+    }
+  }
+  return combined ?? { grid: new Uint8Array(0), cellsX: 0, cellsY: 0 }
+}
+
+// Shared core: bbox already chosen, bitmap already built, run A* +
+// smoothing. Callers (`planWaterRoute`, `planRouteAvoidingObstacles`)
+// own their own bitmap construction so they can apply different
+// per-layer buffers and stack obstacle types.
+function planOnBbox(start, end, bbox, bitmap, step, { gridSize, noPathReason }) {
   const isLand = makeLandTest(bitmap, bbox, step)
 
   let startIdx = toIndex(start, bbox, step)
@@ -466,52 +488,79 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
   }
 
   const step = chooseStep(bbox, gridSize)
-  const bufferCells = Math.max(0, Math.round(LAND_BUFFER_DEG / step))
-  return planOnBbox(start, end, bbox, polygons, {
-    gridSize, bufferCells,
+  const bitmap = buildCombinedBitmap(
+    [{ polygons, bufferDeg: LAND_BUFFER_DEG }],
+    bbox, step
+  )
+  return planOnBbox(start, end, bbox, bitmap, step, {
+    gridSize,
     noPathReason: 'no water path found between start and end within the search bbox'
   })
 }
 
 /**
  * Plans a polyline from `start` to `end` that does not enter any of the
- * supplied obstacle polygons. Used by the assistant's
- * `map_draw_route_avoiding_features` tool to route around user-drawn
- * keepouts. Does NOT use the bundled coastline data — caller must include
- * coastline obstacles explicitly if they care.
+ * supplied obstacle polygons. Optionally also avoids the bundled
+ * coastline data when `includeLand` is set — used by the assistant's
+ * `map_draw_route_avoiding_features` tool when the user asks to avoid
+ * both keepouts and land in one request.
  *
  * @param {[number, number]} start  [lng, lat]
  * @param {[number, number]} end    [lng, lat]
  * @param {Array<{ type: string, coordinates: any }>} obstaclePolygons
  *   Polygon / MultiPolygon GeoJSON geometries to treat as impassable.
- * @param {{ gridSize?: number, bufferDeg?: number }} [opts]
- *   `bufferDeg` is an optional standoff distance from each obstacle in
- *   degrees (NOT meters). Default 0 — route may hug obstacle edges.
+ * @param {{ gridSize?: number, bufferDeg?: number, includeLand?: boolean }} [opts]
+ *   `bufferDeg`: optional standoff from each user obstacle in degrees
+ *   (default 0).  `includeLand`: also avoid the bundled NE 10m land
+ *   polygons (default false). When true, land gets its own
+ *   `LAND_BUFFER_DEG` buffer regardless of `bufferDeg`.
  */
-export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, { gridSize = 200, bufferDeg = 0 } = {}) {
+export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, { gridSize = 200, bufferDeg = 0, includeLand = false } = {}) {
   if (!Array.isArray(start) || !Array.isArray(end)) {
     return { ok: false, reason: 'start and end must be [lng, lat] coordinates' }
   }
-  if (!Array.isArray(obstaclePolygons) || obstaclePolygons.length === 0) {
+  const userPolygons = Array.isArray(obstaclePolygons) ? obstaclePolygons : []
+  if (userPolygons.length === 0 && !includeLand) {
     return {
       ok: true,
       coordinates: [start, end],
       lengthMeters: distanceBetween(start, end)
     }
   }
-  if (findLandCrossingIndex([start, end], obstaclePolygons) === -1) {
-    return {
-      ok: true,
-      coordinates: [start, end],
-      lengthMeters: distanceBetween(start, end)
-    }
-  }
-  const obstacleBboxes = obstaclePolygons.map(geometryBounds).filter(Boolean)
+
+  // Search bbox: cover start, end, and any user obstacle bboxes. (Land
+  // polygons are clipped to this bbox via polygonsInBbox below — we don't
+  // want a continent-sized land polygon to expand the search area.)
+  const obstacleBboxes = userPolygons.map(geometryBounds).filter(Boolean)
   const bbox = paddedBbox(start, end, obstacleBboxes)
+
+  // Land polygons are loaded only when needed.
+  const landPolygons = includeLand ? await polygonsInBbox(bbox) : []
+
+  // Direct check: if the straight line crosses neither user obstacles
+  // nor land, no planning needed.
+  const crossesUser = userPolygons.length > 0 &&
+    findLandCrossingIndex([start, end], userPolygons) !== -1
+  const crossesLand = landPolygons.length > 0 &&
+    findLandCrossingIndex([start, end], landPolygons) !== -1
+  if (!crossesUser && !crossesLand) {
+    return {
+      ok: true,
+      coordinates: [start, end],
+      lengthMeters: distanceBetween(start, end)
+    }
+  }
+
   const step = chooseStep(bbox, gridSize)
-  const bufferCells = Math.max(0, Math.round(bufferDeg / step))
-  return planOnBbox(start, end, bbox, obstaclePolygons, {
-    gridSize, bufferCells,
-    noPathReason: 'no path found around the supplied obstacles within the search bbox'
+  const layers = []
+  if (userPolygons.length) layers.push({ polygons: userPolygons, bufferDeg })
+  if (landPolygons.length) layers.push({ polygons: landPolygons, bufferDeg: LAND_BUFFER_DEG })
+  const bitmap = buildCombinedBitmap(layers, bbox, step)
+
+  return planOnBbox(start, end, bbox, bitmap, step, {
+    gridSize,
+    noPathReason: includeLand
+      ? 'no path found around the supplied obstacles and land within the search bbox'
+      : 'no path found around the supplied obstacles within the search bbox'
   })
 }
