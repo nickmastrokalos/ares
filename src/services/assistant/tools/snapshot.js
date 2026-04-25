@@ -9,14 +9,24 @@ export function snapshotTools({ captureSnapshotToDesktop }) {
   return [
     {
       name: 'map_capture_snapshot',
-      description: 'Save a PNG of the current map view directly to the user\'s Desktop. The image includes the standard Ares legend strip at the bottom (mission name, UTC timestamp, zoom + center coordinate) and any visible HTML markers (bullseye / bloodhound / perimeter labels). Filename: `ares_screen_capture_<UTC ISO timestamp>.png`. Use when the user asks to "snapshot", "screenshot", "capture", or "export" the current view. The user has approved this via the confirm card so no further prompts appear.',
+      description: 'Save a PNG of the current map view directly to the user\'s Desktop. The image includes the standard Ares legend strip at the bottom (mission name, UTC timestamp, zoom + center coordinate) and any visible HTML markers (bullseye / bloodhound / perimeter labels). Default filename: `ares_screen_capture_<UTC ISO timestamp>.png`. Use when the user asks to "snapshot", "screenshot", "capture", or "export" the current view. Pass `filename` ONLY when the user explicitly names the snapshot, e.g. "create a snapshot called <name>" — the system appends `.png` automatically and sanitises filesystem-unsafe characters. The user has approved this via the confirm card so no further prompts appear.',
       readonly: false,
-      inputSchema: { type: 'object', properties: {}, required: [] },
-      previewRender() {
-        return 'Capture map snapshot → Desktop'
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filename: {
+            type: 'string',
+            description: 'OPTIONAL filename for the saved PNG (without path). Pass ONLY when the user explicitly names the snapshot. Otherwise OMIT — the default `ares_screen_capture_<UTC ISO timestamp>.png` is used. The system appends `.png` if missing and sanitises filesystem-unsafe characters.'
+          }
+        },
+        required: []
       },
-      async handler() {
-        const res = await captureSnapshotToDesktop()
+      previewRender({ filename }) {
+        const named = filename ? `"${filename}"` : 'default name'
+        return `Capture map snapshot · ${named} → Desktop`
+      },
+      async handler({ filename } = {}) {
+        const res = await captureSnapshotToDesktop({ filename })
         if (!res?.ok) return { error: res?.error ?? 'Snapshot failed.' }
         return { success: true, filePath: res.filePath }
       }

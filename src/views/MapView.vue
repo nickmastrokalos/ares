@@ -122,7 +122,8 @@ watch(annotationsApi.selectedId, (id) => {
 const interceptApi = useMapIntercepts(() => map)
 const mapAlerts    = useMapAlerts()
 const { capture: captureSnapshotRaw } = useMapSnapshot({
-  getMap: () => map
+  getMap: () => map,
+  featuresStore
 })
 
 async function captureSnapshot() {
@@ -138,8 +139,10 @@ async function captureSnapshot() {
 
 // Assistant entry point — saves directly to the Desktop with no native
 // dialog. The user has already approved the call via the confirm card.
-async function captureSnapshotToDesktop() {
-  return captureSnapshotRaw({ destination: 'desktop' })
+// `filename` is optional and falls through to the default
+// `ares_screen_capture_<stamp>.png` when not supplied.
+async function captureSnapshotToDesktop({ filename } = {}) {
+  return captureSnapshotRaw({ destination: 'desktop', filename })
 }
 
 // Perimeter breaches are aggregated into a single alert so the chip stays
