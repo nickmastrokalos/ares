@@ -26,19 +26,29 @@ const KTS_TO_MPS = 1852 / 3600
 // last reported (unreliable) heading.
 const AIS_MIN_MOVING_KTS = 0.5
 
-// Build an obstacle polygon for a single AIS vessel projected
-// `horizonSeconds` forward along its current course/speed, with
-// `standoffMeters` clearance on either side.
-function vesselObstaclePolygon(vessel, horizonSeconds, standoffMeters) {
+// Build the obstacle polygons for a single AIS vessel. Every vessel
+// gets a circular keepout at its current position (radius =
+// `standoffMeters`) so a route can't pass within that distance of the
+// vessel regardless of approach angle. Moving vessels additionally
+// get a swept-corridor rectangle extending `horizonSeconds` forward
+// along their current COG, capturing where they're going.
+//
+// (The corridor alone isn't sufficient: it only covers points ahead
+// of the vessel along its track, leaving the area immediately port /
+// starboard of the current position outside its bounds. A route
+// approaching from abeam could then thread between the corridor and
+// the vessel itself. The current-position circle closes that gap.)
+function vesselObstaclePolygons(vessel, horizonSeconds, standoffMeters) {
   const here = [vessel.longitude, vessel.latitude]
-  const sog  = Number(vessel.SOG)
-  const cog  = vessel.COG
+  const polygons = [circlePolygon(here, standoffMeters)]
+  const sog = Number(vessel.SOG)
+  const cog = vessel.COG
   if (Number.isFinite(sog) && sog > AIS_MIN_MOVING_KTS && cog != null && cog >= 0) {
     const distance = sog * KTS_TO_MPS * horizonSeconds
     const there = destinationPoint(here, distance, cog)
-    return corridorPolygon(here, there, standoffMeters)
+    polygons.push(corridorPolygon(here, there, standoffMeters))
   }
-  return circlePolygon(here, standoffMeters)
+  return polygons
 }
 
 // "Go through" point for a feature: most natural single waypoint that
@@ -174,7 +184,7 @@ export function waterRoutingTools({ featuresStore, aisStore }) {
           },
           avoid_ais: {
             type: 'boolean',
-            description: 'Also avoid AIS vessel projected paths. Each vessel currently in `aisStore` is projected `ais_horizon_minutes` forward along its course (COG) and speed (SOG); the corridor of width `ais_standoff_meters` around that projection becomes an obstacle. Stationary vessels (SOG ≤ 0.5 kts or no COG) become a circular keepout at their current position. Default false.'
+            description: 'Also avoid AIS vessels. Every vessel currently in `aisStore` gets a circular keepout of radius `ais_standoff_meters` at its present position (so the route cannot pass within that distance regardless of approach angle); moving vessels (SOG > ~0.5 kts) additionally get a swept corridor of the same half-width extending `ais_horizon_minutes` forward along their COG. Default false.'
           },
           ais_horizon_minutes: {
             type: 'number',
@@ -241,18 +251,19 @@ export function waterRoutingTools({ featuresStore, aisStore }) {
           vias.push(c)
         }
 
-        // Project AIS vessels into the obstacle list. Each moving vessel
-        // becomes a corridor (current → projected position over the
-        // horizon, ± standoff); stationary vessels become a circle.
-        let aisObstacleCount = 0
+        // Project AIS vessels into the obstacle list. Every vessel gets
+        // a circular keepout at its current position (radius = standoff);
+        // moving vessels additionally get a swept-corridor rectangle
+        // extending `horizonSeconds` forward along their COG.
+        let aisVesselCount = 0
         if (avoid_ais && aisStore?.vessels) {
           const horizonSeconds = Math.max(0, Number(ais_horizon_minutes) || 0) * 60
           const standoff = Math.max(0, Number(ais_standoff_meters) || 0)
           if (horizonSeconds > 0 && standoff > 0) {
             for (const vessel of aisStore.vessels.values()) {
               if (vessel.longitude == null || vessel.latitude == null) continue
-              obstacles.push(vesselObstaclePolygon(vessel, horizonSeconds, standoff))
-              aisObstacleCount++
+              obstacles.push(...vesselObstaclePolygons(vessel, horizonSeconds, standoff))
+              aisVesselCount++
             }
           }
         }
@@ -283,7 +294,7 @@ export function waterRoutingTools({ featuresStore, aisStore }) {
           avoidedFeatureCount: avoid_feature_ids.length,
           viaFeatureCount: vias.length,
           avoidedLand: avoid_land,
-          avoidedAisCount: aisObstacleCount
+          avoidedAisVesselCount: aisVesselCount
         }
       }
     }
