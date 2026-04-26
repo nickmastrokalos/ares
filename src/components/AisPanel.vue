@@ -146,6 +146,17 @@ function formatLastFetch(date) {
         </button>
       </div>
 
+      <div class="toggle-row" @pointerdown.stop>
+        <span class="toggle-label">Heading breadcrumbs</span>
+        <button
+          class="toggle-btn"
+          :class="{ 'toggle-btn--on': aisStore.breadcrumbs }"
+          @click="aisStore.setBreadcrumbs(!aisStore.breadcrumbs)"
+        >
+          <span class="toggle-knob" />
+        </button>
+      </div>
+
       <!-- Status -->
       <template v-if="aisStore.enabled">
         <div class="divider" />

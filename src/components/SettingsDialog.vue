@@ -247,9 +247,9 @@ function formatBadge(ts) {
           <div class="pa-4">
             <div class="d-flex align-center">
               <div class="flex-grow-1">
-                <div class="text-body-2">Track breadcrumbs</div>
+                <div class="text-body-2">CoT track breadcrumbs</div>
                 <div class="text-caption text-medium-emphasis">
-                  Show a trail of past positions behind each CoT track and AIS vessel.
+                  Show a trail of past positions behind each CoT track. AIS and ADS-B have their own toggles in their feed panels.
                 </div>
               </div>
               <v-switch

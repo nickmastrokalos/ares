@@ -51,6 +51,7 @@ export function adsbTools({ adsbStore, featuresStore }) {
           enabled:       adsbStore.enabled,
           visible:       adsbStore.visible,
           headingArrows: adsbStore.headingArrows,
+          breadcrumbs:   adsbStore.breadcrumbs,
           aircraftCount: adsbStore.aircraftCount
         }
       }
@@ -172,7 +173,7 @@ export function adsbTools({ adsbStore, featuresStore }) {
 
     {
       name: 'adsb_set_heading_arrows',
-      description: 'Switch the ADS-B aircraft icon between plain circles and direction-aware arrows (rotated to each aircraft\'s true track). The history-trail rendering — fading polylines behind each aircraft — is governed by the global `Track breadcrumbs` setting (Settings → Tracks), not this tool.',
+      description: 'Switch the ADS-B aircraft icon between plain circles and direction-aware arrows (rotated to each aircraft\'s true track). Independent of the breadcrumb tail (`adsb_set_breadcrumbs`).',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -187,6 +188,26 @@ export function adsbTools({ adsbStore, featuresStore }) {
       async handler({ arrows }) {
         await adsbStore.setHeadingArrows(arrows)
         return { success: true, headingArrows: adsbStore.headingArrows }
+      }
+    },
+
+    {
+      name: 'adsb_set_breadcrumbs',
+      description: 'Toggle the short backward heading tail behind each moving ADS-B aircraft. Length is fixed (~1.5 km) and not user-adjustable. Independent of the global CoT `Track breadcrumbs` setting and of `adsb_set_heading_arrows`.',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          breadcrumbs: { type: 'boolean', description: 'True to draw heading tails, false to hide them.' }
+        },
+        required: ['breadcrumbs']
+      },
+      previewRender({ breadcrumbs }) {
+        return `ADS-B breadcrumbs → ${breadcrumbs ? 'on' : 'off'}`
+      },
+      async handler({ breadcrumbs }) {
+        await adsbStore.setBreadcrumbs(breadcrumbs)
+        return { success: true, breadcrumbs: adsbStore.breadcrumbs }
       }
     }
 

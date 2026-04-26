@@ -98,6 +98,17 @@ function formatLastFetch(date) {
         </button>
       </div>
 
+      <div class="toggle-row" @pointerdown.stop>
+        <span class="toggle-label">Heading breadcrumbs</span>
+        <button
+          class="toggle-btn"
+          :class="{ 'toggle-btn--on': adsbStore.breadcrumbs }"
+          @click="adsbStore.setBreadcrumbs(!adsbStore.breadcrumbs)"
+        >
+          <span class="toggle-knob" />
+        </button>
+      </div>
+
       <!-- Status -->
       <template v-if="adsbStore.enabled">
         <div class="divider" />

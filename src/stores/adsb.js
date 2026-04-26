@@ -3,7 +3,6 @@ import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getStore } from '@/plugins/store'
 import { destinationPoint } from '@/services/geometry'
-import { useSettingsStore } from '@/stores/settings'
 
 // Below this ground speed the synthetic backward heading-trail is suppressed:
 // stationary or near-stationary aircraft (e.g. parked on a ramp) have noisy
@@ -12,15 +11,22 @@ import { useSettingsStore } from '@/stores/settings'
 // taxiing at several knots.
 const ADSB_MIN_MOVING_KTS = 5
 
-export const useAdsbStore = defineStore('adsb', () => {
-  const settingsStore = useSettingsStore()
+// Fixed tail length for the heading breadcrumb. Kept short so aircraft
+// read as "currently heading X" without the trail dominating the map.
+// Not user-adjustable — the ADS-B panel exposes only an on/off switch.
+const ADSB_BREADCRUMB_METERS = 1500
 
+export const useAdsbStore = defineStore('adsb', () => {
   // ---- Persisted config ----
   const enabled       = ref(false)
   const visible       = ref(true)
   // True = aircraft icons render as direction-aware arrows (rotated to track).
   // False = aircraft icons render as plain circles.
   const headingArrows = ref(true)
+  // True = draw a short backward heading breadcrumb behind each moving
+  // aircraft. Independent of the global `trackBreadcrumbs` setting
+  // (which now applies only to CoT history trails).
+  const breadcrumbs   = ref(false)
 
   // ---- Runtime state ----
   const aircraft   = ref(new Map())  // hex string → raw item
@@ -51,19 +57,17 @@ export const useAdsbStore = defineStore('adsb', () => {
       : []
   }))
 
-  // Synthetic heading breadcrumb: a line projected backward from each
-  // aircraft's current position along the reverse of its `track`. Tail
-  // length is the global `trackBreadcrumbLength` (meters), independent
-  // of ground speed — every track type draws tails of identical visual
-  // length. Ground speed is only used as a "is this aircraft actually
-  // moving?" gate. Aircraft below `ADSB_MIN_MOVING_KTS` or without a
-  // valid track are suppressed.
+  // Synthetic heading breadcrumb: a short line projected backward from
+  // each aircraft along the reverse of its `track`. Toggled by the
+  // ADS-B-local `breadcrumbs` switch (independent of the global CoT
+  // breadcrumb setting). Length is fixed at `ADSB_BREADCRUMB_METERS`.
+  // Aircraft below `ADSB_MIN_MOVING_KTS` or without a valid track are
+  // suppressed.
   const breadcrumbCollection = computed(() => {
-    if (!settingsStore.trackBreadcrumbs || !visible.value) {
+    if (!breadcrumbs.value || !visible.value) {
       return { type: 'FeatureCollection', features: [] }
     }
-    const lengthMeters = Math.max(0, settingsStore.trackBreadcrumbLength)
-    if (lengthMeters <= 0) return { type: 'FeatureCollection', features: [] }
+    const lengthMeters = ADSB_BREADCRUMB_METERS
     const features = []
     for (const a of aircraft.value.values()) {
       const gs = Number(a.gs)
@@ -108,6 +112,7 @@ export const useAdsbStore = defineStore('adsb', () => {
       if (saved.enabled       != null) enabled.value       = saved.enabled
       if (saved.visible       != null) visible.value       = saved.visible
       if (saved.headingArrows != null) headingArrows.value = saved.headingArrows
+      if (saved.breadcrumbs   != null) breadcrumbs.value   = saved.breadcrumbs
     } catch { /* first run */ }
   }
 
@@ -116,7 +121,8 @@ export const useAdsbStore = defineStore('adsb', () => {
     await store.set('adsbConfig', {
       enabled:       enabled.value,
       visible:       visible.value,
-      headingArrows: headingArrows.value
+      headingArrows: headingArrows.value,
+      breadcrumbs:   breadcrumbs.value
     })
   }
 
@@ -166,14 +172,15 @@ export const useAdsbStore = defineStore('adsb', () => {
 
   async function setVisible(val)       { visible.value       = val; await _save() }
   async function setHeadingArrows(val) { headingArrows.value = val; await _save() }
+  async function setBreadcrumbs(val)   { breadcrumbs.value   = val; await _save() }
 
   return {
-    enabled, visible, headingArrows,
+    enabled, visible, headingArrows, breadcrumbs,
     aircraft, lastFetch, fetchError, loading,
     aircraftCollection, breadcrumbCollection, aircraftCount,
     openPanelList, focusedHex,
     load, fetchAircraft,
-    setEnabled, setVisible, setHeadingArrows,
+    setEnabled, setVisible, setHeadingArrows, setBreadcrumbs,
     openPanel, closePanel
   }
 })

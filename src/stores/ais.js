@@ -3,27 +3,30 @@ import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getStore } from '@/plugins/store'
 import { destinationPoint } from '@/services/geometry'
-import { useSettingsStore } from '@/stores/settings'
 
 // Below this speed the backward heading-trail is suppressed: AIS COG
 // values are noisy at near-zero speed and the tail would jitter
 // directionally.
 const AIS_MIN_MOVING_KTS = 0.2
 
-export const useAisStore = defineStore('ais', () => {
-  const settingsStore = useSettingsStore()
+// Fixed tail length for the heading breadcrumb. Kept short so vessels
+// read as "currently heading X" without the trail dominating the map.
+// Not user-adjustable — the AIS panel exposes only an on/off switch.
+const AIS_BREADCRUMB_METERS = 500
 
+export const useAisStore = defineStore('ais', () => {
   // ---- Persisted config ----
   const feedUrl       = ref('https://aisfeed.com')
   const apiKey        = ref('')
   const enabled       = ref(false)
   const visible       = ref(true)
   // True = vessel icons render as direction-aware arrows (rotated to COG).
-  // False = vessel icons render as plain circles. The breadcrumb trail
-  // (history-based fading line behind each vessel) is now controlled by
-  // the shared `settingsStore.trackBreadcrumbs` / `trackBreadcrumbLength`
-  // pair, the same setting that drives CoT track trails.
+  // False = vessel icons render as plain circles.
   const headingArrows = ref(false)
+  // True = draw a short backward heading breadcrumb behind each moving
+  // vessel. Independent of the global `trackBreadcrumbs` setting (which
+  // now applies only to CoT history trails).
+  const breadcrumbs   = ref(false)
 
   // ---- Runtime state ----
   const vessels    = ref(new Map())  // mmsi string → raw item
@@ -52,20 +55,18 @@ export const useAisStore = defineStore('ais', () => {
       : []
   }))
 
-  // Synthetic heading breadcrumb: a line projected backward from each
-  // vessel's current position along the reverse of its COG. The tail
-  // length is the global `trackBreadcrumbLength` (meters) — the same
-  // fixed map distance used for every track type, so a slow vessel and
-  // a fast jet draw tails of identical visual length. SOG is only used
-  // as a "is this vessel actually moving?" gate, not as a length
-  // multiplier. Vessels below `AIS_MIN_MOVING_KTS` or without a valid
-  // COG are suppressed.
+  // Synthetic heading breadcrumb: a short line projected backward from
+  // each vessel along the reverse of its COG. Toggled by the AIS-local
+  // `breadcrumbs` switch (independent of the global CoT breadcrumb
+  // setting). Length is fixed at `AIS_BREADCRUMB_METERS` — the panel
+  // doesn't expose a slider since the trail is meant to be a small
+  // direction cue, not a track-history visualization. Vessels below
+  // `AIS_MIN_MOVING_KTS` or without a valid COG are suppressed.
   const breadcrumbCollection = computed(() => {
-    if (!settingsStore.trackBreadcrumbs || !visible.value) {
+    if (!breadcrumbs.value || !visible.value) {
       return { type: 'FeatureCollection', features: [] }
     }
-    const lengthMeters = Math.max(0, settingsStore.trackBreadcrumbLength)
-    if (lengthMeters <= 0) return { type: 'FeatureCollection', features: [] }
+    const lengthMeters = AIS_BREADCRUMB_METERS
     const features = []
     for (const v of vessels.value.values()) {
       const sog = Number(v.SOG)
@@ -119,6 +120,7 @@ export const useAisStore = defineStore('ais', () => {
       // history trail.
       if (saved.headingArrows  != null) headingArrows.value = saved.headingArrows
       else if (saved.aisBreadcrumbs != null) headingArrows.value = saved.aisBreadcrumbs
+      if (saved.breadcrumbs != null) breadcrumbs.value = saved.breadcrumbs
     } catch { /* first run */ }
   }
 
@@ -129,7 +131,8 @@ export const useAisStore = defineStore('ais', () => {
       apiKey:        apiKey.value,
       enabled:       enabled.value,
       visible:       visible.value,
-      headingArrows: headingArrows.value
+      headingArrows: headingArrows.value,
+      breadcrumbs:   breadcrumbs.value
     })
   }
 
@@ -174,16 +177,17 @@ export const useAisStore = defineStore('ais', () => {
   async function setFeedUrl(val)       { feedUrl.value       = val; await _save() }
   async function setApiKey(val)        { apiKey.value        = val; await _save() }
   async function setHeadingArrows(val) { headingArrows.value = val; await _save() }
+  async function setBreadcrumbs(val)   { breadcrumbs.value   = val; await _save() }
 
   return {
     feedUrl, apiKey, enabled, visible,
-    headingArrows,
+    headingArrows, breadcrumbs,
     vessels, lastFetch, fetchError, loading,
     vesselCollection, breadcrumbCollection, vesselCount,
     openPanelList, focusedMmsi,
     load, fetchVessels,
     setEnabled, setVisible, setFeedUrl, setApiKey,
-    setHeadingArrows,
+    setHeadingArrows, setBreadcrumbs,
     openPanel, closePanel
   }
 })
