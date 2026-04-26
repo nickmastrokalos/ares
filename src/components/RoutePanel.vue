@@ -24,6 +24,7 @@ const emit = defineEmits(['close', 'append-waypoint'])
 const featuresStore = useFeaturesStore()
 const settingsStore = useSettingsStore()
 const previewRouteColor = inject('previewRouteColor', null)
+const draggingWaypoint = inject('draggingWaypoint', null)
 
 const minimized  = ref(false)
 const positioned = ref(false)
@@ -55,26 +56,30 @@ const routeGeometry = computed(() => {
 const routeName = computed(() => routeProps.value?.name ?? 'Route')
 
 const waypoints = computed(() => {
-  const geometry = routeGeometry.value
-  const props    = routeProps.value
-  if (!geometry || !props) return []
+  const geometry   = routeGeometry.value
+  const properties = routeProps.value
+  if (!geometry || !properties) return []
   const coords = geometry.coordinates
-  const wps    = props.waypoints ?? []
+  const wps    = properties.waypoints ?? []
   const total  = coords.length
+  const dragging = draggingWaypoint?.value
   return coords.map((coord, i) => {
     const wp = wps[i] ?? {}
     const label = wp.label ?? (i === 0 ? 'SP' : i === total - 1 ? 'EP' : `WP ${i}`)
     const role  = wp.role  ?? (i === 0 ? 'SP' : i === total - 1 ? 'EP' : 'WP')
-    return { index: i, label, role, coord }
+    const live = dragging && dragging.routeId === props.routeId && dragging.index === i
+      ? [dragging.lng, dragging.lat]
+      : coord
+    return { index: i, label, role, coord: live }
   })
 })
 
 const totalDistance = computed(() => {
-  const coords = routeGeometry.value?.coordinates
-  if (!coords || coords.length < 2) return 0
+  const wps = waypoints.value
+  if (!wps || wps.length < 2) return 0
   let d = 0
-  for (let i = 1; i < coords.length; i++) {
-    d += distanceBetween(coords[i - 1], coords[i])
+  for (let i = 1; i < wps.length; i++) {
+    d += distanceBetween(wps[i - 1].coord, wps[i].coord)
   }
   return d
 })
