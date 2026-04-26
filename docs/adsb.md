@@ -23,7 +23,7 @@ Live aircraft positions from the free, key-less [airplanes.live](https://airplan
 
 ## Aircraft record shape
 
-The store stores raw airplanes.live records, keyed by `hex`. Used fields: `hex`, `flight` (callsign), `lat`, `lon`, `alt_baro` (number ft or string `"ground"`), `gs` (kts), `track` (°), `r` (registration), `t` (type), `squawk`, `true_heading` / `mag_heading`, `baro_rate` / `geom_rate` (ft/min), `seen` (s).
+The store stores raw airplanes.live records, keyed by `hex`. The endpoint returns the array under the top-level key `ac` (their public field-description page calls it `aircraft`, but the live response uses `ac` — the store accepts either). Used fields: `hex`, `flight` (callsign), `lat`, `lon`, `alt_baro` (number ft or string `"ground"`), `gs` (kts), `track` (°), `r` (registration), `t` (type), `squawk`, `true_heading` / `mag_heading`, `baro_rate` / `geom_rate` (ft/min), `seen` (s).
 
 `AdsbTrackPanel` renders altitudes ≥ 18,000 ft as flight levels (`FL250`), below as plain feet, and `"ground"` as `Ground`.
 
