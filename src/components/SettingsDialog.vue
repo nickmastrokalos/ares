@@ -684,6 +684,7 @@ function formatBadge(ts) {
               </div>
               <v-switch
                 :model-value="plugin.active"
+                :disabled="plugin.incompatible"
                 color="primary"
                 density="compact"
                 hide-details
