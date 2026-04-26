@@ -7,6 +7,7 @@ import { distanceBetween } from '@/services/geometry'
 const TRACKS_SOURCE        = 'cot-tracks'
 const TRACKS_LAYER_POINTS  = 'cot-tracks-points'
 const TRACKS_LAYER_SYMBOLS = 'cot-tracks-symbols'
+const TRACKS_LAYER_SELF    = 'cot-tracks-self-ring'
 const TRACKS_LABEL_LAYER   = 'cot-tracks-labels'
 const BREADCRUMBS_SOURCE   = 'cot-breadcrumbs'
 const BREADCRUMBS_LAYER    = 'cot-breadcrumbs-line'
@@ -148,6 +149,31 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
       }
     })
 
+    // Self-ring: a thin hollow white halo around the operator's own track
+    // so it's spottable at a glance without being label-dependent. Single
+    // static ring, no fill, no animation — same dimming on pitch as the
+    // affiliation circle. Filtered to features tagged `isSelf: true` by
+    // the tracks store.
+    // Self-ring radius is keyed off whether the rendered symbol is the
+    // small affiliation dot (~6 px) or the chunkier 2525 SIDC icon
+    // (~40 px wide at our 2x render). Without the size jump the ring
+    // sits inside the SIDC icon and gets occluded.
+    const selfRingRadius = settingsStore.milStdSymbology ? 22 : 11
+    map.addLayer({
+      id: TRACKS_LAYER_SELF,
+      type: 'circle',
+      source: TRACKS_SOURCE,
+      filter: ['==', ['get', 'isSelf'], true],
+      paint: {
+        'circle-radius':         selfRingRadius,
+        'circle-color':          'rgba(0, 0, 0, 0)',
+        'circle-stroke-width':   1.5,
+        'circle-stroke-color':   '#ffffff',
+        'circle-stroke-opacity': 0.85,
+        'circle-pitch-alignment': 'map'
+      }
+    })
+
     map.addLayer({
       id: TRACKS_LAYER_SYMBOLS,
       type: 'symbol',
@@ -265,6 +291,10 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
       map.setLayoutProperty(TRACKS_LAYER_SYMBOLS, 'visibility', use2525 ? 'visible' : 'none')
       // Adjust label offset: 2525 icons are taller than the 6px circle dot.
       map.setLayoutProperty(TRACKS_LABEL_LAYER, 'text-offset', use2525 ? [0, 2.5] : [0, 1.5])
+      // Resize the self-ring so it wraps around the new symbol size.
+      if (map.getLayer(TRACKS_LAYER_SELF)) {
+        map.setPaintProperty(TRACKS_LAYER_SELF, 'circle-radius', use2525 ? 22 : 11)
+      }
     }
   )
 
@@ -276,6 +306,7 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
     const map = getMap()
     if (!map) return
     if (map.getLayer(TRACKS_LABEL_LAYER))   map.removeLayer(TRACKS_LABEL_LAYER)
+    if (map.getLayer(TRACKS_LAYER_SELF))    map.removeLayer(TRACKS_LAYER_SELF)
     if (map.getLayer(TRACKS_LAYER_SYMBOLS)) map.removeLayer(TRACKS_LAYER_SYMBOLS)
     if (map.getLayer(TRACKS_LAYER_POINTS))  map.removeLayer(TRACKS_LAYER_POINTS)
     if (map.getLayer(BREADCRUMBS_LAYER))    map.removeLayer(BREADCRUMBS_LAYER)

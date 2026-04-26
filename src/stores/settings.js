@@ -35,7 +35,26 @@ const DEFAULTS = {
   selfCallsign: null,
   // Stable per-install UID. Generated on first load if missing — peers key
   // direct chat threads by this. Don't reuse across reinstalls.
-  selfUid: null
+  selfUid: null,
+  // Operator's MIL-STD-2525 affiliation — `f` / `h` / `n` / `u`. Drives the
+  // first attribute of `selfCotType` and is what `TrackTypePicker` uses to
+  // colour preview icons. Defaults to friendly because that's the dominant
+  // operator-self pattern in TAK.
+  selfAffiliation: 'f',
+  // Full CoT type string for the operator (e.g. `a-f-G-U-C-I` infantry).
+  // `null` = "no type picked yet"; the announce broadcaster falls back to
+  // the v1 placeholder `a-f-G-U-C` so behaviour doesn't regress.
+  selfCotType: null,
+  // Manual operator location, `{ lat, lon }` or `null`. `null` = "no
+  // position set" → announce uses lat/lon (0, 0). When set, the announce
+  // broadcasts these coordinates so peers see the operator on their map
+  // at the right place.
+  selfLocation: null,
+  // Master switch for TAK outbound. Defaults off — nothing emits until
+  // the operator explicitly activates from the chat panel or
+  // Settings → Network. Inbound listeners stay on regardless so peers'
+  // broadcasts continue to populate the track list.
+  takActive: false
 }
 
 // Three protected listeners are seeded on first run so the standard TAK
@@ -93,6 +112,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const lastSeenVersion = ref(DEFAULTS.lastSeenVersion)
   const selfCallsign    = ref(DEFAULTS.selfCallsign)
   const selfUid         = ref(DEFAULTS.selfUid)
+  const selfAffiliation = ref(DEFAULTS.selfAffiliation)
+  const selfCotType     = ref(DEFAULTS.selfCotType)
+  const selfLocation    = ref(DEFAULTS.selfLocation)
+  const takActive       = ref(DEFAULTS.takActive)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
   // without a growing switch statement as we add more settings.
@@ -112,7 +135,11 @@ export const useSettingsStore = defineStore('settings', () => {
     assistantApiKey,
     lastSeenVersion,
     selfCallsign,
-    selfUid
+    selfUid,
+    selfAffiliation,
+    selfCotType,
+    selfLocation,
+    takActive
   }
 
   // Promise cache: `load()` may be called from multiple places during boot
@@ -223,6 +250,10 @@ export const useSettingsStore = defineStore('settings', () => {
     lastSeenVersion,
     selfCallsign,
     selfUid,
+    selfAffiliation,
+    selfCotType,
+    selfLocation,
+    takActive,
     load,
     setSetting,
     addCotListener,

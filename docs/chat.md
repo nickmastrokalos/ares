@@ -56,11 +56,22 @@ Peers filter direct messages by recipient. The local Chat panel keys direct room
 - `selfUid` is generated on first `settingsStore.load()` (`crypto.randomUUID()`) and saved immediately so the value is stable across restarts. Settings → Network → "Regenerate" replaces it; useful if two installs ever share one (after a copy-paste of app data) so peers stop conflating them.
 - `selfCallsign` defaults to `null` — the chat panel and the announce broadcaster gate on this. The first time the user opens the chat panel they see a "Pick a callsign" splash; nothing else in the chat surface unlocks until they save one. Clearing the field in Settings → Network re-locks the panel.
 
+## Active / inactive
+
+`settingsStore.takActive` (default `false`) is the master switch for **outbound** TAK traffic. Setting up an identity does not start emitting; the user has to flip Active on. The toggle has two surfaces, both bound to the same setting:
+
+- **Chat panel header** — pill next to the callsign chip. Green dot + "Active" when on, dim dot + "Inactive" when off. Click to toggle.
+- **Settings → Network** — `TAK comms active` switch at the top of the tab.
+
+When inactive: the announce timer is stopped and `chatStore.sendMessage` refuses with `TAK comms inactive — flip the Active switch …`. When the user flips active on, the chat store fires an immediate one-shot announce so they appear in peer contact lists within ~1 s, then the regular 60 s timer takes over.
+
+**Inbound is never gated.** Listeners stay enabled regardless so peer broadcasts continue to populate the track list whether or not we're emitting — operators can lurk and see the picture without committing to broadcast.
+
 ## Presence announce
 
-A 60 s timer in the chat store broadcasts a contact-info CoT (`a-f-G-U-C`) on the protected `tak-chat-announce` connection (default `udp://224.10.10.1:18740`) so peers populate their chat contacts list with our callsign + UID. Without this, WinTAK would only see Ares after the first message arrived. The announce CoT carries a 5 minute stale window — long enough to absorb a missed broadcast or two.
+A 60 s timer in the chat store broadcasts a contact-info CoT (`a-f-G-U-C`, or whatever `selfCotType` is set to) on the protected `tak-chat-announce` connection (default `udp://224.10.10.1:18740`) so peers populate their chat contacts list with our callsign + UID and (when `selfLocation` is set) put the operator on their map. The announce CoT carries a 5 minute stale window — long enough to absorb a missed broadcast or two.
 
-The announcer auto-starts when `setupReady` flips true (callsign + UID both set + chat-store listening) and auto-stops if the user clears their callsign. The composer lives in `src/services/announce.js` and uses the same outbound `send_cot` Tauri command as chat messages.
+The announcer auto-starts when `setupReady` (callsign + UID set + chat-store listening) AND `takActive` are both true. It auto-stops if any of those flip false.
 
 ## Outbound flow
 

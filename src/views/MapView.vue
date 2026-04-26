@@ -269,6 +269,16 @@ useAssistantTools(
 // Expose map-centric helpers to descendant components (OverlaysDialog,
 // AttributesPanel, etc.) without prop-drilling through DrawPanel.
 provide('flyToGeometry', flyToGeometry)
+
+// Self-location picker. The operator clicks "Pick on map" in
+// Settings → Network; that closes the dialog and arms one-click
+// capture. The next map click writes lat/lon into the
+// settings store and disarms. Escape cancels.
+const selfLocationPicking = ref(false)
+function pickSelfLocation() {
+  selfLocationPicking.value = true
+}
+provide('pickSelfLocation', pickSelfLocation)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
 provide('draggingTrack', draggingTrack)
@@ -567,7 +577,32 @@ onMounted(async () => {
   })
 
   map.on('movestart', () => { contextMenu.value = null; dispatcher.dismiss() })
-  map.on('click', () => { contextMenu.value = null })
+  map.on('click', (e) => {
+    contextMenu.value = null
+    // One-shot self-location picker armed from Settings → Network.
+    if (selfLocationPicking.value) {
+      settingsStore.setSetting('selfLocation', {
+        lat: e.lngLat.lat,
+        lon: e.lngLat.lng
+      })
+      selfLocationPicking.value = false
+    }
+  })
+
+  // Crosshair cursor + Escape-to-cancel while picking.
+  watch(selfLocationPicking, (picking) => {
+    const canvas = map?.getCanvas()
+    if (canvas) canvas.style.cursor = picking ? 'crosshair' : ''
+    if (picking) {
+      const onKey = (ev) => {
+        if (ev.key === 'Escape') {
+          selfLocationPicking.value = false
+          window.removeEventListener('keydown', onKey)
+        }
+      }
+      window.addEventListener('keydown', onKey)
+    }
+  })
 
   map.on('load', async () => {
     dispatcher.install(map)
