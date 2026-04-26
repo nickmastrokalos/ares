@@ -147,6 +147,12 @@ export const useSettingsStore = defineStore('settings', () => {
   // callers share the same in-flight read.
   let loadPromise = null
 
+  // Settings that intentionally don't persist across restarts. The user
+  // has to opt back in each session; saved values from prior runs are
+  // ignored on load and writes are no-ops on disk (the ref value still
+  // updates so in-session UI works normally).
+  const SESSION_ONLY = new Set(['enabledPlugins'])
+
   async function load() {
     if (loadPromise) return loadPromise
     appStore.beginLoad()
@@ -154,6 +160,7 @@ export const useSettingsStore = defineStore('settings', () => {
       try {
         const store = await getStore()
         for (const key of Object.keys(refs)) {
+          if (SESSION_ONLY.has(key)) continue
           const stored = await store.get(key)
           // Only override the default when the user has actually set a value —
           // `null`/`undefined` mean "never written" and should stay as default.
@@ -203,9 +210,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function setSetting(key, value) {
     if (!(key in refs)) return
+    refs[key].value = value
+    if (SESSION_ONLY.has(key)) return    // intentional: don't persist
     const store = await getStore()
     await store.set(key, value)
-    refs[key].value = value
   }
 
   async function saveCotListeners() {
