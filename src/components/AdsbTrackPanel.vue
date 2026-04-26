@@ -207,7 +207,7 @@ watch(() => adsbStore.focusedHex, (h) => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #4dd0e1;
+  background: #ff4081;
   border: 1px solid rgba(0, 0, 0, 0.4);
   flex-shrink: 0;
 }

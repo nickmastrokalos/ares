@@ -1,6 +1,6 @@
 # ADS-B feed
 
-Live aircraft positions from the free, key-less [airplanes.live](https://airplanes.live) REST API, rendered as cyan icons on the map alongside (and visually distinct from) the yellow AIS vessels.
+Live aircraft positions from the free, key-less [airplanes.live](https://airplanes.live) REST API, rendered as magenta icons on the map alongside (and visually distinct from) the yellow AIS vessels.
 
 ## Data source
 
@@ -29,7 +29,7 @@ The store stores raw airplanes.live records, keyed by `hex`. The endpoint return
 
 ## Layers
 
-Cyan (`#4dd0e1`) throughout — distinct from AIS yellow.
+Magenta (`#ff4081`, Material pink A200) throughout — distinct from AIS yellow and outside the MIL-STD-2525 affiliation palette (Friend cyan, Hostile red, Neutral green, Unknown yellow).
 
 - `adsb-breadcrumbs` source + `adsb-breadcrumbs-line` line layer — synthetic backward projection along reverse `track`, length = `gs * trackBreadcrumbLength` (shared with CoT and AIS via `settingsStore.trackBreadcrumbs` / `trackBreadcrumbLength`). Suppressed below 5 kts ground speed.
 - `adsb-aircraft` source feeding two mutually exclusive icon layers:
