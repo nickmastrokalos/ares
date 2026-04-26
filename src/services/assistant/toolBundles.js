@@ -2,6 +2,7 @@ import { mapTools }          from './tools/map'
 import { routeTools }        from './tools/routes'
 import { waterRoutingTools } from './tools/waterRouting'
 import { aisTools }          from './tools/ais'
+import { adsbTools }         from './tools/adsb'
 import { cotTools }          from './tools/cot'
 import { bloodhoundTools }   from './tools/bloodhound'
 import { perimeterTools }    from './tools/perimeter'
@@ -21,6 +22,7 @@ export function buildMapToolBundles(deps) {
     ...routeTools(deps),
     ...waterRoutingTools(deps),
     ...aisTools(deps),
+    ...adsbTools(deps),
     ...cotTools(deps),
     ...bloodhoundTools(deps),
     ...perimeterTools(deps),
