@@ -226,7 +226,7 @@ watch(
 const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value)
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute: toggleRouteRaw, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute: toggleRouteRaw, initLayers: initRouteLayers, previewRouteColor, draggingWaypoint } = useMapRoute(() => map, dispatcher, entitySelecting)
 const suppressEntityClicks = computed(
   () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || appending.value || placing.value != null
 )
@@ -259,6 +259,7 @@ provide('flyToGeometry', flyToGeometry)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
 provide('draggingTrack', draggingTrack)
+provide('draggingWaypoint', draggingWaypoint)
 provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
