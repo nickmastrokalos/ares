@@ -4,6 +4,24 @@ import { useTracksStore } from '@/stores/tracks'
 import { useSettingsStore } from '@/stores/settings'
 import { getStore } from '@/plugins/store'
 import { isOverWater, getLandPolygons } from '@/services/coastlines'
+import { version as HOST_VERSION } from '../../package.json'
+
+// Compare two `MAJOR.MINOR.PATCH` strings. Returns -1, 0, +1. Anything
+// non-numeric in a slot is treated as 0; trailing slots default to 0 so
+// "1.1" and "1.1.0" compare equal. Pre-release / build metadata (`-rc.1`,
+// `+sha`) is ignored — plugins shouldn't depend on it for gating.
+function compareSemver(a, b) {
+  const parse = (s) => String(s ?? '').split('-')[0].split('+')[0].split('.')
+    .map(n => Number.parseInt(n, 10) || 0)
+  const ax = parse(a)
+  const bx = parse(b)
+  for (let i = 0; i < Math.max(ax.length, bx.length); i++) {
+    const av = ax[i] ?? 0
+    const bv = bx[i] ?? 0
+    if (av !== bv) return av < bv ? -1 : 1
+  }
+  return 0
+}
 
 export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   const featuresStore = useFeaturesStore()
@@ -34,7 +52,10 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   // openness off a single top-level Set).
   const _openPanelIds = ref(new Set())
 
-  const discoveredPlugins = ref([])  // { id, name, version, filePath, active, error }
+  // `incompatible: true` blocks activation entirely (toggle is disabled in
+  // the Plugins settings tab). `error` carries the human-readable reason —
+  // either a host-version mismatch or an exception thrown during activate().
+  const discoveredPlugins = ref([])  // { id, name, version, filePath, active, error, incompatible }
 
   // ---- API builder ----
 
@@ -357,27 +378,45 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     }
     _manifests.set(manifest.id, manifest)
 
+    // Host-version gate. Plugins may declare `minHostVersion: 'X.Y.Z'` to
+    // refuse loading on hosts that don't expose enough of the API surface.
+    // We surface the mismatch in the Plugins settings tab and skip
+    // activation — even if the plugin is in `enabledPlugins` from a prior
+    // session, it stays inert until the host is upgraded.
+    let incompatible = false
+    let error = null
+    if (manifest.minHostVersion) {
+      if (compareSemver(HOST_VERSION, manifest.minHostVersion) < 0) {
+        incompatible = true
+        error = `Requires Ares ≥ ${manifest.minHostVersion}; this host is ${HOST_VERSION}.`
+        console.warn(`[plugin-registry] Skipping "${manifest.id}": ${error}`)
+      }
+    }
+
     if (!discoveredPlugins.value.find(p => p.id === manifest.id)) {
       discoveredPlugins.value = [
         ...discoveredPlugins.value,
         {
-          id:       manifest.id,
-          name:     manifest.name     ?? manifest.id,
-          version:  manifest.version  ?? '?',
+          id:           manifest.id,
+          name:         manifest.name    ?? manifest.id,
+          version:      manifest.version ?? '?',
           filePath,
-          active:   false,
-          error:    null
+          active:       false,
+          error,
+          incompatible
         }
       ]
     }
 
-    if (settingsStore.enabledPlugins.includes(manifest.id)) {
+    if (!incompatible && settingsStore.enabledPlugins.includes(manifest.id)) {
       _activate(manifest.id)
     }
   }
 
   // Called from SettingsDialog when the user enables a plugin.
   async function enablePlugin(id) {
+    const row = discoveredPlugins.value.find(p => p.id === id)
+    if (row?.incompatible) return  // toggle is disabled in the UI; belt-and-suspenders
     if (!settingsStore.enabledPlugins.includes(id)) {
       await settingsStore.setSetting('enabledPlugins', [...settingsStore.enabledPlugins, id])
     }

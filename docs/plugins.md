@@ -53,6 +53,13 @@ export default {
   name:    'My Plugin',                  // display name in Settings → Plugins
   version: '1.0.0',
 
+  // Optional — minimum Ares host version this plugin needs. Compared with
+  // simple `MAJOR.MINOR.PATCH` semver. If the running host is older the
+  // plugin is shown in Settings → Plugins with a "Requires Ares ≥ X.Y.Z"
+  // error and the enable toggle is disabled. Set this whenever you start
+  // calling a host API that didn't exist in earlier versions.
+  minHostVersion: '1.1.2',
+
   activate(api) {
     // Register toolbar buttons, set up watchers, etc.
     // Called once when the user enables the plugin.
