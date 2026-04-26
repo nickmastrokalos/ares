@@ -375,6 +375,10 @@ Operator-placed reference point with concentric range rings and cardinal spokes,
 
 Sticky-note style text pins the operator drops on the map (free text, colour, draggable) are documented in [annotations.md](./annotations.md). Toolbar entry is the `mdi-note-text-outline` button in the Annotation group; the `AnnotationsPanel` lists, edits, recolours, and deletes them. Persisted per-mission in the SQLite `annotations` table (migration v5).
 
+## ADS-B feed
+
+Live aircraft positions from the free [airplanes.live](https://airplanes.live) REST API are documented in [adsb.md](./adsb.md). Toolbar entry is the `mdi-airplane` button in the Feeds group next to AIS; the `AdsbPanel` exposes three toggles (Active / Visible / Heading arrows) — there is no feed URL or API key since the endpoint is unauthenticated. Aircraft render in cyan (`#4dd0e1`) to stay visually distinct from AIS yellow. Click an aircraft to open an `AdsbTrackPanel` with hex / flight / altitude / track / squawk / vertical rate. Six assistant tools mirror the AIS set: `adsb_get_status`, `adsb_list_aircraft`, `adsb_aircraft_near`, `adsb_set_enabled`, `adsb_set_visible`, `adsb_set_heading_arrows`.
+
 ## Intercept
 
 Live-updating intercept and CPA solutions between a friendly and hostile track are documented in [intercept.md](./intercept.md). Toolbar entry is the `mdi-target` button in the Analysis group; the `CallInterceptorPanel` manages the add form plus a list of active solves. Each solve renders a friendly→aim line, a dashed hostile projected path, a dashed aim ring, and an aim marker. When the friendly can't catch the hostile, the solver falls back to the closest-point-of-approach (amber styling + miss distance). Both endpoints may be CoT tracks, AIS vessels, or manual tracks; multiple simultaneous intercepts are supported and persist when the panel is closed.

@@ -20,6 +20,9 @@ export const RELEASES = [
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
+    added: [
+      'ADS-B aircraft feed via airplanes.live — new toolbar button (`mdi-airplane`) next to AIS opens an `AdsbPanel` with three toggles (Active / Visible on map / Heading arrows). The endpoint is free and key-less so there is no feed URL or API key to configure. Aircraft render in cyan to stay visually distinct from AIS yellow; clicking one opens a draggable detail panel showing hex, flight, registration, type, altitude (with FL formatting above 18,000 ft), ground speed, track, heading, vertical rate, and squawk. Six assistant tools mirror the AIS set: `adsb_get_status`, `adsb_list_aircraft`, `adsb_aircraft_near`, `adsb_set_enabled`, `adsb_set_visible`, `adsb_set_heading_arrows`. Polled every 10 s with a viewport-derived radius capped at 250 nm; breadcrumbs share the global `Track breadcrumbs` setting.'
+    ],
     fixed: [
       'Offline tile-server responses now include CORS headers on every path (empty-tile 204s, unknown-name 404s, `/tilesets` JSON), not just the success branch — eliminates the dev-console error spam when an MBTiles basemap is selected and the viewport requests tiles outside the file\'s covered area.'
     ]

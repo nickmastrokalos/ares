@@ -116,6 +116,41 @@ async fn fetch_ais_vessels(
         .map_err(|e| e.to_string())
 }
 
+/// Proxy an ADS-B aircraft fetch through Rust. The endpoint
+/// `https://api.airplanes.live/v2/point/{lat}/{lon}/{radius_nm}` is free and
+/// unauthenticated; routing through Rust avoids any CORS questions and gives
+/// a single place to set a User-Agent / customise the call later. The
+/// `radius_nm` is clamped to the airplanes.live cap of 250 nm before the
+/// request is sent.
+#[tauri::command]
+async fn fetch_adsb_aircraft(
+    lat: f64,
+    lon: f64,
+    radius_nm: f64,
+) -> Result<serde_json::Value, String> {
+    let radius = radius_nm.clamp(1.0, 250.0);
+    let endpoint = format!(
+        "https://api.airplanes.live/v2/point/{lat}/{lon}/{radius}"
+    );
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(&endpoint)
+        .header("User-Agent", "Ares/1.x (https://github.com/)")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = res.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {}", status.as_u16()));
+    }
+
+    res.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Resolve the SQLite connection URL used by the `tauri-plugin-sql`.
 ///
 /// - In debug builds the file lives in the project root (one level above
@@ -167,6 +202,7 @@ pub fn run() {
             stop_listener,
             stop_all_listeners,
             fetch_ais_vessels,
+            fetch_adsb_aircraft,
             add_tile_path,
             remove_tile_path,
             list_tilesets,

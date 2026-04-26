@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useTracksStore } from '@/stores/tracks'
 import { useGhostsStore } from '@/stores/ghosts'
 import { useAisStore } from '@/stores/ais'
+import { useAdsbStore } from '@/stores/adsb'
 import { useTileserverStore } from '@/stores/tileserver'
 import { useClickDispatcher } from '@/composables/useClickDispatcher'
 import { useMapDraw } from '@/composables/useMapDraw'
@@ -27,6 +28,7 @@ import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
 import { useMapGhosts } from '@/composables/useMapGhosts'
 import { useMapAis } from '@/composables/useMapAis'
+import { useMapAdsb } from '@/composables/useMapAdsb'
 import { getBasemap } from '@/services/basemaps'
 import { usePluginRegistry } from '@/composables/usePluginRegistry'
 import { loadPlugins } from '@/services/pluginLoader'
@@ -56,6 +58,8 @@ import AnnotationsPanel from '@/components/AnnotationsPanel.vue'
 import MapAlertChip from '@/components/MapAlertChip.vue'
 import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
+import AdsbPanel from '@/components/AdsbPanel.vue'
+import AdsbTrackPanel from '@/components/AdsbTrackPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
 import { useAssistantTools } from '@/composables/useAssistantTools'
@@ -77,6 +81,7 @@ function flyTo({ coordinate, zoom }) {
 const tracksStore = useTracksStore()
 const ghostsStore = useGhostsStore()
 const aisStore          = useAisStore()
+const adsbStore         = useAdsbStore()
 const tileserverStore   = useTileserverStore()
 const navStore          = useNavigationStore()
 const appStore          = useAppStore()
@@ -91,6 +96,7 @@ const trackListOpen      = ref(false)
 const ghostPanelOpen     = ref(false)
 const interceptPanelOpen = ref(false)
 const aisPanelOpen       = ref(false)
+const adsbPanelOpen      = ref(false)
 const bloodhoundPanelOpen = ref(false)
 const perimeterPanelOpen  = ref(false)
 const bullseyePanelOpen   = ref(false)
@@ -239,12 +245,13 @@ const pluginRegistry = usePluginRegistry({ flyToGeometry })
 const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
 const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppressEntityClicks)
+const { initLayers: initAdsbLayers }  = useMapAdsb(() => map, dispatcher, suppressEntityClicks)
 
 // Register assistant tool bundles. Factories run once on mount, after the
 // stores above are created — so the closures capture live store instances.
 useAssistantTools(
   () => buildMapToolBundles({
-    featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
+    featuresStore, tracksStore, aisStore, adsbStore, ghostsStore, settingsStore,
     flyToGeometry, flyTo, switchBasemap,
     bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi,
     captureSnapshotToDesktop,
@@ -379,6 +386,9 @@ function toggleGhostPanel() {
 function toggleAisPanel() {
   aisPanelOpen.value = !aisPanelOpen.value
 }
+function toggleAdsbPanel() {
+  adsbPanelOpen.value = !adsbPanelOpen.value
+}
 
 function toggleBloodhoundPanel() {
   const isOpen = bloodhoundPanelOpen.value
@@ -447,6 +457,7 @@ onMounted(async () => {
   loadPlugins(pluginRegistry)
   await tileserverStore.load()
   await aisStore.load()
+  await adsbStore.load()
   const basemap = resolveBasemapTiles(settingsStore.selectedBasemap)
 
   map = new maplibregl.Map({
@@ -548,6 +559,7 @@ onMounted(async () => {
     initTrackLayers()
     initManualTrackLayers()
     initAisLayers()
+    initAdsbLayers()
     bullseyeApi.init()
     annotationsApi.init()
 
@@ -614,6 +626,7 @@ onUnmounted(async () => {
       :ghost-panel-open="ghostPanelOpen"
       :intercept-panel-open="interceptPanelOpen"
       :ais-panel-open="aisPanelOpen"
+      :adsb-panel-open="adsbPanelOpen"
       :recording-video="recordingVideo"
       :mission-name="featuresStore.activeMission?.name || ''"
       :plugin-buttons="pluginRegistry.allToolbarButtons.value"
@@ -630,6 +643,7 @@ onUnmounted(async () => {
       @toggle-ghost="toggleGhostPanel"
       @toggle-intercept="toggleInterceptPanel"
       @toggle-ais="toggleAisPanel"
+      @toggle-adsb="toggleAdsbPanel"
       @toggle-overlays="overlaysDialogOpen = true"
       @toggle-listeners="listenersDialogOpen = true"
       @toggle-settings="settingsDialogOpen = true"
@@ -672,6 +686,10 @@ onUnmounted(async () => {
           v-if="aisPanelOpen"
           @close="aisPanelOpen = false"
         />
+        <AdsbPanel
+          v-if="adsbPanelOpen"
+          @close="adsbPanelOpen = false"
+        />
         <BloodhoundPanel
           v-if="bloodhoundPanelOpen"
           @close="bloodhoundPanelOpen = false"
@@ -692,6 +710,11 @@ onUnmounted(async () => {
           v-for="mmsi in aisStore.openPanelList"
           :key="mmsi"
           :mmsi="mmsi"
+        />
+        <AdsbTrackPanel
+          v-for="hex in adsbStore.openPanelList"
+          :key="hex"
+          :hex="hex"
         />
         <TrackDropPanel
           v-if="trackDropPanelOpen"
