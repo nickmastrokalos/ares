@@ -5,12 +5,9 @@ import { getStore } from '@/plugins/store'
 import { destinationPoint } from '@/services/geometry'
 import { useSettingsStore } from '@/stores/settings'
 
-// Knots → metres per second.
-const KTS_TO_MPS = 1852 / 3600
-
 // Below this speed the backward heading-trail is suppressed: AIS COG
 // values are noisy at near-zero speed and the tail would jitter
-// directionally. Mirrors the prior 0.2 kt floor.
+// directionally.
 const AIS_MIN_MOVING_KTS = 0.2
 
 export const useAisStore = defineStore('ais', () => {
@@ -56,28 +53,24 @@ export const useAisStore = defineStore('ais', () => {
   }))
 
   // Synthetic heading breadcrumb: a line projected backward from each
-  // vessel's current position along the reverse of its COG. The visual
-  // length is derived from the shared `trackBreadcrumbLength` (seconds)
-  // multiplied by the vessel's SOG, so faster vessels get proportionally
-  // longer tails for the same setting. We don't accumulate real position
-  // history for AIS — fetch is too sparse (~30 s) to be useful as a
-  // history sample, and the COG-based projection conveys "where this
-  // vessel has been recently, assuming constant heading" cleanly.
-  // Vessels below `AIS_MIN_MOVING_KTS` or without a valid COG are
-  // suppressed.
+  // vessel's current position along the reverse of its COG. The tail
+  // length is the global `trackBreadcrumbLength` (meters) — the same
+  // fixed map distance used for every track type, so a slow vessel and
+  // a fast jet draw tails of identical visual length. SOG is only used
+  // as a "is this vessel actually moving?" gate, not as a length
+  // multiplier. Vessels below `AIS_MIN_MOVING_KTS` or without a valid
+  // COG are suppressed.
   const breadcrumbCollection = computed(() => {
     if (!settingsStore.trackBreadcrumbs || !visible.value) {
       return { type: 'FeatureCollection', features: [] }
     }
-    const seconds = Math.max(0, settingsStore.trackBreadcrumbLength)
-    if (seconds <= 0) return { type: 'FeatureCollection', features: [] }
+    const lengthMeters = Math.max(0, settingsStore.trackBreadcrumbLength)
+    if (lengthMeters <= 0) return { type: 'FeatureCollection', features: [] }
     const features = []
     for (const v of vessels.value.values()) {
       const sog = Number(v.SOG)
       if (!Number.isFinite(sog) || sog < AIS_MIN_MOVING_KTS) continue
       if (v.COG == null || v.COG < 0) continue
-      const lengthMeters = sog * KTS_TO_MPS * seconds
-      if (lengthMeters <= 0) continue
       const reverseCog = (v.COG + 180) % 360
       const from = [v.longitude, v.latitude]
       const to   = destinationPoint(from, lengthMeters, reverseCog)

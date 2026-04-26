@@ -5,14 +5,11 @@ import { getStore } from '@/plugins/store'
 import { destinationPoint } from '@/services/geometry'
 import { useSettingsStore } from '@/stores/settings'
 
-// Knots → metres per second.
-const KTS_TO_MPS = 1852 / 3600
-
 // Below this ground speed the synthetic backward heading-trail is suppressed:
 // stationary or near-stationary aircraft (e.g. parked on a ramp) have noisy
-// `track` values and the tail would jitter. Mirrors the AIS 0.2 kts floor but
-// at a higher threshold because aircraft "moving slowly" on the ground are
-// still typically taxiing at several knots.
+// `track` values and the tail would jitter. Higher threshold than AIS
+// because aircraft "moving slowly" on the ground are still typically
+// taxiing at several knots.
 const ADSB_MIN_MOVING_KTS = 5
 
 export const useAdsbStore = defineStore('adsb', () => {
@@ -55,23 +52,23 @@ export const useAdsbStore = defineStore('adsb', () => {
   }))
 
   // Synthetic heading breadcrumb: a line projected backward from each
-  // aircraft's current position along the reverse of its `track`. Visual
-  // length is `gs * trackBreadcrumbLength`, so faster aircraft get
-  // proportionally longer trails. Aircraft below `ADSB_MIN_MOVING_KTS` or
-  // without a valid track are suppressed.
+  // aircraft's current position along the reverse of its `track`. Tail
+  // length is the global `trackBreadcrumbLength` (meters), independent
+  // of ground speed — every track type draws tails of identical visual
+  // length. Ground speed is only used as a "is this aircraft actually
+  // moving?" gate. Aircraft below `ADSB_MIN_MOVING_KTS` or without a
+  // valid track are suppressed.
   const breadcrumbCollection = computed(() => {
     if (!settingsStore.trackBreadcrumbs || !visible.value) {
       return { type: 'FeatureCollection', features: [] }
     }
-    const seconds = Math.max(0, settingsStore.trackBreadcrumbLength)
-    if (seconds <= 0) return { type: 'FeatureCollection', features: [] }
+    const lengthMeters = Math.max(0, settingsStore.trackBreadcrumbLength)
+    if (lengthMeters <= 0) return { type: 'FeatureCollection', features: [] }
     const features = []
     for (const a of aircraft.value.values()) {
       const gs = Number(a.gs)
       if (!Number.isFinite(gs) || gs < ADSB_MIN_MOVING_KTS) continue
       if (!Number.isFinite(a.track)) continue
-      const lengthMeters = gs * KTS_TO_MPS * seconds
-      if (lengthMeters <= 0) continue
       const reverseTrack = (a.track + 180) % 360
       const from = [a.lon, a.lat]
       const to   = destinationPoint(from, lengthMeters, reverseTrack)

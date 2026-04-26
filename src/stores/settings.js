@@ -13,7 +13,11 @@ const DEFAULTS = {
   distanceUnits: 'metric',
   coordinateFormat: 'dd',
   trackBreadcrumbs: false,
-  trackBreadcrumbLength: 30,  // seconds
+  // Tail length is now a fixed map distance in meters, not a time window.
+  // Same value applies to every track type (CoT history trails, AIS and
+  // ADS-B synthetic backward projections), so a slow vessel and a fast
+  // jet draw tails of identical visual length.
+  trackBreadcrumbLength: 1000,  // meters
   milStdSymbology: false,
   basemapOpacity: 1.0,
   enabledPlugins: [],         // plugin ids the operator has opted into
@@ -80,6 +84,15 @@ export const useSettingsStore = defineStore('settings', () => {
           if (stored !== undefined && stored !== null) {
             refs[key].value = stored
           }
+        }
+        // One-time migration: trackBreadcrumbLength was previously stored
+        // in seconds (range 5..60) and is now stored in meters (range
+        // 100..5000). Any persisted value at or below the old maximum is
+        // a leftover from the old unit and would render as an invisibly
+        // short tail — bump it to the new default.
+        if (trackBreadcrumbLength.value <= 60) {
+          trackBreadcrumbLength.value = DEFAULTS.trackBreadcrumbLength
+          await store.set('trackBreadcrumbLength', trackBreadcrumbLength.value)
         }
       } finally {
         appStore.endLoad()

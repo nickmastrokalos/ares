@@ -23,6 +23,9 @@ export const RELEASES = [
     added: [
       'ADS-B aircraft feed via airplanes.live — new toolbar button (`mdi-airplane`) next to AIS opens an `AdsbPanel` with three toggles (Active / Visible on map / Heading arrows). The endpoint is free and key-less so there is no feed URL or API key to configure. Aircraft render in magenta (outside the MIL-STD-2525 affiliation palette) to stay visually distinct from CoT/manual symbology and AIS yellow; clicking one opens a draggable detail panel showing hex, flight, registration, type, altitude (with FL formatting above 18,000 ft), ground speed, track, heading, vertical rate, and squawk. Six assistant tools mirror the AIS set: `adsb_get_status`, `adsb_list_aircraft`, `adsb_aircraft_near`, `adsb_set_enabled`, `adsb_set_visible`, `adsb_set_heading_arrows`. Polled every 10 s with a viewport-derived radius capped at 250 nm; breadcrumbs share the global `Track breadcrumbs` setting.'
     ],
+    changed: [
+      'Breadcrumb-length setting is now a fixed map distance (meters) instead of a time window (seconds). Same value applies to every track type — CoT, AIS, ADS-B — so a slow vessel and a fast jet draw tails of identical visual length. Slider range 100 m – 5 km, default 1 km. CoT trails truncate accumulated history to the target distance (with proportional truncation of the last segment); AIS / ADS-B project that fixed length backward along COG / track. Old persisted values (≤60, the prior seconds maximum) are migrated to the new default on load.'
+    ],
     fixed: [
       'Offline tile-server responses now include CORS headers on every path (empty-tile 204s, unknown-name 404s, `/tilesets` JSON), not just the success branch — eliminates the dev-console error spam when an MBTiles basemap is selected and the viewport requests tiles outside the file\'s covered area.'
     ]
