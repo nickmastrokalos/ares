@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { cotTypeToSidc, sidcToDataUrl } from '@/services/sidc'
 import { TRACK_TYPE_CATALOG } from '@/services/trackTypes'
 
@@ -12,6 +12,23 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const activeTab = ref(TRACK_TYPE_CATALOG[0].key)
+
+// Follow modelValue across mount + external changes so the picker shows
+// the category containing the currently-selected type. Without this the
+// picker resets to "Ground" on every remount even when modelValue is in
+// a different dimension (Air, Sea, SOF).
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (!val) return
+    const suffix = val.replace(/^a-\w-/, '')
+    const cat = TRACK_TYPE_CATALOG.find(c =>
+      c.types.some(t => t.suffix === suffix)
+    )
+    if (cat && cat.key !== activeTab.value) activeTab.value = cat.key
+  },
+  { immediate: true }
+)
 
 const activeTypes = computed(() =>
   TRACK_TYPE_CATALOG.find(c => c.key === activeTab.value)?.types ?? []

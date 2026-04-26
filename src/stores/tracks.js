@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { listen } from '@tauri-apps/api/event'
+import { useSettingsStore } from '@/stores/settings'
 
 // Map CoT type character at index 1 to a short affiliation token.
 // CoT type format: "a-{affiliation}-..." e.g. "a-f-G-U-C"
@@ -13,6 +14,8 @@ function affiliationFromCotType(cotType) {
 }
 
 export const useTracksStore = defineStore('tracks', () => {
+  const settingsStore = useSettingsStore()
+
   // uid → track object
   const tracks = ref(new Map())
   const listening = ref(false)
@@ -25,27 +28,31 @@ export const useTracksStore = defineStore('tracks', () => {
   // Each feature carries all track fields as properties plus a derived
   // `affiliation` for styling and an `updatedAt` timestamp.
   // Hidden uids are dropped here so the map source reflects visibility.
-  const trackCollection = computed(() => ({
-    type: 'FeatureCollection',
-    features: Array.from(tracks.value.values())
-      .filter(t => !hiddenIds.value.has(t.uid))
-      .map(t => ({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
-        properties: {
-          uid: t.uid,
-          cotType: t.cotType,
-          affiliation: affiliationFromCotType(t.cotType),
-          callsign: t.callsign,
-          hae: t.hae,
-          speed: t.speed,
-          course: t.course,
-          time: t.time,
-          stale: t.stale,
-          updatedAt: t.updatedAt
-        }
-      }))
-  }))
+  const trackCollection = computed(() => {
+    const selfUid = settingsStore.selfUid
+    return {
+      type: 'FeatureCollection',
+      features: Array.from(tracks.value.values())
+        .filter(t => !hiddenIds.value.has(t.uid))
+        .map(t => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
+          properties: {
+            uid: t.uid,
+            cotType: t.cotType,
+            affiliation: affiliationFromCotType(t.cotType),
+            callsign: t.callsign,
+            hae: t.hae,
+            speed: t.speed,
+            course: t.course,
+            time: t.time,
+            stale: t.stale,
+            updatedAt: t.updatedAt,
+            isSelf: !!selfUid && t.uid === selfUid
+          }
+        }))
+    }
+  })
 
   // Maximum history window kept in memory. The breadcrumb length setting
   // controls how much of this is *shown* — we keep more so the user can
@@ -61,6 +68,18 @@ export const useTracksStore = defineStore('tracks', () => {
 
     unlistenFn = await listen('cot-event', (event) => {
       const e = event.payload
+      // Drop our own announce echo only when no manual location is set.
+      // Without a location the announce broadcasts at lat/lon (0, 0) as a
+      // presence-only beacon and self-echoing it would pin a phantom
+      // track at Null Island. With a location set, the user expects to
+      // see themselves on their own map and in the track list — same
+      // place peers see them.
+      if (
+        settingsStore.selfUid &&
+        e.uid === settingsStore.selfUid &&
+        !settingsStore.selfLocation
+      ) return
+
       const now = Date.now()
       const existing = tracks.value.get(e.uid)
 
