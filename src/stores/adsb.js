@@ -137,8 +137,12 @@ export const useAdsbStore = defineStore('adsb', () => {
         lat, lon, radiusNm
       })
 
+      // airplanes.live returns the aircraft array under `ac` (field-description
+      // page documents `aircraft`, but the live response uses `ac` — keep the
+      // fallback in case they ever align).
+      const list = data?.ac ?? data?.aircraft ?? []
       const next = new Map()
-      for (const item of data?.aircraft ?? []) {
+      for (const item of list) {
         if (item.hex && Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
           next.set(String(item.hex), item)
         }
