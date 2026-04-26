@@ -10,10 +10,10 @@ const ADSB_LAYER        = 'adsb-aircraft-points'
 const ADSB_LAYER_ARROWS = 'adsb-aircraft-arrows'
 const ADSB_LABELS       = 'adsb-aircraft-labels'
 
-const ADSB_COLOR = '#4dd0e1'  // Material cyan 300 — distinct from AIS yellow.
+const ADSB_COLOR = '#ff4081'  // Material pink A200 — outside the MIL-STD-2525 affiliation palette (cyan/red/green/yellow).
 
 /**
- * Draw a north-pointing filled chevron onto an offscreen canvas in cyan.
+ * Draw a north-pointing filled chevron onto an offscreen canvas in magenta.
  * The symbol layer applies `icon-rotate: ['get', 'track']` to aim it at each
  * aircraft's true track over ground.
  */
