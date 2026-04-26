@@ -513,6 +513,10 @@ onMounted(async () => {
     zoom: mapStore.zoom,
     bearing: mapStore.bearing,
     pitch: mapStore.pitch,
+    // Lift the pitch cap from MapLibre's 60° default to its hard limit of
+    // 85°, so the pitch slider's full travel is usable. Anything past 85°
+    // is rejected by MapLibre internally (camera math degenerates).
+    maxPitch: 85,
     attributionControl: false,
     maplibreLogo: false,
     // Required so the map canvas can be read back for snapshot export.
