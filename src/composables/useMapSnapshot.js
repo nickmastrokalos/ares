@@ -1,5 +1,6 @@
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
+import { desktopDir, join } from '@tauri-apps/api/path'
 
 // Map snapshot / brief export — composites the current MapLibre canvas
 // with a legend strip (mission, timestamp, overlay counts, view info) and
@@ -15,10 +16,13 @@ const LEGEND_TEXT   = '#e3e6ee'
 const LEGEND_DIM    = '#8a92a8'
 const LEGEND_PAD    = 16
 
-export function useMapSnapshot({
-  getMap,
-  featuresStore
-}) {
+// Replace any character that's unsafe in cross-platform filenames with `_`.
+// Conservative — Windows is the strictest of the three platforms we ship to.
+function sanitizeFileName(name) {
+  return String(name).trim().replace(/[\/\\:*?"<>|]+/g, '_')
+}
+
+export function useMapSnapshot({ getMap, featuresStore }) {
 
   // HTML text labels (bullseye / bloodhound / perimeter / measure) live
   // in the DOM overlay, so `map.getCanvas()` alone misses them. Rasterise
@@ -87,7 +91,23 @@ export function useMapSnapshot({
     })
   }
 
-  async function capture() {
+  /**
+   * Capture the current map view as a PNG.
+   *
+   * @param {{ destination?: 'dialog' | 'desktop', filename?: string }} [opts]
+   *   `destination`: `'dialog'` (default) prompts the native save
+   *     dialog with a suggested filename; `'desktop'` writes directly
+   *     to the user's Desktop with no prompt. The agent's
+   *     `map_capture_snapshot` tool uses 'desktop'; the toolbar button
+   *     uses 'dialog'.
+   *   `filename`: optional override. Sanitised for cross-platform
+   *     filesystem safety. `.png` is appended if missing. Defaults to
+   *     `ares_screen_capture_<UTC ISO timestamp>.png`.
+   *
+   * @returns {Promise<{ ok: true, filePath: string }
+   *                  | { ok: false, cancelled?: true, error?: string }>}
+   */
+  async function capture({ destination = 'dialog', filename } = {}) {
     const map = getMap()
     if (!map) return { ok: false, error: 'Map not ready.' }
 
@@ -150,15 +170,30 @@ export function useMapSnapshot({
     const blob = await new Promise(resolve => composite.toBlob(resolve, 'image/png'))
     if (!blob) return { ok: false, error: 'Failed to encode PNG.' }
 
-    const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const safeTitle = title.replace(/[^\w\-]+/g, '_').toLowerCase() || 'mission'
-    const defaultName = `${safeTitle}_${stamp}.png`
+    let fileName
+    if (filename && String(filename).trim()) {
+      const safe = sanitizeFileName(filename)
+      fileName = safe.toLowerCase().endsWith('.png') ? safe : `${safe}.png`
+    } else {
+      const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      fileName = `ares_screen_capture_${stamp}.png`
+    }
 
-    const filePath = await save({
-      defaultPath: defaultName,
-      filters: [{ name: 'PNG image', extensions: ['png'] }]
-    })
-    if (!filePath) return { ok: false, cancelled: true }
+    let filePath
+    if (destination === 'desktop') {
+      try {
+        const dir = await desktopDir()
+        filePath = await join(dir, fileName)
+      } catch (err) {
+        return { ok: false, error: `Could not resolve Desktop directory: ${err?.message ?? err}` }
+      }
+    } else {
+      filePath = await save({
+        defaultPath: fileName,
+        filters: [{ name: 'PNG image', extensions: ['png'] }]
+      })
+      if (!filePath) return { ok: false, cancelled: true }
+    }
 
     const bytes = new Uint8Array(await blob.arrayBuffer())
     await writeFile(filePath, bytes)

@@ -12,6 +12,7 @@ import {
 import { DEFAULT_FEATURE_COLOR } from '@/stores/features'
 import { parseCoordinate } from '@/services/coordinates'
 import { BASEMAPS } from '@/services/basemaps'
+import { nameOrDefault, rejectIfContextDerived, looksContextDerived } from '@/services/featureNaming'
 
 // Mirrors the track builder UI (ManualTrackPanel / useMapManualTracks).
 const AFFIL_ENUM   = ['friendly', 'hostile', 'civilian', 'unknown']
@@ -455,7 +456,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
             description: '[longitude, latitude]'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string', description: 'Hex color e.g. #ff0000' }
         },
         required: ['coordinate']
@@ -466,9 +467,12 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Point at ${lat.toFixed(4)}, ${lon.toFixed(4)}${col}`
       },
-      async handler({ coordinate, name = 'Point', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ coordinate, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = { type: 'Point', coordinates: coordinate }
-        const id = await featuresStore.addFeature('point', geometry, { name, color })
+        const id = await featuresStore.addFeature('point', geometry, {
+          name: nameOrDefault(name, 'point', featuresStore), color
+        })
         return { id, success: true }
       }
     },
@@ -486,7 +490,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             minItems: 2,
             description: 'Ordered list of [longitude, latitude] pairs.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['points']
@@ -496,9 +500,12 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Line · ${points.length} points${col}`
       },
-      async handler({ points, name = 'Line', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ points, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = { type: 'LineString', coordinates: points }
-        const id = await featuresStore.addFeature('line', geometry, { name, color })
+        const id = await featuresStore.addFeature('line', geometry, {
+          name: nameOrDefault(name, 'line', featuresStore), color
+        })
         return { id, success: true }
       }
     },
@@ -518,7 +525,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             minItems: 3,
             description: 'Ordered ring of [longitude, latitude] pairs. Auto-closed.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['points']
@@ -528,12 +535,15 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Polygon · ${points.length} points${col}`
       },
-      async handler({ points, name = 'Polygon', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ points, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const ring = [...points]
         const first = ring[0], last = ring[ring.length - 1]
         if (first[0] !== last[0] || first[1] !== last[1]) ring.push([...first])
         const geometry = { type: 'Polygon', coordinates: [ring] }
-        const id = await featuresStore.addFeature('polygon', geometry, { name, color })
+        const id = await featuresStore.addFeature('polygon', geometry, {
+          name: nameOrDefault(name, 'polygon', featuresStore), color
+        })
         return { id, success: true }
       }
     },
@@ -550,7 +560,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             description: 'Center [longitude, latitude].'
           },
           radiusMeters: { type: 'number', description: 'Radius in meters.' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['center', 'radiusMeters']
@@ -561,9 +571,13 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const col = color ? ` · ${color}` : ''
         return `${label}Circle at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radiusMeters} m${col}`
       },
-      async handler({ center, radiusMeters, name = 'Circle', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ center, radiusMeters, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = circlePolygon(center, radiusMeters)
-        const id = await featuresStore.addFeature('circle', geometry, { name, center, radius: radiusMeters, color })
+        const id = await featuresStore.addFeature('circle', geometry, {
+          name: nameOrDefault(name, 'circle', featuresStore),
+          center, radius: radiusMeters, color
+        })
         return { id, success: true }
       }
     },
@@ -582,7 +596,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
           radiusMajor: { type: 'number', description: 'Major-axis radius in meters.' },
           radiusMinor: { type: 'number', description: 'Minor-axis radius in meters.' },
           rotation: { type: 'number', description: 'Rotation in degrees (azimuth of major axis from north). Default 0.' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['center', 'radiusMajor', 'radiusMinor']
@@ -592,10 +606,12 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const label = name ? `"${name}" · ` : ''
         return `${label}Ellipse at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radiusMajor}×${radiusMinor} m`
       },
-      async handler({ center, radiusMajor, radiusMinor, rotation = 0, name = 'Ellipse', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ center, radiusMajor, radiusMinor, rotation = 0, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = ellipsePolygon(center, radiusMajor, radiusMinor, rotation)
         const id = await featuresStore.addFeature('ellipse', geometry, {
-          name, center, radiusMajor, radiusMinor, rotation, color
+          name: nameOrDefault(name, 'ellipse', featuresStore),
+          center, radiusMajor, radiusMinor, rotation, color
         })
         return { id, success: true }
       }
@@ -615,7 +631,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
           radius: { type: 'number', description: 'Radius in meters.' },
           startAngle: { type: 'number', description: 'Start bearing in degrees (0 = north, clockwise).' },
           endAngle: { type: 'number', description: 'End bearing in degrees (clockwise from north).' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['center', 'radius', 'startAngle', 'endAngle']
@@ -625,10 +641,12 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const label = name ? `"${name}" · ` : ''
         return `${label}Sector at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radius} m · ${startAngle}°–${endAngle}°`
       },
-      async handler({ center, radius, startAngle, endAngle, name = 'Sector', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ center, radius, startAngle, endAngle, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = sectorPolygon(center, radius, startAngle, endAngle)
         const id = await featuresStore.addFeature('sector', geometry, {
-          name, center, radius, startAngle, endAngle, color
+          name: nameOrDefault(name, 'sector', featuresStore),
+          center, radius, startAngle, endAngle, color
         })
         return { id, success: true }
       }
@@ -650,7 +668,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             description: 'Northeast corner [longitude, latitude].'
           },
           rotationDeg: { type: 'number', description: 'Rotation in degrees. Default 0.' },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['sw', 'ne']
@@ -660,9 +678,13 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const rot = rotationDeg ? ` · ${rotationDeg}°` : ''
         return `${label}Box SW ${sw[1].toFixed(4)}, ${sw[0].toFixed(4)} → NE ${ne[1].toFixed(4)}, ${ne[0].toFixed(4)}${rot}`
       },
-      async handler({ sw, ne, rotationDeg = 0, name = 'Box', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ sw, ne, rotationDeg = 0, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = rotatedBoxPolygon(sw, ne, rotationDeg)
-        const id = await featuresStore.addFeature('box', geometry, { name, sw, ne, rotationDeg, color })
+        const id = await featuresStore.addFeature('box', geometry, {
+          name: nameOrDefault(name, 'box', featuresStore),
+          sw, ne, rotationDeg, color
+        })
         return { id, success: true }
       }
     },
@@ -682,7 +704,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
             type: 'number',
             description: 'Margin (in meters) added around the tightest bounding box so the box stays visible. Defaults to 500.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['featureIds']
@@ -692,7 +714,8 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const ids = featureIds.map(i => `#${i}`).join(', ')
         return `${label}Box around ${ids} · +${paddingMeters} m`
       },
-      async handler({ featureIds, paddingMeters = 500, name = 'Box', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ featureIds, paddingMeters = 500, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const rows = featureIds
           .map(id => featuresStore.features.find(f => f.id === id))
           .filter(Boolean)
@@ -725,7 +748,10 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const sw = [minLng - dLng, minLat - dLat]
         const ne = [maxLng + dLng, maxLat + dLat]
         const geometry = rotatedBoxPolygon(sw, ne, 0)
-        const id = await featuresStore.addFeature('box', geometry, { name, sw, ne, rotationDeg: 0, color })
+        const id = await featuresStore.addFeature('box', geometry, {
+          name: nameOrDefault(name, 'box', featuresStore),
+          sw, ne, rotationDeg: 0, color
+        })
         return { id, success: true }
       }
     },
@@ -748,14 +774,14 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
                   type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
                   description: '[longitude, latitude]'
                 },
-                label: { type: 'string', description: 'Optional waypoint label (e.g. "Alpha", "Bravo"). Defaults to SP/WP N/EP.' }
+                label: { type: 'string', description: 'OPTIONAL waypoint label. Pass ONLY when the user explicitly named this specific waypoint (e.g. "label this point Alpha"). If the user did not provide a label, OMIT this field — the system auto-labels SP / WP 1 / WP 2 / … / EP. Do NOT invent descriptive labels like "South entry", "Turning point", "Approach", or anything derived from prompt context.' }
               },
               required: ['coordinate']
             },
             minItems: 2,
             description: 'Ordered waypoints. First = SP, last = EP, rest = WP.'
           },
-          name: { type: 'string' },
+          name: { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the feature in their request (e.g. "polygon called Keepout", "box named Alpha"). If the user did not provide a name, OMIT this field — the system auto-generates a default like `circle-a3f9` / `box-7c2e` / `route-9201`. Do NOT invent descriptive names from context such as "Circle at 40R EP 13166 05853", "Polygon around target", or "Route SP→EP".' },
           color: { type: 'string' }
         },
         required: ['waypoints']
@@ -764,7 +790,13 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         const label = name ? `"${name}" · ` : ''
         return `${label}Route · ${waypoints.length} waypoints`
       },
-      async handler({ waypoints, name = 'Route', color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ waypoints, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
+        for (const wp of waypoints ?? []) {
+          if (looksContextDerived(wp?.label)) {
+            return rejectIfContextDerived(wp.label, 'waypoint label')
+          }
+        }
         const total = waypoints.length
         const coords = waypoints.map(wp => wp.coordinate)
         const wps = waypoints.map((wp, i) => {
@@ -773,7 +805,10 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
           return { label: wp.label ?? defaultLabel, role }
         })
         const geometry = { type: 'LineString', coordinates: coords }
-        const id = await featuresStore.addFeature('route', geometry, { name, color, waypoints: wps })
+        const id = await featuresStore.addFeature('route', geometry, {
+          name: nameOrDefault(name, 'route', featuresStore),
+          color, waypoints: wps
+        })
         return { id, success: true }
       }
     },

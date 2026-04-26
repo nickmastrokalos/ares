@@ -59,6 +59,24 @@ export function ellipsePolygon(center, radiusMajor, radiusMinor, rotationDeg = 0
   return { type: 'Polygon', coordinates: [coords] }
 }
 
+// Rectangular corridor polygon centred on the line `start → end`, extending
+// `halfWidthMeters` perpendicular to it on each side. Used as a route
+// obstacle when projecting a moving entity (AIS vessel, etc.) forward
+// along its course: feed the current and projected positions as endpoints
+// and the corridor stands in for "anywhere this vessel will be over the
+// horizon ± standoff." Square ends — no rounded caps — which is fine for
+// the rasterizer.
+export function corridorPolygon(start, end, halfWidthMeters) {
+  const bearing = bearingBetween(start, end)
+  const left  = (bearing + 270) % 360  // -90°
+  const right = (bearing +  90) % 360
+  const aL = destinationPoint(start, halfWidthMeters, left)
+  const aR = destinationPoint(start, halfWidthMeters, right)
+  const bL = destinationPoint(end,   halfWidthMeters, left)
+  const bR = destinationPoint(end,   halfWidthMeters, right)
+  return { type: 'Polygon', coordinates: [[aL, bL, bR, aR, aL]] }
+}
+
 export function sectorPolygon(center, radiusMeters, startAngle, endAngle, steps = 64) {
   const coords = [center]
   let sweep = endAngle - startAngle
@@ -224,6 +242,56 @@ export function pointInPolygon(point, geometry) {
     })
   }
   return false
+}
+
+// True if the open segments p1-p2 and p3-p4 intersect strictly. Touches at
+// endpoints / collinear overlap return false. Planar [lng, lat] is fine here
+// because callers only use it on small bboxes (route planning, land checks).
+export function segmentsIntersect(p1, p2, p3, p4) {
+  const [x1, y1] = p1, [x2, y2] = p2, [x3, y3] = p3, [x4, y4] = p4
+  const d = (x2 - x1) * (y4 - y3) - (y2 - y1) * (x4 - x3)
+  if (d === 0) return false
+  const t = ((x3 - x1) * (y4 - y3) - (y3 - y1) * (x4 - x3)) / d
+  const u = ((x3 - x1) * (y2 - y1) - (y3 - y1) * (x2 - x1)) / d
+  return t > 0 && t < 1 && u > 0 && u < 1
+}
+
+// True if the open segment a-b crosses any edge of the Polygon / MultiPolygon
+// or has either endpoint strictly inside it (with holes honored). Useful for
+// "does this leg of a route enter land?" — boundary touches are tolerated.
+export function segmentCrossesPolygon(a, b, geometry) {
+  if (!geometry) return false
+  const polys =
+    geometry.type === 'Polygon'      ? [geometry.coordinates] :
+    geometry.type === 'MultiPolygon' ?  geometry.coordinates  :
+    null
+  if (!polys) return false
+
+  for (const rings of polys) {
+    for (const ring of rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        if (segmentsIntersect(a, b, ring[j], ring[i])) return true
+      }
+    }
+  }
+  // Either endpoint inside the interior counts as crossing — handles the
+  // case of a fully-interior segment that doesn't intersect any boundary.
+  return pointInPolygon(a, geometry) || pointInPolygon(b, geometry)
+}
+
+// Returns the index of the first segment of `coordinates` that crosses any
+// of the supplied land polygons, or -1 if none. Used by the assistant
+// `route_check_land_crossing` tool.
+export function findLandCrossingIndex(coordinates, landPolygons) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return -1
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const a = coordinates[i]
+    const b = coordinates[i + 1]
+    for (const geom of landPolygons) {
+      if (segmentCrossesPolygon(a, b, geom)) return i
+    }
+  }
+  return -1
 }
 
 function collectCoords(geometry) {

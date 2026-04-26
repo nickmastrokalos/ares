@@ -21,6 +21,7 @@ import { useMapAnnotations } from '@/composables/useMapAnnotations'
 import { useMapIntercepts } from '@/composables/useMapIntercepts'
 import { useMapAlerts } from '@/composables/useMapAlerts'
 import { useMapSnapshot } from '@/composables/useMapSnapshot'
+import { useMapVideo } from '@/composables/useMapVideo'
 import { useMapRoute } from '@/composables/useMapRoute'
 import { useMapTracks } from '@/composables/useMapTracks'
 import { useMapManualTracks } from '@/composables/useMapManualTracks'
@@ -127,7 +128,7 @@ const { capture: captureSnapshotRaw } = useMapSnapshot({
 })
 
 async function captureSnapshot() {
-  const res = await captureSnapshotRaw()
+  const res = await captureSnapshotRaw({ destination: 'dialog' })
   if (res.ok || res.cancelled) return
   mapAlerts.setAlert('snapshot-err', {
     source: 'snapshot', level: 'critical',
@@ -135,6 +136,56 @@ async function captureSnapshot() {
     timestamp: Date.now()
   })
   setTimeout(() => mapAlerts.clearAlert('snapshot-err'), 6000)
+}
+
+// Assistant entry point — saves directly to the Desktop with no native
+// dialog. The user has already approved the call via the confirm card.
+// `filename` is optional and falls through to the default
+// `ares_screen_capture_<stamp>.png` when not supplied.
+async function captureSnapshotToDesktop({ filename } = {}) {
+  return captureSnapshotRaw({ destination: 'desktop', filename })
+}
+
+const { record: recordVideoRaw } = useMapVideo({ getMap: () => map })
+
+const recordingVideo = ref(false)
+
+// Single mutex for both entry points — the toolbar button and the
+// agent tool — so the toolbar's "recording" state reflects either
+// path (red icon + disabled button) and the second caller bails
+// cleanly if a recording is already in flight.
+async function runRecording(opts) {
+  if (recordingVideo.value) {
+    return { ok: false, error: 'A video is already being recorded.' }
+  }
+  recordingVideo.value = true
+  try {
+    return await recordVideoRaw(opts)
+  } finally {
+    recordingVideo.value = false
+  }
+}
+
+// Toolbar entry point — records for the requested duration and saves
+// via the native dialog (matching the snapshot button).
+async function captureVideo({ durationSeconds } = {}) {
+  const res = await runRecording({ destination: 'dialog', durationSeconds })
+  if (!res.ok && !res.cancelled) {
+    mapAlerts.setAlert('video-err', {
+      source: 'snapshot', level: 'critical',
+      message: `Video capture failed: ${res.error}`,
+      timestamp: Date.now()
+    })
+    setTimeout(() => mapAlerts.clearAlert('video-err'), 6000)
+  }
+}
+
+// Same shape as `captureSnapshotToDesktop` — the agent's
+// `map_capture_video` tool calls this directly and the user has
+// approved via the confirm card. Goes through `runRecording` so the
+// toolbar button reflects the agent-driven recording too.
+async function captureVideoToDesktop({ durationSeconds, filename } = {}) {
+  return runRecording({ destination: 'desktop', durationSeconds, filename })
 }
 
 // Perimeter breaches are aggregated into a single alert so the chip stays
@@ -175,9 +226,9 @@ watch(
 const entitySelecting = computed(() => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value)
 const { setTool, cancel, initLayers, flyToGeometry, moveFeature, draggingFeature, previewFeatureColor } = useMapDraw(() => map, dispatcher, entitySelecting)
 const { measuring, startMeasure, cancelMeasure } = useMapMeasure(() => map)
-const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute, initLayers: initRouteLayers, previewRouteColor } = useMapRoute(() => map, dispatcher, entitySelecting)
+const { routing, appending, appendingRouteId, openRouteList, openRoutePanel, closeRoutePanel, startAppendMode, toggleRoute: toggleRouteRaw, initLayers: initRouteLayers, previewRouteColor, draggingWaypoint } = useMapRoute(() => map, dispatcher, entitySelecting)
 const suppressEntityClicks = computed(
-  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || placing.value != null
+  () => bloodhounding.value || perimeterSelecting.value || bullseyeSelecting.value || annotationSelecting.value || routing.value || appending.value || placing.value != null
 )
 const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: openManualTrackPanel, closePanel: closeManualTrackPanel, focusedId: manualFocusedId, draggingTrack, initLayers: initManualTrackLayers } = useMapManualTracks(() => map, suppressEntityClicks, dispatcher)
 // Back-fill the proxy ref handed to bullseye/annotations at construction —
@@ -195,7 +246,9 @@ useAssistantTools(
   () => buildMapToolBundles({
     featuresStore, tracksStore, aisStore, ghostsStore, settingsStore,
     flyToGeometry, flyTo, switchBasemap,
-    bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi
+    bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi,
+    captureSnapshotToDesktop,
+    captureVideoToDesktop
   }),
   'Map assistant'
 )
@@ -206,6 +259,7 @@ provide('flyToGeometry', flyToGeometry)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
 provide('draggingTrack', draggingTrack)
+provide('draggingWaypoint', draggingWaypoint)
 provide('previewFeatureColor', previewFeatureColor)
 provide('openManualTrackPanel', (id) => openManualTrackPanel(id))
 provide('previewRouteColor', (id, color) => previewRouteColor(id, color))
@@ -236,8 +290,60 @@ async function switchBasemap(id) {
 }
 provide('switchBasemap', switchBasemap)
 
+// Disarm every "active" tool except the named one. Called from each
+// toolbar-driven entry point so picking a new tool always replaces
+// whatever was previously armed (route building, draw shape, measure,
+// manual-track placement, bloodhound/perimeter/bullseye/annotations
+// selection, …) and the open tool panels that own those armed states.
+// Passive panels (track list, AIS, ghost, settings, IO, layers,
+// listeners, intercept) are left alone — they don't interact with map
+// clicks, so they're safe to coexist with anything.
+function exitOtherTools(keep) {
+  if (keep !== 'route' && routing.value) toggleRouteRaw()
+
+  if (keep !== 'draw') {
+    cancel()
+    if (drawPanelOpen.value) drawPanelOpen.value = false
+  }
+
+  if (keep !== 'measure' && measuring.value) cancelMeasure()
+
+  if (keep !== 'trackDrop') {
+    if (placing.value != null) setPlacing(null)
+    if (trackDropPanelOpen.value) trackDropPanelOpen.value = false
+  }
+
+  if (keep !== 'bloodhound') {
+    if (bloodhounding.value) bloodhoundApi.toggleSelecting()
+    if (bloodhoundPanelOpen.value) bloodhoundPanelOpen.value = false
+  }
+
+  if (keep !== 'perimeter') {
+    if (perimeterSelecting.value) perimeterApi.toggleSelecting()
+    if (perimeterPanelOpen.value) perimeterPanelOpen.value = false
+  }
+
+  if (keep !== 'bullseye') {
+    if (bullseyeSelecting.value) bullseyeApi.toggleSelecting()
+    if (bullseyePanelOpen.value) bullseyePanelOpen.value = false
+  }
+
+  if (keep !== 'annotations') {
+    if (annotationSelecting.value) annotationsApi.toggleSelecting()
+    if (annotationsPanelOpen.value) annotationsPanelOpen.value = false
+  }
+}
+
+function toggleRoute() {
+  // Entering build mode kicks every other armed tool; cancelling does nothing
+  // to others (toggleRouteRaw flips routing.value off when already on).
+  if (!routing.value) exitOtherTools('route')
+  toggleRouteRaw()
+}
+
 function toggleDrawPanel() {
-  cancelMeasure()
+  const opening = !drawPanelOpen.value
+  if (opening) exitOtherTools('draw')
   drawPanelOpen.value = !drawPanelOpen.value
   if (!drawPanelOpen.value) cancel()
 }
@@ -250,13 +356,14 @@ function toggleMeasure() {
   if (measuring.value) {
     cancelMeasure()
   } else {
-    cancel()
-    drawPanelOpen.value = false
+    exitOtherTools('measure')
     startMeasure()
   }
 }
 
 function toggleTrackDrop() {
+  const opening = !trackDropPanelOpen.value
+  if (opening) exitOtherTools('trackDrop')
   trackDropPanelOpen.value = !trackDropPanelOpen.value
   if (!trackDropPanelOpen.value) setPlacing(null)
 }
@@ -274,19 +381,33 @@ function toggleAisPanel() {
 }
 
 function toggleBloodhoundPanel() {
-  bloodhoundPanelOpen.value = !bloodhoundPanelOpen.value
+  const isOpen = bloodhoundPanelOpen.value
+  // Closing while selecting → drop the crosshair (matches the panel's X
+  // button). Opening → kick every other armed tool first.
+  if (isOpen && bloodhounding.value) bloodhoundApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('bloodhound')
+  bloodhoundPanelOpen.value = !isOpen
 }
 
 function togglePerimeterPanel() {
-  perimeterPanelOpen.value = !perimeterPanelOpen.value
+  const isOpen = perimeterPanelOpen.value
+  if (isOpen && perimeterSelecting.value) perimeterApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('perimeter')
+  perimeterPanelOpen.value = !isOpen
 }
 
 function toggleBullseyePanel() {
-  bullseyePanelOpen.value = !bullseyePanelOpen.value
+  const isOpen = bullseyePanelOpen.value
+  if (isOpen && bullseyeSelecting.value) bullseyeApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('bullseye')
+  bullseyePanelOpen.value = !isOpen
 }
 
 function toggleAnnotationsPanel() {
-  annotationsPanelOpen.value = !annotationsPanelOpen.value
+  const isOpen = annotationsPanelOpen.value
+  if (isOpen && annotationSelecting.value) annotationsApi.toggleSelecting()
+  if (!isOpen) exitOtherTools('annotations')
+  annotationsPanelOpen.value = !isOpen
 }
 
 function toggleInterceptPanel() {
@@ -294,6 +415,9 @@ function toggleInterceptPanel() {
 }
 
 function onToolSelect(toolId) {
+  // Selecting a draw tool disarms every other tool. Deselecting (toolId
+  // null) doesn't need to disarm anything else.
+  if (toolId != null) exitOtherTools('draw')
   setTool(toolId)
 }
 
@@ -490,6 +614,7 @@ onUnmounted(async () => {
       :ghost-panel-open="ghostPanelOpen"
       :intercept-panel-open="interceptPanelOpen"
       :ais-panel-open="aisPanelOpen"
+      :recording-video="recordingVideo"
       :mission-name="featuresStore.activeMission?.name || ''"
       :plugin-buttons="pluginRegistry.allToolbarButtons.value"
       @toggle-draw="toggleDrawPanel"
@@ -511,6 +636,7 @@ onUnmounted(async () => {
       @exit-mission="exitMission"
       @toggle-io="ioDialogOpen = true"
       @snapshot="captureSnapshot"
+      @capture-video="captureVideo"
     />
     <div class="map-body">
       <div ref="mapContainer" class="map-container">

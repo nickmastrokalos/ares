@@ -17,27 +17,34 @@ export const useTracksStore = defineStore('tracks', () => {
   const tracks = ref(new Map())
   const listening = ref(false)
 
+  // Session-only set of uids hidden from the map via the track list.
+  // Cleared on uid removal so a re-appearing track doesn't stay hidden.
+  const hiddenIds = ref(new Set())
+
   // GeoJSON FeatureCollection derived from the tracks Map.
   // Each feature carries all track fields as properties plus a derived
   // `affiliation` for styling and an `updatedAt` timestamp.
+  // Hidden uids are dropped here so the map source reflects visibility.
   const trackCollection = computed(() => ({
     type: 'FeatureCollection',
-    features: Array.from(tracks.value.values()).map(t => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
-      properties: {
-        uid: t.uid,
-        cotType: t.cotType,
-        affiliation: affiliationFromCotType(t.cotType),
-        callsign: t.callsign,
-        hae: t.hae,
-        speed: t.speed,
-        course: t.course,
-        time: t.time,
-        stale: t.stale,
-        updatedAt: t.updatedAt
-      }
-    }))
+    features: Array.from(tracks.value.values())
+      .filter(t => !hiddenIds.value.has(t.uid))
+      .map(t => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
+        properties: {
+          uid: t.uid,
+          cotType: t.cotType,
+          affiliation: affiliationFromCotType(t.cotType),
+          callsign: t.callsign,
+          hae: t.hae,
+          speed: t.speed,
+          course: t.course,
+          time: t.time,
+          stale: t.stale,
+          updatedAt: t.updatedAt
+        }
+      }))
   }))
 
   // Maximum history window kept in memory. The breadcrumb length setting
@@ -114,10 +121,23 @@ export const useTracksStore = defineStore('tracks', () => {
     const m = new Map(tracks.value)
     m.delete(uid)
     tracks.value = m
+    if (hiddenIds.value.has(uid)) {
+      const next = new Set(hiddenIds.value)
+      next.delete(uid)
+      hiddenIds.value = next
+    }
   }
 
   function clearTracks() {
     tracks.value = new Map()
+    hiddenIds.value = new Set()
+  }
+
+  function toggleVisibility(uid) {
+    const next = new Set(hiddenIds.value)
+    if (next.has(uid)) next.delete(uid)
+    else next.add(uid)
+    hiddenIds.value = next
   }
 
   // ---- Open panels ----
@@ -146,6 +166,8 @@ export const useTracksStore = defineStore('tracks', () => {
     tracks,
     listening,
     trackCollection,
+    hiddenIds,
+    toggleVisibility,
     startListening,
     stopListening,
     removeTrack,

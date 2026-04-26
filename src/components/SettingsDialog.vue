@@ -249,7 +249,7 @@ function formatBadge(ts) {
               <div class="flex-grow-1">
                 <div class="text-body-2">Track breadcrumbs</div>
                 <div class="text-caption text-medium-emphasis">
-                  Show a trail of past positions behind each track.
+                  Show a trail of past positions behind each CoT track and AIS vessel.
                 </div>
               </div>
               <v-switch

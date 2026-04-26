@@ -1,11 +1,13 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import ReleaseNotesList from '@/components/ReleaseNotesList.vue'
 
 const settingsStore = useSettingsStore()
 
 const TABS = [
-  { id: 'assistant', label: 'Assistant', icon: 'mdi-robot-outline' }
+  { id: 'assistant',    label: 'Assistant', icon: 'mdi-robot-outline' },
+  { id: 'releaseNotes', label: 'Releases',  icon: 'mdi-history' }
 ]
 
 const activeTab = ref(TABS[0].id)
@@ -139,6 +141,14 @@ const showApiKey = ref(false)
           </div>
         </v-window-item>
 
+        <!-- ---- Release Notes ---- -->
+        <v-window-item value="releaseNotes">
+          <div class="tab-content">
+            <div class="section-label">Release notes</div>
+            <ReleaseNotesList />
+          </div>
+        </v-window-item>
+
       </v-window>
 
     </div>
@@ -149,7 +159,9 @@ const showApiKey = ref(false)
 .settings-view {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* viewport minus AppFooter (28px, see App.vue) — gives a definite height
+     so the inner flex chain can bound .settings-window and let it scroll. */
+  height: calc(100vh - 28px);
   background: rgb(var(--v-theme-background));
 }
 
@@ -185,6 +197,7 @@ const showApiKey = ref(false)
 .settings-window {
   flex: 1;
   min-width: 0;
+  min-height: 0;  /* required for the flex item to shrink and let overflow-y kick in */
   overflow-y: auto;
 }
 

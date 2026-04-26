@@ -49,7 +49,7 @@ Owner refs are typed, resolved to coordinates on every source-store tick:
 
 `useMapPerimeters` installs three watchers — one each on `tracksStore.tracks`, `aisStore.vessels`, `featuresStore.features`. Any one firing triggers `reresolveAll()`, which:
 
-1. **Drops** any perimeter whose feature owner was deleted (same authoritative-deletion rule as bloodhound). CoT / AIS owner disappearance does **not** drop the perimeter — the ring freezes at the last-known coord, matching the compromise in bloodhound for noisy AIS feeds and pruned CoT tracks.
+1. **Drops** any perimeter whose owner anchor is gone — deleted manual / draw feature, removed or stale-pruned CoT track, or aged-out AIS vessel. Hidden anchors (track-list eye toggle) are still in their store and do **not** trigger removal — visibility is separate from deletion. Mirrors the bloodhound rule.
 2. **Re-resolves** each surviving owner's `coord`.
 3. **Recomputes breaches** for every alert-enabled perimeter (see below).
 4. **Rebuilds** the rings and halos sources in one batch.
@@ -65,6 +65,8 @@ For every perimeter with `alert=true`, on each tick:
 - If `distanceBetween(intruder, center) < radius` (great-circle, via `src/services/geometry.js`), mark the intruder as breached.
 
 **AIS visibility gate** — the AIS loop is skipped entirely when `aisStore.visible === false`. A breach halo floating over empty map (with no vessel rendered) is confusing, and an operator who has explicitly hidden AIS has opted out of AIS-driven alerting. A watcher on `aisStore.visible` triggers `reresolveAll()` so breaches appear / disappear immediately on toggle.
+
+**Per-track visibility gate** — individual CoT uids in `tracksStore.hiddenIds` and manual-track ids in `featuresStore.hiddenManualIds` (toggled from the track list's eye button) are skipped in the same loop for the same reason. Watchers on each Set trigger `reresolveAll()` so toggling a track's visibility clears or re-fires any breach it was part of.
 
 Results drive two MapLibre sources:
 

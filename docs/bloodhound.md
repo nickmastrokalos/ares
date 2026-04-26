@@ -47,12 +47,10 @@ Endpoints are stored as typed refs, resolved to coordinates on every source chan
 `useMapBloodhound` installs three Vue watchers — one each on `tracksStore.tracks`, `aisStore.vessels`, `featuresStore.features`. Any one firing triggers `reresolveAll()`, which:
 
 1. Walks every committed line.
-2. If an endpoint references a feature that no longer exists, the whole line is dropped (mirrors `RoutePanel`'s "close on row gone" pattern).
+2. If either endpoint's anchor is gone — deleted feature, removed or stale-pruned CoT track, aged-out AIS vessel — the whole line is dropped. Mirrors the perimeter rule. Hidden anchors (track-list eye toggle) are still in their store and don't count as "gone" — visibility is separate from deletion.
 3. Otherwise re-resolves each endpoint's `coord`; if it moved, rewrites the line on the map and updates both endpoint dots + the midpoint label.
 
 The watchers are lazy — they start only after the first line is committed and stop when the last line is removed, so mounting the view doesn't pay for them.
-
-If a `cot` or `ais` endpoint's source temporarily disappears (track pruned, vessel outside the current AIS fetch window), the line freezes at its last-known coord. This is intentional — AIS feeds are noisy and we don't want every out-of-window vessel to yank a line. Features are different: deletion is authoritative, so the line is removed.
 
 ## Selection flow
 
@@ -137,4 +135,3 @@ The canonical resolver is `map_find_entity(name)` (in `tools/map.js`), which sea
 - Persisting bloodhounds across app restarts — lines are ephemeral, matching the pre-existing range behaviour.
 - Per-line colour / style overrides.
 - Arbitrary-shape endpoints (e.g., "closest point on this polygon" rather than its centroid).
-- Stale-vessel auto-removal — see "Reactivity" above for the frozen-at-last-coord compromise.

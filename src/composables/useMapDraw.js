@@ -14,6 +14,7 @@ import {
   ringCentroid
 } from '@/services/geometry'
 import { pickAndReadImage } from '@/services/imageOverlay'
+import { defaultFeatureName } from '@/services/featureNaming'
 import { useFeaturesStore, DEFAULT_FEATURE_COLOR, DEFAULT_FEATURE_OPACITY } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -66,30 +67,13 @@ export function useMapDraw(getMap, dispatcher = null, suppress = { value: false 
   // AttributesPanel can sync its fields in real-time without a DB round-trip.
   const draggingFeature = ref(null)
 
-  // Returns the next default name for a new feature of `type`, numbered so it
-  // is unique within the active mission (e.g. "Polygon 1", "Polygon 2", …).
-  // Mirrors the scan-and-increment strategy used by useMapManualTracks so the
-  // UX is consistent across draw features and manual tracks.
-  const FEATURE_LABELS = {
-    line: 'Line', polygon: 'Polygon', circle: 'Circle', sector: 'Sector',
-    ellipse: 'Ellipse', box: 'Box', image: 'Image', point: 'Point'
-  }
+  // Wrapper around the shared default-name helper. Bound to the local
+  // featuresStore so callsites can stay terse: `nextFeatureName('polygon')`.
+  // Names follow the `<type>-<4hex>` convention (e.g. `polygon-a3f9`),
+  // shared with the assistant's draw tools so manual and AI-created
+  // features look consistent in the feature list.
   function nextFeatureName(type) {
-    const base = FEATURE_LABELS[type] ?? type
-    const re = new RegExp(`^${base}\\s+(\\d+)$`)
-    let max = 0
-    for (const f of featuresStore.features) {
-      if (f.type !== type) continue
-      try {
-        const props = JSON.parse(f.properties)
-        const m = String(props.name ?? '').match(re)
-        if (m) {
-          const n = parseInt(m[1])
-          if (!isNaN(n) && n > max) max = n
-        }
-      } catch { /* skip malformed row */ }
-    }
-    return `${base} ${max + 1}`
+    return defaultFeatureName(type, featuresStore)
   }
 
   const SELECTABLE_LAYERS = [

@@ -2,6 +2,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
+import { defaultFeatureName } from '@/services/featureNaming'
 
 const PREVIEW_SOURCE  = 'route-preview'
 const PREVIEW_LAYER   = 'route-preview-line'
@@ -34,6 +35,14 @@ export function useMapRoute(getMap, dispatcher = null, suppress = { value: false
   const appending         = ref(false)
   const appendingRouteId  = ref(null)
   const openRouteIds      = ref(new Set())
+
+  // Per-frame broadcast of the in-flight waypoint drag — `{ routeId,
+  // index, lng, lat }` while dragging, `null` otherwise. RoutePanel
+  // injects this and overlays the live coord on its readout grid so the
+  // user sees the position update as the cursor moves rather than only
+  // on mouse release. Mirrors the `draggingTrack` pattern in
+  // `useMapManualTracks`.
+  const draggingWaypoint  = ref(null)
 
   const openRouteList = computed(() => [...openRouteIds.value])
 
@@ -249,6 +258,7 @@ export function useMapRoute(getMap, dispatcher = null, suppress = { value: false
           type: 'Feature',
           properties: {
             _dbId: row.id,
+            _index: i,
             color,
             label: wp.label ?? wpLabel(i, total),
             role:  wp.role  ?? (i === 0 ? 'SP' : i === total - 1 ? 'EP' : 'WP')
@@ -349,12 +359,8 @@ export function useMapRoute(getMap, dispatcher = null, suppress = { value: false
 
     const geometry = { type: 'LineString', coordinates: [...buildPoints] }
 
-    // Count existing routes to pick a default name.
-    const existingCount = featuresStore.features.filter(f => f.type === 'route').length
-    const name = `Route ${existingCount + 1}`
-
     const id = await featuresStore.addFeature('route', geometry, {
-      name,
+      name: defaultFeatureName('route', featuresStore),
       color: ROUTE_COLOR,
       waypoints
     })
@@ -513,12 +519,133 @@ export function useMapRoute(getMap, dispatcher = null, suppress = { value: false
     map.on('mouseleave', LINE_LAYER, () => {
       if (!routing.value && !appending.value) map.getCanvasContainer().style.cursor = ''
     })
-    map.on('mouseenter', DOT_LAYER, () => {
-      if (!routing.value && !appending.value) map.getCanvasContainer().style.cursor = 'pointer'
+    map.on('mouseenter', DOT_LAYER, (e) => {
+      if (routing.value || appending.value) return
+      const id = e.features?.[0]?.properties?._dbId
+      // Show `grab` when the waypoint belongs to a route whose panel is
+      // already open (the user has selected the route). Otherwise it's
+      // just clickable to focus it.
+      map.getCanvasContainer().style.cursor =
+        (id != null && openRouteIds.value.has(id)) ? 'grab' : 'pointer'
     })
     map.on('mouseleave', DOT_LAYER, () => {
       if (!routing.value && !appending.value) map.getCanvasContainer().style.cursor = ''
     })
+
+    setupWaypointDrag(map)
+  }
+
+  // Drag-to-move existing waypoints. Two-step "select then drag" matches
+  // the manual-track and annotation flows: first click opens the route
+  // panel (focuses the route), a subsequent mousedown on any of its
+  // waypoints starts a drag. While dragging, the line + dots sources
+  // are updated directly for live preview; the DB write happens once
+  // on release. Escape cancels and reverts to the canonical state.
+  function setupWaypointDrag(map) {
+    const canvas = map.getCanvasContainer()
+
+    function pushLivePreview(routeId, overrideCoords) {
+      // Mirror syncSources but substitute the in-flight coords for the
+      // route under drag. Cheaper than a full store round-trip.
+      const routes = featuresStore.features.filter(f => f.type === 'route')
+      const lineFeatures = []
+      const wpFeatures = []
+      for (const row of routes) {
+        const geometry = JSON.parse(row.geometry)
+        const properties = JSON.parse(row.properties)
+        const coords = (row.id === routeId) ? overrideCoords : geometry.coordinates
+        const total = coords.length
+        const color = properties.color ?? ROUTE_COLOR
+        const waypoints = properties.waypoints ?? []
+        lineFeatures.push({
+          type: 'Feature',
+          properties: { _dbId: row.id, color },
+          geometry: { type: 'LineString', coordinates: coords }
+        })
+        for (let i = 0; i < total; i++) {
+          const wp = waypoints[i] ?? {}
+          wpFeatures.push({
+            type: 'Feature',
+            properties: {
+              _dbId: row.id,
+              _index: i,
+              color,
+              label: wp.label ?? wpLabel(i, total),
+              role:  wp.role  ?? (i === 0 ? 'SP' : i === total - 1 ? 'EP' : 'WP')
+            },
+            geometry: { type: 'Point', coordinates: coords[i] }
+          })
+        }
+      }
+      map.getSource(LINES_SOURCE)?.setData({ type: 'FeatureCollection', features: lineFeatures })
+      map.getSource(WAYPOINTS_SOURCE)?.setData({ type: 'FeatureCollection', features: wpFeatures })
+    }
+
+    function onDotMouseDown(e) {
+      if (suppress.value || routing.value || appending.value) return
+      if (e.originalEvent?.button !== 0) return
+      const f = e.features?.[0]
+      const id  = f?.properties?._dbId
+      const idx = f?.properties?._index
+      if (id == null || idx == null) return
+
+      // Only the focused (panel-open) route accepts drags. First mousedown
+      // on an unfocused route's waypoint falls through to the dispatcher's
+      // click handler, which opens the panel.
+      if (!openRouteIds.value.has(id)) return
+
+      const row = featuresStore.features.find(r => r.id === id)
+      if (!row) return
+      const geom  = JSON.parse(row.geometry)
+      const props = JSON.parse(row.properties)
+      if (geom.type !== 'LineString' || idx >= geom.coordinates.length) return
+
+      e.preventDefault()
+      map.dragPan.disable()
+      canvas.style.cursor = 'grabbing'
+
+      let hasMoved = false
+      let lastLngLat = null
+
+      function onWindowMouseMove(me) {
+        hasMoved = true
+        const rect = canvas.getBoundingClientRect()
+        lastLngLat = map.unproject([me.clientX - rect.left, me.clientY - rect.top])
+        const newCoords = [...geom.coordinates]
+        newCoords[idx] = [lastLngLat.lng, lastLngLat.lat]
+        pushLivePreview(id, newCoords)
+        draggingWaypoint.value = { routeId: id, index: idx, lng: lastLngLat.lng, lat: lastLngLat.lat }
+      }
+
+      function finish(commit) {
+        window.removeEventListener('mousemove', onWindowMouseMove)
+        window.removeEventListener('mouseup', onWindowMouseUp)
+        window.removeEventListener('keydown', onWindowKeyDown)
+        map.dragPan.enable()
+        canvas.style.cursor = ''
+        draggingWaypoint.value = null
+        if (commit && hasMoved && lastLngLat) {
+          const newCoords = [...geom.coordinates]
+          newCoords[idx] = [lastLngLat.lng, lastLngLat.lat]
+          featuresStore.updateFeature(
+            id,
+            { type: 'LineString', coordinates: newCoords },
+            props
+          )
+        } else {
+          syncSources()
+        }
+      }
+
+      function onWindowMouseUp()  { finish(true) }
+      function onWindowKeyDown(k) { if (k.key === 'Escape') finish(false) }
+
+      window.addEventListener('mousemove', onWindowMouseMove)
+      window.addEventListener('mouseup', onWindowMouseUp)
+      window.addEventListener('keydown', onWindowKeyDown)
+    }
+
+    map.on('mousedown', DOT_LAYER, onDotMouseDown)
   }
 
   // ---- Watch store for sync ----
@@ -615,6 +742,7 @@ export function useMapRoute(getMap, dispatcher = null, suppress = { value: false
     startAppendMode,
     toggleRoute,
     initLayers,
-    previewRouteColor
+    previewRouteColor,
+    draggingWaypoint
   }
 }

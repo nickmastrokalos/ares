@@ -18,8 +18,8 @@ const confirmStore = useAssistantConfirmStore()
     <div class="confirm-actions">
       <v-btn
         size="x-small"
-        variant="text"
-        class="text-medium-emphasis"
+        variant="tonal"
+        color="error"
         :disabled="call.status !== 'pending'"
         @click="confirmStore.cancel(call.id)"
       >
@@ -28,11 +28,11 @@ const confirmStore = useAssistantConfirmStore()
       <v-btn
         size="x-small"
         variant="tonal"
-        color="primary"
+        color="success"
         :disabled="call.status !== 'pending'"
         @click="confirmStore.confirm(call.id)"
       >
-        Confirm
+        Execute
       </v-btn>
     </div>
   </div>
