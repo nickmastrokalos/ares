@@ -10,7 +10,7 @@ const props = defineProps({
 })
 
 const SECTION_META = [
-  { key: 'added',   label: 'Added',   icon: 'mdi-plus-circle-outline'   },
+  { key: 'added',   label: 'New',     icon: 'mdi-plus-circle-outline'   },
   { key: 'changed', label: 'Changed', icon: 'mdi-circle-edit-outline'   },
   { key: 'fixed',   label: 'Fixed',   icon: 'mdi-wrench-outline'        }
 ]
