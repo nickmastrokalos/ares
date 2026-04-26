@@ -18,9 +18,13 @@
  *   Linux:   ~/.config/com.ares.app/plugins/hello-world/
  */
 export default {
-  id:      'com.example.hello-world',
-  name:    'Hello World',
-  version: '1.1.0',
+  id:             'com.example.hello-world',
+  name:           'Hello World',
+  version:        '1.1.0',
+  // Uses api.registerPanel, api.settings, api.map.addLayer / onMove —
+  // all 1.1.2 surfaces. Older hosts will refuse to activate this plugin
+  // and surface the version mismatch in Settings → Plugins.
+  minHostVersion: '1.1.2',
 
   async activate(api) {
     api.log('Plugin activated.')
