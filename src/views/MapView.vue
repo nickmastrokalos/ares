@@ -11,6 +11,7 @@ import { useTracksStore } from '@/stores/tracks'
 import { useGhostsStore } from '@/stores/ghosts'
 import { useAisStore } from '@/stores/ais'
 import { useAdsbStore } from '@/stores/adsb'
+import { useChatStore } from '@/stores/chat'
 import { useTileserverStore } from '@/stores/tileserver'
 import { useClickDispatcher } from '@/composables/useClickDispatcher'
 import { useMapDraw } from '@/composables/useMapDraw'
@@ -41,7 +42,7 @@ import MapToolbar from '@/components/MapToolbar.vue'
 import DrawPanel from '@/components/DrawPanel.vue'
 import AttributesPanel from '@/components/AttributesPanel.vue'
 import LayersPanel from '@/components/LayersPanel.vue'
-import ListenersDialog from '@/components/ListenersDialog.vue'
+import ConnectionsDialog from '@/components/ConnectionsDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import MapContextMenu from '@/components/MapContextMenu.vue'
 import MapFeaturePicker from '@/components/MapFeaturePicker.vue'
@@ -61,6 +62,7 @@ import AisPanel from '@/components/AisPanel.vue'
 import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import AdsbPanel from '@/components/AdsbPanel.vue'
 import AdsbTrackPanel from '@/components/AdsbTrackPanel.vue'
+import ChatPanel from '@/components/ChatPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
 import { useAssistantTools } from '@/composables/useAssistantTools'
@@ -83,12 +85,13 @@ const tracksStore = useTracksStore()
 const ghostsStore = useGhostsStore()
 const aisStore          = useAisStore()
 const adsbStore         = useAdsbStore()
+const chatStore         = useChatStore()
 const tileserverStore   = useTileserverStore()
 const navStore          = useNavigationStore()
 const appStore          = useAppStore()
 const drawPanelOpen = ref(false)
 const layersPanelOpen = ref(false)
-const listenersDialogOpen = ref(false)
+const connectionsDialogOpen = ref(false)
 const settingsDialogOpen = ref(false)
 const ioDialogOpen = ref(false)
 const overlaysDialogOpen = ref(false)
@@ -98,6 +101,7 @@ const ghostPanelOpen     = ref(false)
 const interceptPanelOpen = ref(false)
 const aisPanelOpen       = ref(false)
 const adsbPanelOpen      = ref(false)
+const chatPanelOpen      = ref(false)
 const bloodhoundPanelOpen = ref(false)
 const perimeterPanelOpen  = ref(false)
 const bullseyePanelOpen   = ref(false)
@@ -390,6 +394,9 @@ function toggleAisPanel() {
 function toggleAdsbPanel() {
   adsbPanelOpen.value = !adsbPanelOpen.value
 }
+function toggleChatPanel() {
+  chatPanelOpen.value = !chatPanelOpen.value
+}
 
 function toggleBloodhoundPanel() {
   const isOpen = bloodhoundPanelOpen.value
@@ -459,6 +466,11 @@ onMounted(async () => {
   await tileserverStore.load()
   await aisStore.load()
   await adsbStore.load()
+  // Chat store subscribes to the same `cot-event` Tauri channel as
+  // tracksStore — start it once self identity is loaded so we can ignore
+  // our own echoes. tracksStore.startListening() is also called below;
+  // both can coexist on the same event.
+  await chatStore.startListening()
   const basemap = resolveBasemapTiles(settingsStore.selectedBasemap)
 
   map = new maplibregl.Map({
@@ -633,6 +645,7 @@ onUnmounted(async () => {
       :intercept-panel-open="interceptPanelOpen"
       :ais-panel-open="aisPanelOpen"
       :adsb-panel-open="adsbPanelOpen"
+      :chat-panel-open="chatPanelOpen"
       :recording-video="recordingVideo"
       :mission-name="featuresStore.activeMission?.name || ''"
       :plugin-buttons="pluginRegistry.allToolbarButtons.value"
@@ -650,8 +663,9 @@ onUnmounted(async () => {
       @toggle-intercept="toggleInterceptPanel"
       @toggle-ais="toggleAisPanel"
       @toggle-adsb="toggleAdsbPanel"
+      @toggle-chat="toggleChatPanel"
       @toggle-overlays="overlaysDialogOpen = true"
-      @toggle-listeners="listenersDialogOpen = true"
+      @toggle-connections="connectionsDialogOpen = true"
       @toggle-settings="settingsDialogOpen = true"
       @exit-mission="exitMission"
       @toggle-io="ioDialogOpen = true"
@@ -696,6 +710,10 @@ onUnmounted(async () => {
           v-if="adsbPanelOpen"
           @close="adsbPanelOpen = false"
         />
+        <ChatPanel
+          v-if="chatPanelOpen"
+          @close="chatPanelOpen = false"
+        />
         <BloodhoundPanel
           v-if="bloodhoundPanelOpen"
           @close="bloodhoundPanelOpen = false"
@@ -737,7 +755,7 @@ onUnmounted(async () => {
         />
         <ImportExportDialog v-model="ioDialogOpen" />
         <OverlaysDialog v-model="overlaysDialogOpen" />
-        <ListenersDialog v-model="listenersDialogOpen" />
+        <ConnectionsDialog v-model="connectionsDialogOpen" />
         <SettingsDialog v-model="settingsDialogOpen" />
         <MapContextMenu
           v-if="contextMenu"

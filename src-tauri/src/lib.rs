@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 mod assistant;
 mod cot;
+mod cot_sender;
 mod listeners;
 mod migrations;
 mod plugins;
@@ -76,6 +77,24 @@ fn stop_listener(address: String, port: u16, state: tauri::State<ListenerState>)
 #[tauri::command]
 fn stop_all_listeners(state: tauri::State<ListenerState>) {
     state.0.lock().unwrap().stop_all();
+}
+
+/// Send a single CoT XML payload to a destination.
+///
+/// `protocol` is "udp" (functional in v1) or "tcp" (returns an error from
+/// `cot_sender::send_tcp` until streaming/TAK Server support lands).
+/// Multicast detection happens inside the sender module.
+#[tauri::command]
+async fn send_cot(
+    address: String,
+    port: u16,
+    protocol: String,
+    xml: String,
+) -> Result<(), String> {
+    match protocol.to_lowercase().as_str() {
+        "tcp" => cot_sender::send_tcp(&address, port, &xml).await,
+        _     => cot_sender::send_udp(&address, port, &xml).await,
+    }
 }
 
 /// Proxy an AIS vessel fetch through Rust to avoid CORS restrictions.
@@ -201,6 +220,7 @@ pub fn run() {
             start_listener,
             stop_listener,
             stop_all_listeners,
+            send_cot,
             fetch_ais_vessels,
             fetch_adsb_aircraft,
             add_tile_path,
