@@ -95,10 +95,19 @@ export const useChatStore = defineStore('chat', () => {
     return !!(cs && cs.trim() && settingsStore.selfUid)
   })
 
+  // Master switch for TAK outbound. Mirrors `settingsStore.takActive`
+  // for ergonomics — components import the chat store and read this
+  // directly rather than reaching into settings.
+  const takActive = computed(() => !!settingsStore.takActive)
+
+  async function setActive(val) {
+    await settingsStore.setSetting('takActive', !!val)
+  }
+
   async function startListening() {
     if (listening) return
     listening = true
-    if (setupReady.value) startAnnouncing()
+    if (setupReady.value && takActive.value) startAnnouncing()
     unlistenFn = await listen('cot-event', (event) => {
       const e = event.payload
       // Only process actual chat events. Non-chat CoT (positions / shapes)
@@ -176,7 +185,12 @@ export const useChatStore = defineStore('chat', () => {
     if (announceListener.enabled === false) return
 
     try {
-      const xml = composeAnnounceXml({ selfUid: uid, selfCallsign: callsign })
+      const xml = composeAnnounceXml({
+        selfUid:      uid,
+        selfCallsign: callsign,
+        selfCotType:  settingsStore.selfCotType ?? undefined,
+        selfLocation: settingsStore.selfLocation ?? null
+      })
       await invoke('send_cot', {
         address:  announceListener.address,
         port:     announceListener.port,
@@ -205,16 +219,26 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // Auto-start announcing as soon as identity is fully set; auto-stop if
-  // the user clears their callsign. Avoids the "I set my callsign but
-  // peers can't see me until I restart" failure mode.
+  // Drive announce start/stop off identity AND the master active switch.
+  // The user has to flip Active before anything emits; clearing the
+  // callsign or flipping inactive both stop the timer.
   watch(
-    () => [settingsStore.selfCallsign, settingsStore.selfUid],
-    ([cs, uid]) => {
+    () => [settingsStore.selfCallsign, settingsStore.selfUid, settingsStore.takActive],
+    ([cs, uid, active]) => {
       const ready = !!(cs && cs.trim() && uid)
-      if (ready && listening) startAnnouncing()
+      if (ready && active && listening) startAnnouncing()
       else stopAnnouncing()
     }
+  )
+
+  // Fire an immediate announce when the operator's type or location
+  // changes so the user sees themselves jump on the map without waiting
+  // for the next 60 s tick. Skipped if we're not yet announcing
+  // (callsign + UID not set, listener not started).
+  watch(
+    () => [settingsStore.selfCotType, settingsStore.selfLocation],
+    () => { if (announceTimer) broadcastAnnounce() },
+    { deep: true }
   )
 
   // ---- Outbound ----
@@ -222,6 +246,9 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessage(roomId, text) {
     const trimmed = (text ?? '').trim()
     if (!trimmed) return { ok: false, error: 'Empty message' }
+    if (!settingsStore.takActive) {
+      return { ok: false, error: 'TAK comms inactive — flip the Active switch in the chat panel header to send.' }
+    }
 
     const room = rooms.value.get(roomId)
     if (!room) return { ok: false, error: 'Unknown room' }
@@ -318,10 +345,14 @@ export const useChatStore = defineStore('chat', () => {
   // ---- Contacts (derived from live CoT tracks) ----
   // Anything in tracksStore with a callsign is a candidate direct-chat
   // partner. The panel uses this to populate the "+ Direct" picker.
+  // The operator's own self-track is filtered out — chatting with
+  // yourself isn't useful and surfaces as confusing in the picker.
   const knownContacts = computed(() => {
+    const selfUid = settingsStore.selfUid
     const out = []
     for (const t of tracksStore.tracks.values()) {
       if (!t.callsign) continue
+      if (selfUid && t.uid === selfUid) continue
       out.push({ uid: t.uid, callsign: t.callsign })
     }
     out.sort((a, b) => a.callsign.localeCompare(b.callsign))
@@ -345,8 +376,9 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     rooms, messages, unread, activeRoomId, sendErrors,
-    roomList, knownContacts, setupReady,
+    roomList, knownContacts, setupReady, takActive,
     startListening, stopListening,
-    sendMessage, openDirectRoom, setActiveRoom
+    sendMessage, openDirectRoom, setActiveRoom,
+    setActive
   }
 })

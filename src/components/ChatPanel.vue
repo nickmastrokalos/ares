@@ -153,6 +153,23 @@ function formatTs(iso) {
         @pointerdown.stop
         @click.stop="beginEditCallsign"
       >{{ settingsStore.selfCallsign }}</span>
+
+      <!-- TAK active / inactive toggle pill. Gates announce broadcasts
+           and outbound chat. Receiving still works regardless. -->
+      <button
+        v-if="chatStore.setupReady"
+        class="active-pill"
+        :class="{ 'active-pill--on': chatStore.takActive }"
+        :title="chatStore.takActive
+          ? 'TAK comms active — click to go inactive'
+          : 'TAK comms inactive — click to activate'"
+        @pointerdown.stop
+        @click.stop="chatStore.setActive(!chatStore.takActive)"
+      >
+        <span class="active-dot" />
+        {{ chatStore.takActive ? 'Active' : 'Inactive' }}
+      </button>
+
       <v-spacer />
       <v-btn
         icon="mdi-account-plus-outline"
@@ -282,7 +299,12 @@ function formatTs(iso) {
             spellcheck="false"
             @keydown.enter="onSendKey"
           />
-          <button class="send-btn" :disabled="!draftText.trim()" @click="send">
+          <button
+            class="send-btn"
+            :disabled="!draftText.trim() || !chatStore.takActive"
+            :title="chatStore.takActive ? 'Send' : 'TAK comms inactive — flip Active to send'"
+            @click="send"
+          >
             <v-icon size="14">mdi-send</v-icon>
           </button>
         </div>
@@ -359,6 +381,50 @@ function formatTs(iso) {
 
 .panel-self--edit::placeholder {
   color: rgba(var(--v-theme-on-surface), 0.3);
+}
+
+/* Active / Inactive pill in the panel header */
+.active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  margin-left: 4px;
+  border: 1px solid rgb(var(--v-theme-surface-variant));
+  border-radius: 9px;
+  background: rgba(var(--v-theme-surface-variant), 0.3);
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  user-select: none;
+}
+
+.active-pill:hover {
+  background: rgba(var(--v-theme-surface-variant), 0.5);
+}
+
+.active-pill--on {
+  color: #4caf50;
+  border-color: rgba(76, 175, 80, 0.5);
+  background: rgba(76, 175, 80, 0.12);
+}
+
+.active-pill--on:hover {
+  background: rgba(76, 175, 80, 0.18);
+}
+
+.active-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(var(--v-theme-on-surface), 0.35);
+}
+
+.active-pill--on .active-dot {
+  background: #4caf50;
 }
 
 .header-btn { flex-shrink: 0; }

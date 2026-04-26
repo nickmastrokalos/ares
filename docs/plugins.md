@@ -39,6 +39,8 @@ plugins/
 
 \* See the **Self-contained requirement** below — `index.js` cannot use ES `import` to load sibling files at runtime. Bundle everything into `index.js` before dropping the directory into the plugins folder.
 
+`index.js` may be a **symlink** to a bundle elsewhere on disk (the standard development pattern: symlink `<plugins>/my-plugin/index.js` to your project's `dist/index.js` and rebuilds land instantly without re-copying). The loader allows symlinks at the leaf as long as the containing directory is inside the plugins folder.
+
 ---
 
 ## Plugin contract
@@ -50,6 +52,13 @@ export default {
   id:      'com.your-org.plugin-name',   // reverse-domain, globally unique
   name:    'My Plugin',                  // display name in Settings → Plugins
   version: '1.0.0',
+
+  // Optional — minimum Ares host version this plugin needs. Compared with
+  // simple `MAJOR.MINOR.PATCH` semver. If the running host is older the
+  // plugin is shown in Settings → Plugins with a "Requires Ares ≥ X.Y.Z"
+  // error and the enable toggle is disabled. Set this whenever you start
+  // calling a host API that didn't exist in earlier versions.
+  minHostVersion: '1.1.2',
 
   activate(api) {
     // Register toolbar buttons, set up watchers, etc.
@@ -111,7 +120,57 @@ All mutations write through to SQLite and are reflected reactively — `api.feat
 api.flyToGeometry(geometry)  // pan/zoom the map to a GeoJSON geometry
 ```
 
-### UI registration
+### Map layers and viewport events
+
+Plugins can draw their own MapLibre layers without going through the features
+store. Layer ids must be unique across the whole map; the registry rejects
+collisions. All registered layers are removed automatically on plugin
+deactivation.
+
+```js
+const layer = api.map.addLayer({
+  id: 'my-layer',                         // unique map-wide
+  source: { type: 'geojson', data: collection },
+  layer: {                                // standard MapLibre layer spec; `source` is filled in
+    type: 'circle',
+    paint: { 'circle-radius': 6, 'circle-color': '#ff4081' }
+  },
+  onClick({ feature, lngLat, point, originalEvent }) {
+    // Optional. Fires when the user clicks a feature in this layer.
+  },
+  onHover({ feature, lngLat, point, originalEvent }) {
+    // Optional. Fires on every cursor motion over a feature (both on
+    // enter and on subsequent moves). Tooltip-friendly: position your
+    // tooltip element near `point.x, point.y` and populate from
+    // `feature.properties`.
+  },
+  onHoverEnd() {
+    // Optional. Fires when the cursor leaves the layer. Use to hide
+    // your tooltip element.
+  }
+})
+
+// Cursor automatically turns to a pointer on hover whenever any
+// interaction handler is registered. All click + hover handlers are
+// removed when the layer unregisters.
+
+// `layer` is the unregister function — call it directly to remove the
+// layer + source — and also carries a `setData(geojson)` helper for
+// updating the GeoJSON source's data without re-registering the layer:
+layer.setData(newCollection)
+layer()                  // unregister
+
+const state = api.map.getState()
+// → { bounds: { north, south, east, west },
+//     center: { lng, lat },
+//     zoom, bearing, pitch }
+
+api.map.onMove((state) => { /* fired on moveend */ })
+api.map.onZoom((state) => { /* fired on zoomend */ })
+// Both return unregister functions; auto-cleaned on deactivation.
+```
+
+### UI registration — toolbar buttons
 
 ```js
 const unregister = api.registerToolbarButton({
@@ -123,6 +182,74 @@ const unregister = api.registerToolbarButton({
 // Returns an unregister function. The button is also removed automatically
 // when the plugin is deactivated.
 ```
+
+### UI registration — floating panels
+
+Plugins can also register draggable floating panels. The panel body is a plain
+DOM element the plugin renders into — no Vue or Vuetify is shared with the
+host, so use vanilla DOM (or whatever framework your bundle includes).
+
+```js
+const panel = api.registerPanel({
+  id:    'my-panel',                       // unique map-wide
+  title: 'My Panel',                       // shown in the panel header
+  icon:  'mdi-icon-name',                  // optional, shown next to title
+  initialPosition: { x: 60, y: 80 },        // optional
+  mount(containerEl) {
+    containerEl.innerHTML = '<div>Hello!</div>'
+    // Optional return: cleanup function called on plugin deactivation.
+    return () => { /* tear down listeners, etc. */ }
+  }
+})
+
+panel.open()
+panel.close()
+panel.toggle()
+panel.isOpen   // boolean — current open state
+```
+
+`mount(containerEl)` is called exactly once when the panel first appears in
+the DOM (panel registration), not every time the user opens it. The DOM and
+any internal state persist across close/reopen via `v-show`. The cleanup
+function returned by `mount` runs only when the panel is unregistered
+(plugin disable / app shutdown).
+
+### Coastlines / land mask
+
+Ares ships the Natural Earth 10 m land dataset (~10 MB, lazy-loaded on first
+use) for the water-routing planner. Plugins can use the same data:
+
+```js
+const isWater = await api.land.isOverWater([-76.21, 37.01])  // → true
+// Use it to pre-filter sample points before hitting an external API:
+const samples = points.filter(async p => await api.land.isOverWater(p))
+
+// Or pull the land polygons for a bbox to use as a clipping / mask layer:
+const fc = await api.land.getLandPolygons([[-77, 36], [-75, 38]])
+api.map.addLayer({
+  id: 'land-mask',
+  source: { type: 'geojson', data: fc },
+  layer: { type: 'fill', paint: { 'fill-color': '#1a1a1a' } }
+})
+```
+
+Both calls return promises. The dataset is cached after the first load,
+so subsequent calls are fast.
+
+### Plugin-scoped persistent settings
+
+```js
+await api.settings.set('refreshInterval', 600)
+const interval = await api.settings.get('refreshInterval')
+await api.settings.delete('refreshInterval')
+const allKeys = await api.settings.keys()
+```
+
+All keys are namespaced under `plugin:<your-id>:<key>` in the same
+`tauri-plugin-store` Ares uses for its own settings, so plugins can't collide
+with each other or with host settings. Settings persist across app restarts
+**and** across plugin disable/enable cycles — re-enabling a plugin restores
+its prior preferences.
 
 ### Lifecycle
 
@@ -140,7 +267,7 @@ api.log(...args)
 
 ## Example plugin
 
-A working example lives at `examples/plugins/hello-world/index.js`. It adds a toolbar button that logs the current feature and track counts and flies to the first feature on the map. To install it, copy the `hello-world/` directory into your plugins folder.
+A working example lives at `examples/plugins/hello-world/index.js`. It exercises every host API surface — toolbar buttons, a map layer (a magenta dot at lat/lon 0,0), a `moveend` listener that logs viewport state, a draggable panel with a click counter, and persistent plugin-scoped settings that keep the counter across reopen and disable/enable cycles. To install it, copy the `hello-world/` directory into your plugins folder.
 
 ```js
 export default {
@@ -204,4 +331,5 @@ App shutdown
 | Rust commands (`list_plugin_files`, `read_plugin_file`) | `src-tauri/src/plugins.rs` |
 | Settings (enabledPlugins) | `src/stores/settings.js` |
 | Toolbar button slot | `src/components/MapToolbar.vue` |
+| Plugin floating panels | `src/components/PluginPanel.vue` |
 | Settings → Plugins tab | `src/components/SettingsDialog.vue` |

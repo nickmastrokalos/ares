@@ -34,28 +34,40 @@ function addMinutes(d, m) {
  * Build a presence-announce CoT XML string.
  *
  * @param {object} params
- * @param {string} params.selfUid       Stable per-install UID.
- * @param {string} params.selfCallsign  Operator callsign.
- * @param {string} [params.appVersion]  App version label for the takv block.
+ * @param {string} params.selfUid                  Stable per-install UID.
+ * @param {string} params.selfCallsign             Operator callsign.
+ * @param {string} [params.selfCotType]            Full CoT type (e.g. `a-f-G-U-C-I`).
+ *                                                  Falls back to the v1 placeholder
+ *                                                  `a-f-G-U-C` when not provided.
+ * @param {{lat:number,lon:number}|null} [params.selfLocation]
+ *                                                  Operator's manual location. When
+ *                                                  null, the announce uses lat/lon
+ *                                                  (0, 0) as a presence-only beacon.
+ * @param {string} [params.appVersion]             App version label for the takv block.
  * @param {Date}   [params.now]
  * @returns {string}
  */
 export function composeAnnounceXml({
   selfUid,
   selfCallsign,
-  appVersion = '1.x',
-  now = new Date()
+  selfCotType  = 'a-f-G-U-C',
+  selfLocation = null,
+  appVersion   = '1.x',
+  now          = new Date()
 }) {
   const time  = iso(now)
   const stale = iso(addMinutes(now, 5))
+
+  const lat = (selfLocation && Number.isFinite(selfLocation.lat)) ? selfLocation.lat : 0
+  const lon = (selfLocation && Number.isFinite(selfLocation.lon)) ? selfLocation.lon : 0
 
   // `endpoint="*:-1:stcp"` is TAK shorthand for "I'm not on a streaming
   // server; reach me through whatever multicast group we share."
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<event version="2.0" uid="${escapeXml(selfUid)}" type="a-f-G-U-C" ` +
+    `<event version="2.0" uid="${escapeXml(selfUid)}" type="${escapeXml(selfCotType)}" ` +
     `how="m-g" time="${time}" start="${time}" stale="${stale}">` +
-      `<point lat="0" lon="0" hae="9999999.0" ce="9999999.0" le="9999999.0"/>` +
+      `<point lat="${lat}" lon="${lon}" hae="9999999.0" ce="9999999.0" le="9999999.0"/>` +
       `<detail>` +
         `<contact callsign="${escapeXml(selfCallsign)}" endpoint="*:-1:stcp"/>` +
         `<__group name="Cyan" role="Team Member"/>` +

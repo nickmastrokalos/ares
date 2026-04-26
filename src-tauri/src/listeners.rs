@@ -142,7 +142,23 @@ impl ListenerManager {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[cot] parse error from UDP: {e}");
+                                // Diagnostic: dump the first 96 bytes so we
+                                // can tell XML / TAK-protocol-v1 / garbage
+                                // apart. Strip after the issue is resolved.
+                                let n = data.len().min(96);
+                                let head = &data[..n];
+                                let hex = head
+                                    .iter()
+                                    .map(|b| format!("{:02x}", b))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let ascii: String = head
+                                    .iter()
+                                    .map(|&b| if (32..127).contains(&b) { b as char } else { '.' })
+                                    .collect();
+                                eprintln!(
+                                    "[cot] parse error from UDP ({address}:{port}, {len}B): {e}\n  hex:   {hex}\n  ascii: {ascii}"
+                                );
                             }
                         }
                     }

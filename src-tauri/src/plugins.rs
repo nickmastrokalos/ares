@@ -45,22 +45,37 @@ pub fn read_plugin_file(path: String, app: tauri::AppHandle) -> Result<String, S
     let plugins_dir = resolve_plugins_dir(&app)?;
 
     let requested = PathBuf::from(&path);
+    let parent = requested
+        .parent()
+        .ok_or_else(|| "Plugin path has no parent".to_string())?;
+    let basename = requested
+        .file_name()
+        .ok_or_else(|| "Plugin path has no filename".to_string())?;
 
     let canonical_plugins = plugins_dir
         .canonicalize()
         .map_err(|e| format!("Cannot resolve plugins directory: {e}"))?;
-    let canonical_path = requested
+    // Canonicalize only the parent — that handles `..` traversal — and
+    // require the parent to be inside the plugins directory. The leaf
+    // itself is allowed to be a symlink (common dev pattern: symlink
+    // `<plugins>/my-plugin/index.js` to a built bundle elsewhere on
+    // disk so rebuilds land instantly without re-copying). The trust
+    // model is unchanged because the JS we ultimately execute already
+    // runs with full webview privileges regardless of how we got it.
+    let canonical_parent = parent
         .canonicalize()
         .map_err(|_| "Plugin file not found".to_string())?;
 
-    if !canonical_path.starts_with(&canonical_plugins) {
+    if !canonical_parent.starts_with(&canonical_plugins) {
         return Err("Access denied: path is outside the plugins directory".to_string());
     }
-    if canonical_path.extension().and_then(|e| e.to_str()) != Some("js") {
+
+    let target = canonical_parent.join(basename);
+    if target.extension().and_then(|e| e.to_str()) != Some("js") {
         return Err("Only .js files may be loaded as plugins".to_string());
     }
 
-    std::fs::read_to_string(&canonical_path).map_err(|e| format!("Failed to read plugin: {e}"))
+    std::fs::read_to_string(&target).map_err(|e| format!("Failed to read plugin: {e}"))
 }
 
 fn resolve_plugins_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {

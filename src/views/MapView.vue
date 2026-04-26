@@ -63,6 +63,7 @@ import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import AdsbPanel from '@/components/AdsbPanel.vue'
 import AdsbTrackPanel from '@/components/AdsbTrackPanel.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
+import PluginPanel from '@/components/PluginPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
 import { useAssistantTools } from '@/composables/useAssistantTools'
@@ -246,7 +247,7 @@ const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: ope
 // must run after `useMapManualTracks` since `suppressEntityClicks` reads
 // `placing.value`, which only exists past that destructure.
 watch(suppressEntityClicks, (val) => { entitySuppressRef.value = val }, { immediate: true })
-const pluginRegistry = usePluginRegistry({ flyToGeometry })
+const pluginRegistry = usePluginRegistry({ flyToGeometry, getMap: () => map })
 const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
 const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppressEntityClicks)
@@ -268,6 +269,16 @@ useAssistantTools(
 // Expose map-centric helpers to descendant components (OverlaysDialog,
 // AttributesPanel, etc.) without prop-drilling through DrawPanel.
 provide('flyToGeometry', flyToGeometry)
+
+// Self-location picker. The operator clicks "Pick on map" in
+// Settings → Network; that closes the dialog and arms one-click
+// capture. The next map click writes lat/lon into the
+// settings store and disarms. Escape cancels.
+const selfLocationPicking = ref(false)
+function pickSelfLocation() {
+  selfLocationPicking.value = true
+}
+provide('pickSelfLocation', pickSelfLocation)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
 provide('draggingTrack', draggingTrack)
@@ -462,7 +473,6 @@ onMounted(async () => {
   navStore.setActiveMission(props.missionId)
 
   await settingsStore.load()
-  loadPlugins(pluginRegistry)
   await tileserverStore.load()
   await aisStore.load()
   await adsbStore.load()
@@ -567,7 +577,32 @@ onMounted(async () => {
   })
 
   map.on('movestart', () => { contextMenu.value = null; dispatcher.dismiss() })
-  map.on('click', () => { contextMenu.value = null })
+  map.on('click', (e) => {
+    contextMenu.value = null
+    // One-shot self-location picker armed from Settings → Network.
+    if (selfLocationPicking.value) {
+      settingsStore.setSetting('selfLocation', {
+        lat: e.lngLat.lat,
+        lon: e.lngLat.lng
+      })
+      selfLocationPicking.value = false
+    }
+  })
+
+  // Crosshair cursor + Escape-to-cancel while picking.
+  watch(selfLocationPicking, (picking) => {
+    const canvas = map?.getCanvas()
+    if (canvas) canvas.style.cursor = picking ? 'crosshair' : ''
+    if (picking) {
+      const onKey = (ev) => {
+        if (ev.key === 'Escape') {
+          selfLocationPicking.value = false
+          window.removeEventListener('keydown', onKey)
+        }
+      }
+      window.addEventListener('keydown', onKey)
+    }
+  })
 
   map.on('load', async () => {
     dispatcher.install(map)
@@ -596,6 +631,13 @@ onMounted(async () => {
       }
     }
     await tracksStore.startListening()
+
+    // Plugins activate with a guaranteed-ready map: the host's
+    // `addLayer` / `getState` / `onMove` / `onZoom` APIs all assume the
+    // MapLibre instance is live. Defer plugin discovery + activation
+    // until this point so plugin authors don't have to handle a
+    // "map not ready" race.
+    loadPlugins(pluginRegistry)
 
     // Apply basemap opacity live when the setting changes.
     watch(
@@ -713,6 +755,13 @@ onUnmounted(async () => {
         <ChatPanel
           v-if="chatPanelOpen"
           @close="chatPanelOpen = false"
+        />
+        <PluginPanel
+          v-for="panel in pluginRegistry.allPanels.value"
+          v-show="pluginRegistry.isPanelOpen(panel.id)"
+          :key="panel.id"
+          :panel="panel"
+          @close="pluginRegistry.closePanel(panel.id)"
         />
         <BloodhoundPanel
           v-if="bloodhoundPanelOpen"

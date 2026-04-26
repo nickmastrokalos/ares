@@ -2,6 +2,7 @@
 import { ref, computed, inject, onMounted } from 'vue'
 import { useFeaturesStore } from '@/stores/features'
 import { useTracksStore } from '@/stores/tracks'
+import { useSettingsStore } from '@/stores/settings'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
 
@@ -9,6 +10,7 @@ const emit = defineEmits(['close'])
 
 const featuresStore = useFeaturesStore()
 const tracksStore   = useTracksStore()
+const settingsStore = useSettingsStore()
 
 const minimized  = ref(false)
 const positioned = ref(false)
@@ -56,6 +58,7 @@ function toggleSort() {
 const allTracks = computed(() => {
   const result = []
 
+  const selfUid = settingsStore.selfUid
   for (const t of tracksStore.tracks.values()) {
     const char = t.cotType?.[2] ?? 'u'
     const affiliation = ['f', 'h', 'n', 'u'].includes(char) ? char : 'u'
@@ -64,7 +67,8 @@ const allTracks = computed(() => {
       id:          t.uid,
       callsign:    t.callsign,
       affiliation,
-      coord:       [t.lon, t.lat]
+      coord:       [t.lon, t.lat],
+      isSelf:      !!selfUid && t.uid === selfUid
     })
   }
 
@@ -259,6 +263,7 @@ onMounted(() => {
           :style="{ backgroundColor: AFFIL_COLORS[track.affiliation] ?? '#ffeb3b' }"
         />
         <span class="callsign">{{ track.callsign }}</span>
+        <span v-if="track.isSelf" class="self-badge">(you)</span>
         <span class="kind-badge">{{ track.kind === 'cot' ? 'COT' : 'MAN' }}</span>
 
         <v-tooltip text="Center" location="top">
@@ -530,6 +535,14 @@ onMounted(() => {
   font-weight: 600;
   letter-spacing: 0.06em;
   color: rgba(var(--v-theme-on-surface), 0.35);
+  flex-shrink: 0;
+}
+
+.self-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgb(var(--v-theme-primary));
   flex-shrink: 0;
 }
 

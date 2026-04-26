@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, inject } from 'vue'
+import { ref, computed, inject, watch } from 'vue'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settings'
 import { useTileserverStore } from '@/stores/tileserver'
+import TrackTypePicker from '@/components/TrackTypePicker.vue'
 
 const props = defineProps({
   modelValue: Boolean
@@ -94,15 +95,21 @@ function breadcrumbLengthLabel(meters) {
 // not duplicated here) so there's only one place to point at the
 // right multicast group.
 
-const selfCallsign = computed({
-  // Empty string surfaces as null in the store so "unset" stays
-  // distinguishable from a deliberate placeholder. The chat panel
-  // re-prompts the user if they clear it.
-  get: () => settingsStore.selfCallsign ?? '',
-  set: (v) => {
-    const trimmed = (v ?? '').trim()
-    settingsStore.setSetting('selfCallsign', trimmed || null)
-  }
+// Callsign uses a local draft + commit-on-blur pattern so we don't write to
+// the plugin store on every keystroke (which used to cause the next 60 s
+// announce cycle to broadcast the partial string the user was typing).
+const callsignDraft = ref(settingsStore.selfCallsign ?? '')
+watch(() => settingsStore.selfCallsign, (val) => {
+  if ((val ?? '') !== callsignDraft.value) callsignDraft.value = val ?? ''
+})
+function commitCallsign() {
+  const trimmed = callsignDraft.value.trim()
+  settingsStore.setSetting('selfCallsign', trimmed || null)
+}
+
+const takActive = computed({
+  get: () => settingsStore.takActive,
+  set: (v) => settingsStore.setSetting('takActive', v)
 })
 
 function regenerateSelfUid() {
@@ -110,6 +117,83 @@ function regenerateSelfUid() {
     ? crypto.randomUUID()
     : `ares-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
   settingsStore.setSetting('selfUid', uid)
+}
+
+// ---- Self type picker ----
+
+const SELF_AFFILIATIONS = [
+  { title: 'Friendly',  value: 'f' },
+  { title: 'Hostile',   value: 'h' },
+  { title: 'Neutral',   value: 'n' },
+  { title: 'Unknown',   value: 'u' }
+]
+
+const selfAffiliation = computed({
+  get: () => settingsStore.selfAffiliation ?? 'f',
+  set: (v) => {
+    settingsStore.setSetting('selfAffiliation', v)
+    // Re-issue the cotType under the new affiliation so e.g. picking
+    // "Hostile" while infantry is selected becomes `a-h-G-U-C-I` rather
+    // than leaving the type stuck on the old prefix.
+    const ct = settingsStore.selfCotType
+    if (typeof ct === 'string' && ct.length >= 4) {
+      settingsStore.setSetting('selfCotType', `a-${v}-${ct.slice(4)}`)
+    }
+  }
+})
+
+const selfCotType = computed({
+  get: () => settingsStore.selfCotType,
+  set: (v) => settingsStore.setSetting('selfCotType', v)
+})
+
+function clearSelfCotType() {
+  settingsStore.setSetting('selfCotType', null)
+}
+
+// ---- Self location ----
+
+// Drafts so the user can type negative numbers / decimals without each
+// keystroke being normalized + persisted. Commit on blur or via the
+// "Use map center" shortcut.
+const locationLatDraft = ref(
+  settingsStore.selfLocation?.lat != null ? String(settingsStore.selfLocation.lat) : ''
+)
+const locationLonDraft = ref(
+  settingsStore.selfLocation?.lon != null ? String(settingsStore.selfLocation.lon) : ''
+)
+watch(() => settingsStore.selfLocation, (loc) => {
+  locationLatDraft.value = loc?.lat != null ? String(loc.lat) : ''
+  locationLonDraft.value = loc?.lon != null ? String(loc.lon) : ''
+})
+
+function commitSelfLocation() {
+  const latStr = locationLatDraft.value.trim()
+  const lonStr = locationLonDraft.value.trim()
+  // Both empty → clear (back to placeholder mode).
+  if (!latStr && !lonStr) {
+    settingsStore.setSetting('selfLocation', null)
+    return
+  }
+  const lat = Number(latStr)
+  const lon = Number(lonStr)
+  if (!Number.isFinite(lat) || lat < -90  || lat > 90)  return
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) return
+  settingsStore.setSetting('selfLocation', { lat, lon })
+}
+
+// Map-side helpers, injected at setup time (calling inject() inside an
+// event handler triggers Vue's "inject() can only be used inside setup()"
+// warning and returns undefined, which is why the buttons silently
+// no-op'd before).
+const pickSelfLocationOnMap = inject('pickSelfLocation', null)
+
+function pickOnMap() {
+  // Close the settings dialog so the operator can click the map directly,
+  // then ask MapView to enter "picking self location" mode for one click.
+  if (typeof pickSelfLocationOnMap !== 'function') return
+  emit('update:modelValue', false)
+  pickSelfLocationOnMap()
 }
 
 const chatMessagesEndpoint = computed(() => {
@@ -180,7 +264,7 @@ function formatBadge(ts) {
 
       <v-divider />
 
-      <v-window v-model="activeTab">
+      <v-window v-model="activeTab" class="settings-window">
 
         <!-- ---- Display ---- -->
         <v-window-item value="display">
@@ -349,6 +433,27 @@ function formatBadge(ts) {
         <v-window-item value="network">
           <div class="pa-4">
 
+            <div class="d-flex align-center mb-3">
+              <div class="flex-grow-1">
+                <div class="text-body-2">TAK comms active</div>
+                <div class="text-caption text-medium-emphasis">
+                  Master switch for outbound traffic. When off, Ares does not
+                  emit presence announces or chat messages. Inbound listeners
+                  stay running so peer broadcasts still populate the track
+                  list.
+                </div>
+              </div>
+              <v-switch
+                v-model="takActive"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+              />
+            </div>
+
+            <v-divider class="my-3" />
+
             <div class="text-overline mb-1">TAK Identity</div>
             <div class="text-caption text-medium-emphasis mb-3">
               Callsign and UID peers see when you send chat or other CoT.
@@ -356,7 +461,7 @@ function formatBadge(ts) {
             </div>
 
             <v-text-field
-              v-model="selfCallsign"
+              v-model="callsignDraft"
               label="Callsign"
               density="compact"
               hide-details
@@ -364,6 +469,8 @@ function formatBadge(ts) {
               spellcheck="false"
               autocomplete="off"
               class="mb-3"
+              @blur="commitCallsign"
+              @keydown.enter.prevent="commitCallsign"
             />
 
             <div class="d-flex align-center ga-2 mb-4">
@@ -383,6 +490,81 @@ function formatBadge(ts) {
                 @click="regenerateSelfUid"
               >
                 Regenerate
+              </v-btn>
+            </div>
+
+            <v-divider class="my-3" />
+
+            <div class="text-overline mb-1">Type</div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              MIL-STD-2525 affiliation and type peers see for the operator.
+              Same picker the manual-track flow uses.
+            </div>
+
+            <div class="d-flex align-center ga-2 mb-3">
+              <v-select
+                v-model="selfAffiliation"
+                :items="SELF_AFFILIATIONS"
+                label="Affiliation"
+                density="compact"
+                hide-details
+                variant="outlined"
+                style="width: 160px;"
+              />
+              <v-btn
+                v-if="selfCotType"
+                size="small"
+                variant="text"
+                @click="clearSelfCotType"
+              >
+                Clear type
+              </v-btn>
+            </div>
+
+            <TrackTypePicker
+              :affiliation="selfAffiliation"
+              :model-value="selfCotType"
+              @update:model-value="(v) => selfCotType = v"
+            />
+
+            <v-divider class="my-3" />
+
+            <div class="text-overline mb-1">Location</div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Manually-set operator position broadcast on the presence
+              announce. Empty = no manual position; the announce broadcasts
+              at lat/lon (0, 0) as a presence-only beacon.
+            </div>
+
+            <div class="d-flex align-center ga-2 mb-4">
+              <v-text-field
+                v-model="locationLatDraft"
+                label="Latitude"
+                type="number"
+                density="compact"
+                hide-details
+                variant="outlined"
+                style="width: 140px; font-family: monospace;"
+                @blur="commitSelfLocation"
+                @keydown.enter.prevent="commitSelfLocation"
+              />
+              <v-text-field
+                v-model="locationLonDraft"
+                label="Longitude"
+                type="number"
+                density="compact"
+                hide-details
+                variant="outlined"
+                style="width: 140px; font-family: monospace;"
+                @blur="commitSelfLocation"
+                @keydown.enter.prevent="commitSelfLocation"
+              />
+              <v-btn
+                size="small"
+                variant="tonal"
+                @click="pickOnMap"
+              >
+                Pick on map
               </v-btn>
             </div>
 
@@ -502,6 +684,7 @@ function formatBadge(ts) {
               </div>
               <v-switch
                 :model-value="plugin.active"
+                :disabled="plugin.incompatible"
                 color="primary"
                 density="compact"
                 hide-details
@@ -625,5 +808,14 @@ function formatBadge(ts) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Cap the tab body so the dialog never overflows the app window. The
+   header + tab strip together are roughly 96 px; leaving 80vh for the
+   whole dialog gives a comfortable scrolling area for tall tabs like
+   Network. */
+.settings-window {
+  max-height: calc(80vh - 96px);
+  overflow-y: auto;
 }
 </style>

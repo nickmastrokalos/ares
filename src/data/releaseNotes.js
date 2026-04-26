@@ -22,6 +22,22 @@ export const RELEASES = [
     version: 'unreleased'
   },
   {
+    version: '1.1.2',
+    date: '2026-04-26',
+    added: [
+      'Plugin host API extension. Plugins can now: register their own MapLibre layers (`api.map.addLayer({ id, source, layer })`) without going through the features store; read the current viewport state (`api.map.getState()`) and subscribe to viewport-change events (`api.map.onMove`, `api.map.onZoom`); host their own draggable floating panels with a vanilla DOM body (`api.registerPanel({ id, title, mount(containerEl) })`); and persist plugin-scoped settings (`api.settings.get / set / delete / keys`) namespaced under `plugin:<id>:` so plugins can\'t collide with each other or with host settings. All registrations auto-clean on disable: layers + sources are removed, event listeners are detached, panels close. Settings persist across disable/enable. Plugin panels mount once and stay alive across close/reopen via `v-show` so internal state is preserved without authors having to externalize it. The `examples/plugins/hello-world` reference plugin is updated to exercise every new surface.',
+      'Plugin host-version compatibility check. Plugin manifests can now declare `minHostVersion: \'X.Y.Z\'`; Ares refuses to activate any plugin whose minimum is newer than the running host, surfaces the reason in Settings → Plugins, and disables the enable toggle for that row. Replaces the prior failure mode where an outdated host would load a newer plugin and only crash the moment the plugin touched a missing API.',
+      'Self-identity in TAK comms now carries a 2525 type and a manual location, not just a callsign. Settings → Network gains a `Type` picker (same flow as manual tracks — affiliation + 2525 type) and `Location` inputs (lat / lon, plus a "Use map center" shortcut). The presence announce broadcast picks up both, so peer TAK clients now see the operator on their map at the configured position with the configured 2525 symbol instead of a generic placeholder at lat/lon (0, 0). Clearing the type reverts to the v1 placeholder; clearing the location reverts to (0, 0) presence-only mode.'
+    ],
+    changed: [
+      'Settings → Network → Callsign input now commits on blur or Enter instead of per-keystroke. Previously each character was being persisted to `tauri-plugin-store` and the next 60-second announce cycle would broadcast the partial string — peers briefly saw "d", "dr", "dra" on the way to "dragon".',
+      'TAK comms outbound (presence announce + GeoChat send) is now gated by an explicit `Active` toggle. Default is off — Ares does not emit anything until the operator flips Active on, either via the new pill in the chat panel header or the switch at the top of Settings → Network. Inbound listeners stay running regardless so peers\' broadcasts still populate the track list. Activating fires an immediate one-shot announce so the operator appears in peer contact lists within ~1 s.'
+    ],
+    fixed: [
+      'Operator\'s own GeoChat presence announce no longer renders as a phantom track at the broadcast position carrying the local callsign — the track store now drops events whose `uid` matches `selfUid`, mirroring the chat store\'s existing self-echo filter.'
+    ]
+  },
+  {
     version: '1.1.1',
     date: '2026-04-26',
     added: [

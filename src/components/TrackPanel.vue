@@ -39,6 +39,10 @@ const affiliation = computed(() => {
 const affiliationColor = computed(() => AFFILIATION_COLORS[affiliation.value])
 const affiliationLabel = computed(() => AFFILIATION_LABELS[affiliation.value])
 
+const isSelf = computed(() =>
+  !!settingsStore.selfUid && props.uid === settingsStore.selfUid
+)
+
 const position = computed(() => {
   if (!track.value) return '—'
   return formatCoordinate(track.value.lon, track.value.lat, settingsStore.coordinateFormat)
@@ -122,6 +126,7 @@ watch(() => tracksStore.focusedUid, (uid) => {
     <div class="panel-header" @pointerdown="onPointerDown">
       <span class="affil-dot" :style="{ backgroundColor: affiliationColor }" />
       <span class="callsign">{{ track?.callsign ?? '—' }}</span>
+      <span v-if="isSelf" class="self-badge">(you)</span>
       <v-spacer />
       <v-btn
         :icon="minimized ? 'mdi-chevron-down' : 'mdi-chevron-up'"
@@ -223,6 +228,15 @@ watch(() => tracksStore.focusedUid, (uid) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.self-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgb(var(--v-theme-primary));
+  flex-shrink: 0;
+  margin-left: 2px;
 }
 
 .header-btn {
