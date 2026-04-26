@@ -19,8 +19,13 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased',
+    version: 'unreleased'
+  },
+  {
+    version: '1.1.2',
+    date: '2026-04-26',
     added: [
+      'Plugin host API extension. Plugins can now: register their own MapLibre layers (`api.map.addLayer({ id, source, layer })`) without going through the features store; read the current viewport state (`api.map.getState()`) and subscribe to viewport-change events (`api.map.onMove`, `api.map.onZoom`); host their own draggable floating panels with a vanilla DOM body (`api.registerPanel({ id, title, mount(containerEl) })`); and persist plugin-scoped settings (`api.settings.get / set / delete / keys`) namespaced under `plugin:<id>:` so plugins can\'t collide with each other or with host settings. All registrations auto-clean on disable: layers + sources are removed, event listeners are detached, panels close. Settings persist across disable/enable. Plugin panels mount once and stay alive across close/reopen via `v-show` so internal state is preserved without authors having to externalize it. The `examples/plugins/hello-world` reference plugin is updated to exercise every new surface.',
       'Self-identity in TAK comms now carries a 2525 type and a manual location, not just a callsign. Settings → Network gains a `Type` picker (same flow as manual tracks — affiliation + 2525 type) and `Location` inputs (lat / lon, plus a "Use map center" shortcut). The presence announce broadcast picks up both, so peer TAK clients now see the operator on their map at the configured position with the configured 2525 symbol instead of a generic placeholder at lat/lon (0, 0). Clearing the type reverts to the v1 placeholder; clearing the location reverts to (0, 0) presence-only mode.'
     ],
     changed: [
@@ -29,13 +34,6 @@ export const RELEASES = [
     ],
     fixed: [
       'Operator\'s own GeoChat presence announce no longer renders as a phantom track at the broadcast position carrying the local callsign — the track store now drops events whose `uid` matches `selfUid`, mirroring the chat store\'s existing self-echo filter.'
-    ]
-  },
-  {
-    version: '1.1.2',
-    date: '2026-04-26',
-    added: [
-      'Plugin host API extension. Plugins can now: register their own MapLibre layers (`api.map.addLayer({ id, source, layer })`) without going through the features store; read the current viewport state (`api.map.getState()`) and subscribe to viewport-change events (`api.map.onMove`, `api.map.onZoom`); host their own draggable floating panels with a vanilla DOM body (`api.registerPanel({ id, title, mount(containerEl) })`); and persist plugin-scoped settings (`api.settings.get / set / delete / keys`) namespaced under `plugin:<id>:` so plugins can\'t collide with each other or with host settings. All registrations auto-clean on disable: layers + sources are removed, event listeners are detached, panels close. Settings persist across disable/enable. Plugin panels mount once and stay alive across close/reopen via `v-show` so internal state is preserved without authors having to externalize it. The `examples/plugins/hello-world` reference plugin is updated to exercise every new surface.'
     ]
   },
   {
