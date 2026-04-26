@@ -62,6 +62,15 @@ const EXAMPLES = [
       { label: 'Video clip (5/10/30/60s)', prompt: 'record a 30-second video of the current view' },
       { label: 'Video, named',           prompt: 'record a 10-second video called <name>' }
     ]
+  },
+  {
+    category: 'CoT listeners',
+    items: [
+      { label: 'List listeners',         prompt: 'show all CoT listeners' },
+      { label: 'Add a UDP listener',     prompt: 'start listening for CoT on UDP <ip>:<port> called <name>' },
+      { label: 'Toggle a listener',      prompt: 'disable the listener called <name>' },
+      { label: 'Remove a listener',      prompt: 'remove the listener called <name>' }
+    ]
   }
 ]
 

@@ -35,9 +35,7 @@ Map functionality the operator has in the UI but the assistant cannot drive. Eac
 
 - **Intercept tools** — listed separately below under "Intercept v1 follow-ups". Biggest gap: the assistant can set up a perimeter or a bloodhound but not an intercept. Model on `useMapIntercepts.interceptApi` (`addIntercept({ hostile, friendly, mode, offsetRange?, offsetBearing? })`, `removeIntercept(id)`, `setAimRingRadius(r)`, `clearAll()`). Tool surface: `intercept_list`, `intercept_add`, `intercept_remove`, `intercept_set_aim_radius`, `intercept_clear`.
 
-- **CoT listener control + outbound send** — `cotTools` currently covers reads (`cot_list_tracks`, `cot_get_track`, `cot_tracks_near`) and `cot_remove_track` only. Missing:
-  - Listener CRUD: `settingsStore.addCotListener / updateCotListener / removeCotListener / toggleCotListener` — no tool. The operator can't ask the agent to "start listening on UDP 4242" or "disable the VRS listener".
-  - Outbound CoT send — no programmatic path at all today (the existing `scripts/cot-sender.mjs` is a dev script, not a service). Separate from the tools gap; needs a service layer first.
+- **Outbound CoT send** — no programmatic path at all today (the existing `scripts/cot-sender.mjs` is a dev script, not a service). Needs a service layer first — a Rust command + `useCotSender` composable — before there's anywhere for an agent tool to hook in. Listener CRUD has shipped; outbound send is the remaining gap.
 
 - **Scenes: update / delete / apply** — `scenesTools` covers `scenes_list` + `scenes_create_scene`. The store exposes `updateScene` (label / description / icon), `deleteScene`, and `saveSceneCards`; none are surfaced. "Load/apply a scene" has no semantics today either — if scenes are meant to be recallable, that's a store design decision before it's a tool.
 
