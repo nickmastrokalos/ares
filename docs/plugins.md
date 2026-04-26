@@ -119,7 +119,7 @@ collisions. All registered layers are removed automatically on plugin
 deactivation.
 
 ```js
-const unregister = api.map.addLayer({
+const layer = api.map.addLayer({
   id: 'my-layer',                         // unique map-wide
   source: { type: 'geojson', data: collection },
   layer: {                                // standard MapLibre layer spec; `source` is filled in
@@ -133,6 +133,12 @@ const unregister = api.map.addLayer({
     // unregisters.
   }
 })
+
+// `layer` is the unregister function — call it directly to remove the
+// layer + source — and also carries a `setData(geojson)` helper for
+// updating the GeoJSON source's data without re-registering the layer:
+layer.setData(newCollection)
+layer()                  // unregister
 
 const state = api.map.getState()
 // → { bounds: { north, south, east, west },

@@ -151,6 +151,16 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
             _layers.get(manifest.id)?.delete(id)
           }
           cleanups.push(unregister)
+          // Return the unregister fn — historical shape — but also hang
+          // a `setData` method off it so plugins can update the layer's
+          // GeoJSON source without removing + re-adding the layer (which
+          // would flicker and require capturing a new unregister ref each
+          // round). Only meaningful for `geojson` sources.
+          unregister.setData = (data) => {
+            const m = getMap()
+            const src = m?.getSource(id)
+            if (src && typeof src.setData === 'function') src.setData(data)
+          }
           return unregister
         },
 
