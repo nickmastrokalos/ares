@@ -1,4 +1,4 @@
-import { watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useAdsbStore } from '@/stores/adsb'
 import { useSettingsStore } from '@/stores/settings'
 import { distanceBetween } from '@/services/geometry'
@@ -60,6 +60,53 @@ function createArrowImage({ military } = { military: false }) {
   return { width: canvas.width, height: canvas.height, data: imageData.data }
 }
 
+/**
+ * Filled circle icon (used by the heading-arrows-off layer). Same fill
+ * colour as the chevron; military variants get a thicker white stroke so
+ * they stay visually distinct.
+ */
+function createCircleImage({ military } = { military: false }) {
+  const SIZE = 14
+  const RATIO = 2
+  const canvas = document.createElement('canvas')
+  canvas.width  = SIZE * RATIO
+  canvas.height = SIZE * RATIO
+  const ctx = canvas.getContext('2d')
+  ctx.scale(RATIO, RATIO)
+
+  const cx = SIZE / 2, cy = SIZE / 2
+  const r  = military ? 4.5 : 4
+
+  if (military) {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fillStyle = ADSB_COLOR
+    ctx.fill()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth   = 2
+    ctx.stroke()
+  } else {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fillStyle = ADSB_COLOR
+    ctx.fill()
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth   = 1
+    ctx.stroke()
+  }
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  return { width: canvas.width, height: canvas.height, data: imageData.data }
+}
+
+// Pixels of upward screen-space offset per foot of altitude, at full pitch.
+// FL370 (37,000 ft) at full tilt → ~74 px above its ground projection,
+// which reads as clear elevation on a tilted map. Pitch < 25° applies
+// no offset — the effect would just look like position drift when the
+// map is roughly top-down.
+const ALTITUDE_OFFSET_PX_PER_FT = 0.002
+const PITCH_FLOOR_DEG           = 25
+
 const DEBOUNCE_MS = 600
 // Aircraft move much faster than vessels, so poll more often. The
 // airplanes.live rate limit is 1 req/sec — 10 s leaves plenty of headroom.
@@ -74,6 +121,40 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
   let initialized   = false
   let debounceTimer = null
   let pollTimer     = null
+
+  // Map pitch in degrees, refreshed on every map `pitch` event. Drives the
+  // altitude → screen-space-offset translation so aircraft visually float
+  // above the map when the camera is tilted.
+  const pitchDeg = ref(0)
+
+  // Wraps adsbStore.aircraftCollection with per-feature `iconOffset`
+  // (pixels) and `textOffset` (ems, ~10 px per em at our 10 px text
+  // size) derived from altitude × current pitch. The label sits 1.4 em
+  // below the icon at ground level, so we add that to the elevation
+  // term so labels track their icons up the screen when the map tilts.
+  const renderedCollection = computed(() => {
+    const base = adsbStore.aircraftCollection
+    const pitch = pitchDeg.value
+    const factor = pitch <= PITCH_FLOOR_DEG
+      ? 0
+      : Math.sin((pitch - PITCH_FLOOR_DEG) * Math.PI / 180)
+    return {
+      type: 'FeatureCollection',
+      features: base.features.map(f => {
+        const altRaw = f.properties.altitude
+        const altFt  = typeof altRaw === 'number' ? altRaw : 0
+        const offsetY = -altFt * ALTITUDE_OFFSET_PX_PER_FT * factor
+        return {
+          ...f,
+          properties: {
+            ...f.properties,
+            iconOffset: [0, offsetY],
+            textOffset: [0, offsetY / 10 + 1.4]
+          }
+        }
+      })
+    }
+  })
 
   // Compute a center + radius (in nm) covering the current viewport, clamped
   // to the airplanes.live cap. For very wide viewports the cap means we'll
@@ -141,42 +222,48 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
 
     map.addSource(ADSB_SOURCE, {
       type: 'geojson',
-      data: adsbStore.aircraftCollection
+      data: renderedCollection.value
     })
 
-    // Circle layer — shown when heading-arrows are off. Military aircraft
-    // get a thicker white stroke so they read as distinct at a glance.
+    // Both icon variants are symbol layers so each can carry a per-feature
+    // `icon-offset` driven by altitude — circles need this too, otherwise
+    // they'd stay flat on the ground while arrows float above it.
+    map.addImage('adsb-arrow',      createArrowImage({  military: false }), { pixelRatio: 2 })
+    map.addImage('adsb-arrow-mil',  createArrowImage({  military: true  }), { pixelRatio: 2 })
+    map.addImage('adsb-circle',     createCircleImage({ military: false }), { pixelRatio: 2 })
+    map.addImage('adsb-circle-mil', createCircleImage({ military: true  }), { pixelRatio: 2 })
+
+    // Per-feature icon offset in pixels. The store puts a 2-element array
+    // on each feature; coerce it for the style validator.
+    const iconOffsetExpr = ['array', 'number', 2, ['get', 'iconOffset']]
+
+    // Circle layer (heading-arrows off).
     map.addLayer({
       id: ADSB_LAYER,
-      type: 'circle',
+      type: 'symbol',
       source: ADSB_SOURCE,
       layout: {
+        'icon-image': ['case', ['get', 'military'], 'adsb-circle-mil', 'adsb-circle'],
+        'icon-allow-overlap':      true,
+        'icon-ignore-placement':   true,
+        'icon-rotation-alignment': 'map',
+        'icon-offset':             iconOffsetExpr,
         'visibility': adsbStore.headingArrows ? 'none' : 'visible'
-      },
-      paint: {
-        'circle-radius':       ['case', ['get', 'military'], 5, 4],
-        'circle-color':        ADSB_COLOR,
-        'circle-stroke-width': ['case', ['get', 'military'], 2, 1],
-        'circle-stroke-color': ['case', ['get', 'military'], '#ffffff', '#000000']
       }
     })
 
-    // Arrow layer — rotates each chevron to the aircraft's true track.
-    // Military variant has a white halo + black inner edge so it pops
-    // against any basemap without changing the magenta fill (which is
-    // the feed-identity color).
-    map.addImage('adsb-arrow',     createArrowImage({ military: false }), { pixelRatio: 2 })
-    map.addImage('adsb-arrow-mil', createArrowImage({ military: true  }), { pixelRatio: 2 })
+    // Arrow layer (heading-arrows on) — chevron rotates to true track.
     map.addLayer({
       id: ADSB_LAYER_ARROWS,
       type: 'symbol',
       source: ADSB_SOURCE,
       layout: {
         'icon-image': ['case', ['get', 'military'], 'adsb-arrow-mil', 'adsb-arrow'],
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
+        'icon-allow-overlap':      true,
+        'icon-ignore-placement':   true,
         'icon-rotation-alignment': 'map',
-        'icon-rotate': ['coalesce', ['get', 'track'], 0],
+        'icon-rotate':             ['coalesce', ['get', 'track'], 0],
+        'icon-offset':             iconOffsetExpr,
         'visibility': adsbStore.headingArrows ? 'visible' : 'none'
       }
     })
@@ -188,7 +275,7 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
       layout: {
         'text-field': ['get', 'flight'],
         'text-size': 10,
-        'text-offset': [0, 1.4],
+        'text-offset': ['array', 'number', 2, ['get', 'textOffset']],
         'text-anchor': 'top',
         'text-allow-overlap': false,
         'visibility': settingsStore.showFeatureLabels ? 'visible' : 'none'
@@ -202,6 +289,10 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
 
     map.on('moveend', scheduleRefetch)
     map.on('zoomend', scheduleRefetch)
+    // Initial pitch sync, then live updates as the user tilts.
+    pitchDeg.value = map.getPitch()
+    map.on('pitch',    onPitch)
+    map.on('pitchend', onPitch)
 
     if (dispatcher) {
       dispatcher.register('adsb-aircraft', {
@@ -232,13 +323,21 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
     }
   }
 
+  // `renderedCollection` already depends on both the store data AND the
+  // current pitch, so a single watch covers both "new aircraft arrived"
+  // and "user is tilting the map".
   const stopDataWatch = watch(
-    () => adsbStore.aircraftCollection,
+    () => renderedCollection.value,
     (collection) => {
       getMap()?.getSource(ADSB_SOURCE)?.setData(collection)
     },
     { deep: false }
   )
+
+  function onPitch() {
+    const map = getMap()
+    if (map) pitchDeg.value = map.getPitch()
+  }
 
   const stopCrumbWatch = watch(
     () => adsbStore.breadcrumbCollection,
@@ -291,6 +390,8 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
     if (!map) return
     map.off('moveend', scheduleRefetch)
     map.off('zoomend', scheduleRefetch)
+    map.off('pitch',    onPitch)
+    map.off('pitchend', onPitch)
     map.off('click',      ADSB_LAYER,        onAircraftClick)
     map.off('click',      ADSB_LAYER_ARROWS, onAircraftClick)
     map.off('mouseenter', ADSB_LAYER,        onMouseEnter)
