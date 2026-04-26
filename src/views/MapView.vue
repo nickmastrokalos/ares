@@ -148,35 +148,44 @@ async function captureSnapshotToDesktop({ filename } = {}) {
 
 const { record: recordVideoRaw } = useMapVideo({ getMap: () => map })
 
-// Same shape as `captureSnapshotToDesktop` — the agent's
-// `map_capture_video` tool calls this directly and the user has
-// approved via the confirm card.
-async function captureVideoToDesktop({ durationSeconds, filename } = {}) {
-  return recordVideoRaw({ destination: 'desktop', durationSeconds, filename })
-}
-
 const recordingVideo = ref(false)
 
-// Toolbar entry point — records for the requested duration and saves
-// via the native dialog (matching the snapshot button). The toolbar
-// keeps the button in a "recording" state for the duration so the
-// user has visible feedback that something is happening.
-async function captureVideo({ durationSeconds } = {}) {
-  if (recordingVideo.value) return
+// Single mutex for both entry points — the toolbar button and the
+// agent tool — so the toolbar's "recording" state reflects either
+// path (red icon + disabled button) and the second caller bails
+// cleanly if a recording is already in flight.
+async function runRecording(opts) {
+  if (recordingVideo.value) {
+    return { ok: false, error: 'A video is already being recorded.' }
+  }
   recordingVideo.value = true
   try {
-    const res = await recordVideoRaw({ destination: 'dialog', durationSeconds })
-    if (!res.ok && !res.cancelled) {
-      mapAlerts.setAlert('video-err', {
-        source: 'snapshot', level: 'critical',
-        message: `Video capture failed: ${res.error}`,
-        timestamp: Date.now()
-      })
-      setTimeout(() => mapAlerts.clearAlert('video-err'), 6000)
-    }
+    return await recordVideoRaw(opts)
   } finally {
     recordingVideo.value = false
   }
+}
+
+// Toolbar entry point — records for the requested duration and saves
+// via the native dialog (matching the snapshot button).
+async function captureVideo({ durationSeconds } = {}) {
+  const res = await runRecording({ destination: 'dialog', durationSeconds })
+  if (!res.ok && !res.cancelled) {
+    mapAlerts.setAlert('video-err', {
+      source: 'snapshot', level: 'critical',
+      message: `Video capture failed: ${res.error}`,
+      timestamp: Date.now()
+    })
+    setTimeout(() => mapAlerts.clearAlert('video-err'), 6000)
+  }
+}
+
+// Same shape as `captureSnapshotToDesktop` — the agent's
+// `map_capture_video` tool calls this directly and the user has
+// approved via the confirm card. Goes through `runRecording` so the
+// toolbar button reflects the agent-driven recording too.
+async function captureVideoToDesktop({ durationSeconds, filename } = {}) {
+  return runRecording({ destination: 'desktop', durationSeconds, filename })
 }
 
 // Perimeter breaches are aggregated into a single alert so the chip stays
