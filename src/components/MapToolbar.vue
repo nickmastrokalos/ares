@@ -216,7 +216,7 @@ const feedsActive      = () => props.aisPanelOpen
               :color="annotationActive() ? 'primary' : undefined"
               :class="[annotationActive() ? 'toolbar-active' : 'text-medium-emphasis']" />
           </template>
-          <v-list density="compact" nav>
+          <v-list density="compact" nav class="toolbar-menu-list">
             <v-list-item prepend-icon="mdi-pencil-outline" title="Draw"
               :active="drawPanelOpen" active-color="primary"
               @click="emit('toggle-draw')" />
@@ -249,7 +249,7 @@ const feedsActive      = () => props.aisPanelOpen
               :color="analysisActive() ? 'primary' : undefined"
               :class="[analysisActive() ? 'toolbar-active' : 'text-medium-emphasis']" />
           </template>
-          <v-list density="compact" nav>
+          <v-list density="compact" nav class="toolbar-menu-list">
             <v-list-item prepend-icon="mdi-ruler" title="Measure"
               :active="measuring" active-color="primary"
               @click="emit('toggle-measure')" />
@@ -274,7 +274,7 @@ const feedsActive      = () => props.aisPanelOpen
               :color="operationsActive() ? 'primary' : undefined"
               :class="[operationsActive() ? 'toolbar-active' : 'text-medium-emphasis']" />
           </template>
-          <v-list density="compact" nav>
+          <v-list density="compact" nav class="toolbar-menu-list">
             <v-list-item prepend-icon="mdi-ghost" title="Ghosts"
               :active="ghostPanelOpen" active-color="primary"
               @click="emit('toggle-ghost')" />
@@ -293,7 +293,7 @@ const feedsActive      = () => props.aisPanelOpen
               :color="feedsActive() ? 'primary' : undefined"
               :class="[feedsActive() ? 'toolbar-active' : 'text-medium-emphasis']" />
           </template>
-          <v-list density="compact" nav>
+          <v-list density="compact" nav class="toolbar-menu-list">
             <v-list-item prepend-icon="mdi-ferry" title="AIS Feed"
               :active="aisPanelOpen" active-color="primary"
               @click="emit('toggle-ais')" />
@@ -316,7 +316,7 @@ const feedsActive      = () => props.aisPanelOpen
               </template>
             </v-tooltip>
           </template>
-          <v-list density="compact" nav>
+          <v-list density="compact" nav class="toolbar-menu-list">
             <v-list-item
               v-for="btn in pluginButtons"
               :key="btn.id"
@@ -365,7 +365,7 @@ const feedsActive      = () => props.aisPanelOpen
             </template>
           </v-tooltip>
         </template>
-        <v-list density="compact">
+        <v-list density="compact" class="toolbar-menu-list">
           <v-list-item
             v-for="opt in VIDEO_DURATIONS"
             :key="opt.seconds"
@@ -421,5 +421,15 @@ const feedsActive      = () => props.aisPanelOpen
 }
 .video-recording.v-btn--disabled :deep(.v-icon) {
   color: rgb(var(--v-theme-error)) !important;
+}
+
+/* Toolbar dropdown menus open over the map. Vuetify's default v-list
+   background is partially transparent, which makes the entries hard to
+   read against the basemap. Force a solid surface background and a
+   subtle border, matching the rest of the panel surfaces in the app. */
+.toolbar-menu-list {
+  background: rgb(var(--v-theme-surface)) !important;
+  border: 1px solid rgb(var(--v-theme-surface-variant));
+  border-radius: 4px;
 }
 </style>
