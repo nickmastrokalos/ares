@@ -2,6 +2,8 @@
 // duration and writes the result directly to the user's Desktop. The
 // confirm card is the user-approval gate; no native save dialog runs.
 
+import { rejectIfContextDerived } from '@/services/featureNaming'
+
 const MIN_DURATION_S = 1
 const MAX_DURATION_S = 60
 
@@ -34,6 +36,7 @@ export function videoTools({ captureVideoToDesktop }) {
         return `Capture map video · ${duration_seconds}s · ${named} → Desktop`
       },
       async handler({ duration_seconds, filename } = {}) {
+        const reject = rejectIfContextDerived(filename, 'filename'); if (reject) return reject
         const n = Number(duration_seconds)
         if (!Number.isInteger(n) || n < MIN_DURATION_S || n > MAX_DURATION_S) {
           return { error: `duration_seconds must be an integer between ${MIN_DURATION_S} and ${MAX_DURATION_S}.` }
