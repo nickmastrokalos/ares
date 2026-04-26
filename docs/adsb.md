@@ -31,7 +31,7 @@ The store stores raw airplanes.live records, keyed by `hex`. The endpoint return
 
 Magenta (`#ff4081`, Material pink A200) throughout — distinct from AIS yellow and outside the MIL-STD-2525 affiliation palette (Friend cyan, Hostile red, Neutral green, Unknown yellow).
 
-- `adsb-breadcrumbs` source + `adsb-breadcrumbs-line` line layer — synthetic backward projection along reverse `track`, length = `trackBreadcrumbLength` meters (a fixed map distance shared with CoT and AIS, set via `settingsStore.trackBreadcrumbs` / `trackBreadcrumbLength`). Suppressed below 5 kts ground speed; speed is only used as a "is it moving?" gate, not as a length multiplier.
+- `adsb-breadcrumbs` source + `adsb-breadcrumbs-line` line layer — synthetic backward projection along reverse `track`, fixed length `ADSB_BREADCRUMB_METERS` (currently 1.5 km). Toggled by the ADS-B-local `breadcrumbs` switch in `AdsbPanel`, independent of the global CoT `trackBreadcrumbs` setting. Suppressed below 5 kts ground speed; speed is only used as a "is it moving?" gate.
 - `adsb-aircraft` source feeding two mutually exclusive icon layers:
   - `adsb-aircraft-points` — circle, shown when `headingArrows = false`.
   - `adsb-aircraft-arrows` — symbol with `icon-rotate: ['get', 'track']`, shown when `headingArrows = true`.
