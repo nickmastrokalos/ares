@@ -23,7 +23,9 @@ function summariseAircraft(a) {
     headingDeg:   Number.isFinite(a.true_heading) ? a.true_heading
                 : Number.isFinite(a.mag_heading) ? a.mag_heading
                 : null,
-    squawk:       a.squawk ?? null
+    squawk:       a.squawk ?? null,
+    // airplanes.live encodes the military flag in bit 0 of `dbFlags`.
+    military:     Number.isFinite(a.dbFlags) ? Boolean(a.dbFlags & 1) : false
   }
 }
 
@@ -59,26 +61,28 @@ export function adsbTools({ adsbStore, featuresStore }) {
 
     {
       name: 'adsb_list_aircraft',
-      description: 'List ADS-B aircraft currently known to the app. Each aircraft has its 24-bit ICAO hex, callsign (the broadcast `flight` field), registration, type code, [longitude, latitude], altitude in feet (0 = on ground), ground speed in knots, true track, and squawk. Returns an empty list when the feed is disabled or no aircraft have been fetched yet. Use the optional "callsign" filter (case-insensitive substring match) to narrow results when the user refers to a flight by callsign or hex (e.g. "ual123", "ac45").',
+      description: 'List ADS-B aircraft currently known to the app. Each aircraft has its 24-bit ICAO hex, callsign (the broadcast `flight` field), registration, type code, [longitude, latitude], altitude in feet (0 = on ground), ground speed in knots, true track, squawk, and a `military` boolean (decoded from the airplanes.live `dbFlags` bitfield). Returns an empty list when the feed is disabled or no aircraft have been fetched yet. Use the optional "callsign" filter (case-insensitive substring match) to narrow results when the user refers to a flight by callsign or hex (e.g. "ual123", "ac45"). Set `military_only: true` to restrict results to aircraft on the airplanes.live military database.',
       readonly: true,
       inputSchema: {
         type: 'object',
         properties: {
-          callsign: { type: 'string', description: 'Case-insensitive substring of callsign (flight) or hex.' },
-          limit:    { type: 'integer', minimum: 1, maximum: 1000, description: 'Max number of aircraft to return. Default 100.' }
+          callsign:      { type: 'string',  description: 'Case-insensitive substring of callsign (flight) or hex.' },
+          military_only: { type: 'boolean', description: 'If true, only return aircraft flagged military.' },
+          limit:         { type: 'integer', minimum: 1, maximum: 1000, description: 'Max number of aircraft to return. Default 100.' }
         },
         required: []
       },
-      async handler({ callsign, limit = 100 }) {
+      async handler({ callsign, military_only = false, limit = 100 }) {
         if (!adsbStore.enabled) return { enabled: false, aircraft: [], note: 'ADS-B feed is disabled. Enable it with adsb_set_enabled to fetch aircraft.' }
         const needle = callsign?.trim().toLowerCase() ?? ''
         const all = Array.from(adsbStore.aircraft.values()).map(summariseAircraft)
-        const filtered = needle
+        let filtered = needle
           ? all.filter(a =>
               (a.callsign && a.callsign.toLowerCase().includes(needle)) ||
               a.hex.toLowerCase().includes(needle)
             )
           : all
+        if (military_only) filtered = filtered.filter(a => a.military)
         const truncated = filtered.length > limit
         return {
           enabled: true,

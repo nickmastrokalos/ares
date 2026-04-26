@@ -51,7 +51,11 @@ export const useAdsbStore = defineStore('adsb', () => {
               track:     Number.isFinite(a.track) ? a.track : 0,
               altitude:  a.alt_baro,
               squawk:    a.squawk ?? '',
-              type:      a.t ?? ''
+              type:      a.t ?? '',
+              // airplanes.live encodes a military flag in bit 0 of dbFlags.
+              // (Bits 1-3 carry interesting / pia / ladd flags — currently
+              // unused by the renderer.)
+              military:  Number.isFinite(a.dbFlags) ? Boolean(a.dbFlags & 1) : false
             }
           }))
       : []

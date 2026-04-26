@@ -15,9 +15,10 @@ const ADSB_COLOR = '#ff4081'  // Material pink A200 — outside the MIL-STD-2525
 /**
  * Draw a north-pointing filled chevron onto an offscreen canvas in magenta.
  * The symbol layer applies `icon-rotate: ['get', 'track']` to aim it at each
- * aircraft's true track over ground.
+ * aircraft's true track over ground. Military variants use a thicker white
+ * stroke + halo so they pop against any basemap.
  */
-function createArrowImage() {
+function createArrowImage({ military } = { military: false }) {
   const SIZE = 20
   const RATIO = 2
   const canvas = document.createElement('canvas')
@@ -33,12 +34,27 @@ function createArrowImage() {
   ctx.lineTo( 2, 18)
   ctx.closePath()
 
-  ctx.fillStyle = ADSB_COLOR
-  ctx.fill()
-  ctx.strokeStyle = '#000000'
-  ctx.lineWidth = 1.2
-  ctx.lineJoin = 'round'
-  ctx.stroke()
+  if (military) {
+    // White outer halo for at-a-glance distinction, then the standard
+    // magenta fill, then a crisp inner black edge so the chevron stays
+    // legible on light basemaps.
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth   = 3
+    ctx.lineJoin    = 'round'
+    ctx.stroke()
+    ctx.fillStyle = ADSB_COLOR
+    ctx.fill()
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth   = 1
+    ctx.stroke()
+  } else {
+    ctx.fillStyle = ADSB_COLOR
+    ctx.fill()
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth   = 1.2
+    ctx.lineJoin    = 'round'
+    ctx.stroke()
+  }
 
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
   return { width: canvas.width, height: canvas.height, data: imageData.data }
@@ -128,7 +144,8 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
       data: adsbStore.aircraftCollection
     })
 
-    // Circle layer — shown when heading-arrows are off.
+    // Circle layer — shown when heading-arrows are off. Military aircraft
+    // get a thicker white stroke so they read as distinct at a glance.
     map.addLayer({
       id: ADSB_LAYER,
       type: 'circle',
@@ -137,21 +154,25 @@ export function useMapAdsb(getMap, dispatcher = null, suppress = { value: false 
         'visibility': adsbStore.headingArrows ? 'none' : 'visible'
       },
       paint: {
-        'circle-radius': 4,
-        'circle-color': ADSB_COLOR,
-        'circle-stroke-width': 1,
-        'circle-stroke-color': '#000000'
+        'circle-radius':       ['case', ['get', 'military'], 5, 4],
+        'circle-color':        ADSB_COLOR,
+        'circle-stroke-width': ['case', ['get', 'military'], 2, 1],
+        'circle-stroke-color': ['case', ['get', 'military'], '#ffffff', '#000000']
       }
     })
 
     // Arrow layer — rotates each chevron to the aircraft's true track.
-    map.addImage('adsb-arrow', createArrowImage(), { pixelRatio: 2 })
+    // Military variant has a white halo + black inner edge so it pops
+    // against any basemap without changing the magenta fill (which is
+    // the feed-identity color).
+    map.addImage('adsb-arrow',     createArrowImage({ military: false }), { pixelRatio: 2 })
+    map.addImage('adsb-arrow-mil', createArrowImage({ military: true  }), { pixelRatio: 2 })
     map.addLayer({
       id: ADSB_LAYER_ARROWS,
       type: 'symbol',
       source: ADSB_SOURCE,
       layout: {
-        'icon-image': 'adsb-arrow',
+        'icon-image': ['case', ['get', 'military'], 'adsb-arrow-mil', 'adsb-arrow'],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'icon-rotation-alignment': 'map',
