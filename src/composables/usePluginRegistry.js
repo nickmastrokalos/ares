@@ -107,7 +107,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       // subscribe to viewport-change events. Layer ids must be unique across
       // the whole map; the registry rejects collisions before touching state.
       map: {
-        addLayer({ id, source, layer, onClick }) {
+        addLayer({ id, source, layer, onClick, onHover, onHoverEnd }) {
           const map = getMap()
           if (!map) throw new Error('Map not ready yet. Plugins normally activate after the map loads; if you see this from a long-lived watcher, defer the call.')
           if (!id || typeof id !== 'string') throw new Error('addLayer: id is required')
@@ -118,25 +118,47 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
           map.addLayer({ ...layer, id, source: id })
           _layers.get(manifest.id).add(id)
 
-          // Optional click handler: fires when the user clicks a feature
-          // belonging to this layer. Cursor turns to a pointer on hover so
+          // Optional click + hover callbacks. Cursor turns to a pointer
+          // on hover whenever any interaction handler is registered, so
           // the layer reads as interactive.
-          let clickHandler, enterHandler, leaveHandler
+          const interactive = typeof onClick === 'function'
+                           || typeof onHover === 'function'
+                           || typeof onHoverEnd === 'function'
+          let clickHandler, moveHandler, enterHandler, leaveHandler
+          function payload(e) {
+            return {
+              feature:      e.features?.[0] ?? null,
+              lngLat:       { lng: e.lngLat.lng, lat: e.lngLat.lat },
+              point:        { x: e.point.x, y: e.point.y },
+              originalEvent: e.originalEvent
+            }
+          }
           if (typeof onClick === 'function') {
             clickHandler = (e) => {
-              try {
-                onClick({
-                  feature:      e.features?.[0] ?? null,
-                  lngLat:       { lng: e.lngLat.lng, lat: e.lngLat.lat },
-                  originalEvent: e.originalEvent
-                })
-              } catch (err) {
-                console.error(`[plugin:${manifest.id}] click handler for "${id}" threw:`, err)
+              try { onClick(payload(e)) }
+              catch (err) { console.error(`[plugin:${manifest.id}] click handler for "${id}" threw:`, err) }
+            }
+            map.on('click', id, clickHandler)
+          }
+          if (typeof onHover === 'function') {
+            // mousemove fires both on enter and on every cursor motion
+            // over the layer; that's what tooltips want (positions the
+            // tip near the live cursor).
+            moveHandler = (e) => {
+              try { onHover(payload(e)) }
+              catch (err) { console.error(`[plugin:${manifest.id}] hover handler for "${id}" threw:`, err) }
+            }
+            map.on('mousemove', id, moveHandler)
+          }
+          if (interactive) {
+            enterHandler = () => { map.getCanvas().style.cursor = 'pointer' }
+            leaveHandler = () => {
+              map.getCanvas().style.cursor = ''
+              if (typeof onHoverEnd === 'function') {
+                try { onHoverEnd() }
+                catch (err) { console.error(`[plugin:${manifest.id}] hoverEnd handler for "${id}" threw:`, err) }
               }
             }
-            enterHandler = () => { map.getCanvas().style.cursor = 'pointer' }
-            leaveHandler = () => { map.getCanvas().style.cursor = '' }
-            map.on('click',      id, clickHandler)
             map.on('mouseenter', id, enterHandler)
             map.on('mouseleave', id, leaveHandler)
           }
@@ -145,6 +167,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
             const m = getMap()
             if (!m) return
             if (clickHandler) m.off('click',      id, clickHandler)
+            if (moveHandler)  m.off('mousemove',  id, moveHandler)
             if (enterHandler) m.off('mouseenter', id, enterHandler)
             if (leaveHandler) m.off('mouseleave', id, leaveHandler)
             if (m.getLayer(id))  m.removeLayer(id)

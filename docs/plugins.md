@@ -128,13 +128,24 @@ const layer = api.map.addLayer({
     type: 'circle',
     paint: { 'circle-radius': 6, 'circle-color': '#ff4081' }
   },
-  onClick({ feature, lngLat, originalEvent }) {
+  onClick({ feature, lngLat, point, originalEvent }) {
     // Optional. Fires when the user clicks a feature in this layer.
-    // The cursor turns to a pointer on hover automatically when onClick
-    // is supplied. Click + hover handlers are removed when the layer
-    // unregisters.
+  },
+  onHover({ feature, lngLat, point, originalEvent }) {
+    // Optional. Fires on every cursor motion over a feature (both on
+    // enter and on subsequent moves). Tooltip-friendly: position your
+    // tooltip element near `point.x, point.y` and populate from
+    // `feature.properties`.
+  },
+  onHoverEnd() {
+    // Optional. Fires when the cursor leaves the layer. Use to hide
+    // your tooltip element.
   }
 })
+
+// Cursor automatically turns to a pointer on hover whenever any
+// interaction handler is registered. All click + hover handlers are
+// removed when the layer unregisters.
 
 // `layer` is the unregister function — call it directly to remove the
 // layer + source — and also carries a `setData(geojson)` helper for
