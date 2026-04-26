@@ -139,10 +139,13 @@ export const useAdsbStore = defineStore('adsb', () => {
 
       // airplanes.live returns the aircraft array under `ac` (field-description
       // page documents `aircraft`, but the live response uses `ac` — keep the
-      // fallback in case they ever align).
+      // fallback in case they ever align). Aircraft with `alt_baro: "ground"`
+      // are dropped at fetch time so parked / taxiing flights don't clutter
+      // the map or appear in `adsb_list_aircraft` / `adsb_aircraft_near`.
       const list = data?.ac ?? data?.aircraft ?? []
       const next = new Map()
       for (const item of list) {
+        if (item.alt_baro === 'ground') continue
         if (item.hex && Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
           next.set(String(item.hex), item)
         }
