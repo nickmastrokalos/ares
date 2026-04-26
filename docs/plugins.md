@@ -111,7 +111,40 @@ All mutations write through to SQLite and are reflected reactively — `api.feat
 api.flyToGeometry(geometry)  // pan/zoom the map to a GeoJSON geometry
 ```
 
-### UI registration
+### Map layers and viewport events
+
+Plugins can draw their own MapLibre layers without going through the features
+store. Layer ids must be unique across the whole map; the registry rejects
+collisions. All registered layers are removed automatically on plugin
+deactivation.
+
+```js
+const unregister = api.map.addLayer({
+  id: 'my-layer',                         // unique map-wide
+  source: { type: 'geojson', data: collection },
+  layer: {                                // standard MapLibre layer spec; `source` is filled in
+    type: 'circle',
+    paint: { 'circle-radius': 6, 'circle-color': '#ff4081' }
+  },
+  onClick({ feature, lngLat, originalEvent }) {
+    // Optional. Fires when the user clicks a feature in this layer.
+    // The cursor turns to a pointer on hover automatically when onClick
+    // is supplied. Click + hover handlers are removed when the layer
+    // unregisters.
+  }
+})
+
+const state = api.map.getState()
+// → { bounds: { north, south, east, west },
+//     center: { lng, lat },
+//     zoom, bearing, pitch }
+
+api.map.onMove((state) => { /* fired on moveend */ })
+api.map.onZoom((state) => { /* fired on zoomend */ })
+// Both return unregister functions; auto-cleaned on deactivation.
+```
+
+### UI registration — toolbar buttons
 
 ```js
 const unregister = api.registerToolbarButton({
@@ -123,6 +156,52 @@ const unregister = api.registerToolbarButton({
 // Returns an unregister function. The button is also removed automatically
 // when the plugin is deactivated.
 ```
+
+### UI registration — floating panels
+
+Plugins can also register draggable floating panels. The panel body is a plain
+DOM element the plugin renders into — no Vue or Vuetify is shared with the
+host, so use vanilla DOM (or whatever framework your bundle includes).
+
+```js
+const panel = api.registerPanel({
+  id:    'my-panel',                       // unique map-wide
+  title: 'My Panel',                       // shown in the panel header
+  icon:  'mdi-icon-name',                  // optional, shown next to title
+  initialPosition: { x: 60, y: 80 },        // optional
+  mount(containerEl) {
+    containerEl.innerHTML = '<div>Hello!</div>'
+    // Optional return: cleanup function called on plugin deactivation.
+    return () => { /* tear down listeners, etc. */ }
+  }
+})
+
+panel.open()
+panel.close()
+panel.toggle()
+panel.isOpen   // boolean — current open state
+```
+
+`mount(containerEl)` is called exactly once when the panel first appears in
+the DOM (panel registration), not every time the user opens it. The DOM and
+any internal state persist across close/reopen via `v-show`. The cleanup
+function returned by `mount` runs only when the panel is unregistered
+(plugin disable / app shutdown).
+
+### Plugin-scoped persistent settings
+
+```js
+await api.settings.set('refreshInterval', 600)
+const interval = await api.settings.get('refreshInterval')
+await api.settings.delete('refreshInterval')
+const allKeys = await api.settings.keys()
+```
+
+All keys are namespaced under `plugin:<your-id>:<key>` in the same
+`tauri-plugin-store` Ares uses for its own settings, so plugins can't collide
+with each other or with host settings. Settings persist across app restarts
+**and** across plugin disable/enable cycles — re-enabling a plugin restores
+its prior preferences.
 
 ### Lifecycle
 
@@ -140,7 +219,7 @@ api.log(...args)
 
 ## Example plugin
 
-A working example lives at `examples/plugins/hello-world/index.js`. It adds a toolbar button that logs the current feature and track counts and flies to the first feature on the map. To install it, copy the `hello-world/` directory into your plugins folder.
+A working example lives at `examples/plugins/hello-world/index.js`. It exercises every host API surface — toolbar buttons, a map layer (a magenta dot at lat/lon 0,0), a `moveend` listener that logs viewport state, a draggable panel with a click counter, and persistent plugin-scoped settings that keep the counter across reopen and disable/enable cycles. To install it, copy the `hello-world/` directory into your plugins folder.
 
 ```js
 export default {
@@ -204,4 +283,5 @@ App shutdown
 | Rust commands (`list_plugin_files`, `read_plugin_file`) | `src-tauri/src/plugins.rs` |
 | Settings (enabledPlugins) | `src/stores/settings.js` |
 | Toolbar button slot | `src/components/MapToolbar.vue` |
+| Plugin floating panels | `src/components/PluginPanel.vue` |
 | Settings → Plugins tab | `src/components/SettingsDialog.vue` |

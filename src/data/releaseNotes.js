@@ -22,6 +22,13 @@ export const RELEASES = [
     version: 'unreleased'
   },
   {
+    version: '1.1.2',
+    date: '2026-04-26',
+    added: [
+      'Plugin host API extension. Plugins can now: register their own MapLibre layers (`api.map.addLayer({ id, source, layer })`) without going through the features store; read the current viewport state (`api.map.getState()`) and subscribe to viewport-change events (`api.map.onMove`, `api.map.onZoom`); host their own draggable floating panels with a vanilla DOM body (`api.registerPanel({ id, title, mount(containerEl) })`); and persist plugin-scoped settings (`api.settings.get / set / delete / keys`) namespaced under `plugin:<id>:` so plugins can\'t collide with each other or with host settings. All registrations auto-clean on disable: layers + sources are removed, event listeners are detached, panels close. Settings persist across disable/enable. Plugin panels mount once and stay alive across close/reopen via `v-show` so internal state is preserved without authors having to externalize it. The `examples/plugins/hello-world` reference plugin is updated to exercise every new surface.'
+    ]
+  },
+  {
     version: '1.1.1',
     date: '2026-04-26',
     added: [
