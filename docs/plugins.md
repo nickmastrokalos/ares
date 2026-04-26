@@ -196,6 +196,28 @@ any internal state persist across close/reopen via `v-show`. The cleanup
 function returned by `mount` runs only when the panel is unregistered
 (plugin disable / app shutdown).
 
+### Coastlines / land mask
+
+Ares ships the Natural Earth 10 m land dataset (~10 MB, lazy-loaded on first
+use) for the water-routing planner. Plugins can use the same data:
+
+```js
+const isWater = await api.land.isOverWater([-76.21, 37.01])  // → true
+// Use it to pre-filter sample points before hitting an external API:
+const samples = points.filter(async p => await api.land.isOverWater(p))
+
+// Or pull the land polygons for a bbox to use as a clipping / mask layer:
+const fc = await api.land.getLandPolygons([[-77, 36], [-75, 38]])
+api.map.addLayer({
+  id: 'land-mask',
+  source: { type: 'geojson', data: fc },
+  layer: { type: 'fill', paint: { 'fill-color': '#1a1a1a' } }
+})
+```
+
+Both calls return promises. The dataset is cached after the first load,
+so subsequent calls are fast.
+
 ### Plugin-scoped persistent settings
 
 ```js
