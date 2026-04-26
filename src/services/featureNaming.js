@@ -63,3 +63,47 @@ export function nameOrDefault(name, type, featuresStore) {
   if (typeof name === 'string' && name.trim().length) return name
   return defaultFeatureName(type, featuresStore)
 }
+
+// Patterns that, if present in a `name`, almost certainly mean the LLM
+// fabricated the value from prompt context (the user said "circle at <coord>"
+// and the agent passed `name: "Circle at 40R EP 13166 05853"`). Tool
+// descriptions already tell the model to OMIT in that case; this is the
+// handler-side backstop for when it doesn't comply.
+//
+// Patterns are coordinate-shaped (high precision, low false-positive on
+// natural-language names like "Keepout", "Bay recon", "Alpha"):
+//   - MGRS — `40R EP 13166 05853`
+//   - Decimal coord with degree symbol + N/S/E/W — `36.918° N`
+//   - Decimal coord pair with comma — `36.918, -76.112`
+const CONTEXT_DERIVED_PATTERNS = [
+  /\b\d{1,2}[A-Z]\s+[A-Z]{2}\s+\d{4,5}\s+\d{4,5}\b/i,
+  /-?\d{1,3}\.\d+\s*°\s*[NSEW]/i,
+  /-?\d{1,3}\.\d{2,}\s*,\s*-?\d{1,3}\.\d{2,}/
+]
+
+/**
+ * Returns true if the supplied text matches a pattern that's almost
+ * certainly a coordinate-derived name produced by the LLM rather than
+ * something a user typed. False positives on natural-language names
+ * are very low (the patterns require coordinate-shaped substrings).
+ */
+export function looksContextDerived(text) {
+  if (typeof text !== 'string') return false
+  const t = text.trim()
+  if (!t) return false
+  return CONTEXT_DERIVED_PATTERNS.some(re => re.test(t))
+}
+
+/**
+ * If `name` is a coordinate-derived string per `looksContextDerived`,
+ * returns an `{ error }` object that an assistant-tool handler can
+ * return as-is to refuse the call. Otherwise returns null. The error
+ * message tells the model to OMIT the field so the auto-default
+ * naming kicks in.
+ */
+export function rejectIfContextDerived(name, kind = 'name') {
+  if (!looksContextDerived(name)) return null
+  return {
+    error: `The supplied ${kind} ("${name}") looks coordinate-derived from the prompt rather than user-supplied. Re-call this tool WITHOUT the \`${kind}\` field — the system will auto-generate a default. Only pass \`${kind}\` when the user has explicitly named the feature in their request.`
+  }
+}

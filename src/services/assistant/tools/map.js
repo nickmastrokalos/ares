@@ -12,7 +12,7 @@ import {
 import { DEFAULT_FEATURE_COLOR } from '@/stores/features'
 import { parseCoordinate } from '@/services/coordinates'
 import { BASEMAPS } from '@/services/basemaps'
-import { nameOrDefault } from '@/services/featureNaming'
+import { nameOrDefault, rejectIfContextDerived, looksContextDerived } from '@/services/featureNaming'
 
 // Mirrors the track builder UI (ManualTrackPanel / useMapManualTracks).
 const AFFIL_ENUM   = ['friendly', 'hostile', 'civilian', 'unknown']
@@ -468,6 +468,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Point at ${lat.toFixed(4)}, ${lon.toFixed(4)}${col}`
       },
       async handler({ coordinate, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = { type: 'Point', coordinates: coordinate }
         const id = await featuresStore.addFeature('point', geometry, {
           name: nameOrDefault(name, 'point', featuresStore), color
@@ -500,6 +501,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Line · ${points.length} points${col}`
       },
       async handler({ points, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = { type: 'LineString', coordinates: points }
         const id = await featuresStore.addFeature('line', geometry, {
           name: nameOrDefault(name, 'line', featuresStore), color
@@ -534,6 +536,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Polygon · ${points.length} points${col}`
       },
       async handler({ points, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const ring = [...points]
         const first = ring[0], last = ring[ring.length - 1]
         if (first[0] !== last[0] || first[1] !== last[1]) ring.push([...first])
@@ -569,6 +572,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Circle at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radiusMeters} m${col}`
       },
       async handler({ center, radiusMeters, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = circlePolygon(center, radiusMeters)
         const id = await featuresStore.addFeature('circle', geometry, {
           name: nameOrDefault(name, 'circle', featuresStore),
@@ -603,6 +607,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Ellipse at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radiusMajor}×${radiusMinor} m`
       },
       async handler({ center, radiusMajor, radiusMinor, rotation = 0, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = ellipsePolygon(center, radiusMajor, radiusMinor, rotation)
         const id = await featuresStore.addFeature('ellipse', geometry, {
           name: nameOrDefault(name, 'ellipse', featuresStore),
@@ -637,6 +642,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Sector at ${lat.toFixed(4)}, ${lon.toFixed(4)} · ${radius} m · ${startAngle}°–${endAngle}°`
       },
       async handler({ center, radius, startAngle, endAngle, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = sectorPolygon(center, radius, startAngle, endAngle)
         const id = await featuresStore.addFeature('sector', geometry, {
           name: nameOrDefault(name, 'sector', featuresStore),
@@ -673,6 +679,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Box SW ${sw[1].toFixed(4)}, ${sw[0].toFixed(4)} → NE ${ne[1].toFixed(4)}, ${ne[0].toFixed(4)}${rot}`
       },
       async handler({ sw, ne, rotationDeg = 0, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const geometry = rotatedBoxPolygon(sw, ne, rotationDeg)
         const id = await featuresStore.addFeature('box', geometry, {
           name: nameOrDefault(name, 'box', featuresStore),
@@ -708,6 +715,7 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Box around ${ids} · +${paddingMeters} m`
       },
       async handler({ featureIds, paddingMeters = 500, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const rows = featureIds
           .map(id => featuresStore.features.find(f => f.id === id))
           .filter(Boolean)
@@ -783,6 +791,12 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
         return `${label}Route · ${waypoints.length} waypoints`
       },
       async handler({ waypoints, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
+        for (const wp of waypoints ?? []) {
+          if (looksContextDerived(wp?.label)) {
+            return rejectIfContextDerived(wp.label, 'waypoint label')
+          }
+        }
         const total = waypoints.length
         const coords = waypoints.map(wp => wp.coordinate)
         const wps = waypoints.map((wp, i) => {

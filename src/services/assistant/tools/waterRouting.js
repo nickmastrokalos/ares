@@ -14,7 +14,7 @@
 //                                         course/speed × horizon).
 
 import { checkRouteCrossesLand, planWaterRoute, planRouteAvoidingObstacles, planRouteThroughVias } from '@/services/landRouting'
-import { nameOrDefault } from '@/services/featureNaming'
+import { nameOrDefault, rejectIfContextDerived } from '@/services/featureNaming'
 import { geometryBounds, destinationPoint, circlePolygon, corridorPolygon } from '@/services/geometry'
 
 // Knots → metres per second.
@@ -123,6 +123,7 @@ export function waterRoutingTools({ featuresStore, aisStore }) {
         return `${label}Water route · ${fmt(start)} → ${fmt(end)}`
       },
       async handler({ start, end, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const plan = await planWaterRoute(start, end)
         if (!plan.ok) return { error: plan.reason }
         const coords = plan.coordinates
@@ -208,6 +209,7 @@ export function waterRoutingTools({ featuresStore, aisStore }) {
         return `${label}Route · ${what} · ${fmt(start)} → ${fmt(end)}`
       },
       async handler({ start, end, avoid_feature_ids = [], via_feature_ids = [], avoid_land = false, avoid_ais = false, ais_horizon_minutes = 30, ais_standoff_meters = 1852, buffer_meters = 0, name, color = DEFAULT_FEATURE_COLOR }) {
+        const reject = rejectIfContextDerived(name); if (reject) return reject
         const SUPPORTED = new Set(['polygon', 'box', 'circle', 'ellipse', 'sector'])
 
         function resolvePolygonFeature(fid, role) {

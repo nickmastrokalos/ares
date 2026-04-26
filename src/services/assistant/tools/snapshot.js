@@ -3,6 +3,8 @@
 // save dialog. The user already approves the action via the confirm
 // card, which is the right gate point for "write a file."
 
+import { rejectIfContextDerived } from '@/services/featureNaming'
+
 export function snapshotTools({ captureSnapshotToDesktop }) {
   if (typeof captureSnapshotToDesktop !== 'function') return []
 
@@ -26,6 +28,7 @@ export function snapshotTools({ captureSnapshotToDesktop }) {
         return `Capture map snapshot · ${named} → Desktop`
       },
       async handler({ filename } = {}) {
+        const reject = rejectIfContextDerived(filename, 'filename'); if (reject) return reject
         const res = await captureSnapshotToDesktop({ filename })
         if (!res?.ok) return { error: res?.error ?? 'Snapshot failed.' }
         return { success: true, filePath: res.filePath }
