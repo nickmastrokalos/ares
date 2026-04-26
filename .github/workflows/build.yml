@@ -56,11 +56,6 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
       - name: Install frontend dependencies
         run: pnpm install
 
