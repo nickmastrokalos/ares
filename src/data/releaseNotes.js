@@ -19,7 +19,11 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased',
+    version: 'unreleased'
+  },
+  {
+    version: '1.1.0',
+    date: '2026-04-25',
     added: [
       'Routes: existing waypoints are now drag-to-move once the route is selected (panel open). First click on the route opens its panel; a subsequent mousedown on any of its waypoints starts a drag, with live preview of the line on the map and live update of the panel\'s coordinate / distance readouts as you move the cursor. Release to commit the new position; Escape cancels and reverts. Matches the two-step select-then-drag flow already used for manual tracks, bullseye, and annotations. The `route_move_waypoint` agent tool already covered the data path; this is just the UI gap.',
       'Assistant can now manage CoT listeners. New tools: `cot_list_listeners` (read) — enumerate configured listeners with name / address / port / protocol / enabled state. `cot_add_listener` (write) — validates IP, port (1-65535), protocol (udp/tcp), refuses duplicate address:port pairs, then opens the socket via the Tauri `start_listener` command. `cot_set_listener_enabled` (write) — toggles a named listener on or off (start_listener / stop_listener). `cot_remove_listener` (write) — stops the socket then removes the config. Listeners are looked up by name (case-insensitive); the agent calls `cot_list_listeners` first to find the right one.',
