@@ -39,6 +39,8 @@ plugins/
 
 \* See the **Self-contained requirement** below — `index.js` cannot use ES `import` to load sibling files at runtime. Bundle everything into `index.js` before dropping the directory into the plugins folder.
 
+`index.js` may be a **symlink** to a bundle elsewhere on disk (the standard development pattern: symlink `<plugins>/my-plugin/index.js` to your project's `dist/index.js` and rebuilds land instantly without re-copying). The loader allows symlinks at the leaf as long as the containing directory is inside the plugins folder.
+
 ---
 
 ## Plugin contract
