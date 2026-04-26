@@ -3,6 +3,7 @@ import { useFeaturesStore } from '@/stores/features'
 import { useTracksStore } from '@/stores/tracks'
 import { useSettingsStore } from '@/stores/settings'
 import { getStore } from '@/plugins/store'
+import { isOverWater, getLandPolygons } from '@/services/coastlines'
 
 export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   const featuresStore = useFeaturesStore()
@@ -215,6 +216,16 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         }
         cleanups.push(unregister)
         return handle
+      },
+
+      // ---- Coastlines ----
+      // Bundled Natural Earth 10 m land dataset, exposed so plugins can
+      // pre-filter "is this point over water?" or pull land polygons for
+      // a bbox to use as a clipping mask. First call lazy-loads ~10 MB;
+      // subsequent calls are fast.
+      land: {
+        isOverWater(coord)         { return isOverWater(coord) },
+        getLandPolygons(bbox)      { return getLandPolygons(bbox) }
       },
 
       // ---- Plugin-scoped persistent settings ----
