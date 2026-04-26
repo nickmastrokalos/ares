@@ -47,15 +47,15 @@ const position = computed(() => {
   return formatCoordinate(aircraft.value.lon, aircraft.value.lat, settingsStore.coordinateFormat)
 })
 
-// alt_baro is either a number (feet) or the string "ground". Render as
-// plain integer feet at every altitude — flight-level shorthand was
-// confusing to non-aviation users.
+// alt_baro is either a number (feet) or the string "ground". Render flight
+// levels (FL250) above 18,000 ft, plain feet below.
 const altitudeDisplay = computed(() => {
   const alt = aircraft.value?.alt_baro
   if (alt == null) return '—'
   if (typeof alt === 'string') return alt === 'ground' ? 'Ground' : alt
   if (!Number.isFinite(alt)) return '—'
-  return `${Math.round(alt).toLocaleString()} ft`
+  if (alt >= 18000) return `FL${Math.round(alt / 100).toString().padStart(3, '0')}`
+  return `${alt.toLocaleString()} ft`
 })
 
 const speedDisplay = computed(() => {
