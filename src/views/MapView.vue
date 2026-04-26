@@ -63,6 +63,7 @@ import AisTrackPanel from '@/components/AisTrackPanel.vue'
 import AdsbPanel from '@/components/AdsbPanel.vue'
 import AdsbTrackPanel from '@/components/AdsbTrackPanel.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
+import PluginPanel from '@/components/PluginPanel.vue'
 import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
 import { useAssistantTools } from '@/composables/useAssistantTools'
@@ -246,7 +247,7 @@ const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: ope
 // must run after `useMapManualTracks` since `suppressEntityClicks` reads
 // `placing.value`, which only exists past that destructure.
 watch(suppressEntityClicks, (val) => { entitySuppressRef.value = val }, { immediate: true })
-const pluginRegistry = usePluginRegistry({ flyToGeometry })
+const pluginRegistry = usePluginRegistry({ flyToGeometry, getMap: () => map })
 const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
 const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppressEntityClicks)
@@ -462,7 +463,6 @@ onMounted(async () => {
   navStore.setActiveMission(props.missionId)
 
   await settingsStore.load()
-  loadPlugins(pluginRegistry)
   await tileserverStore.load()
   await aisStore.load()
   await adsbStore.load()
@@ -597,6 +597,13 @@ onMounted(async () => {
     }
     await tracksStore.startListening()
 
+    // Plugins activate with a guaranteed-ready map: the host's
+    // `addLayer` / `getState` / `onMove` / `onZoom` APIs all assume the
+    // MapLibre instance is live. Defer plugin discovery + activation
+    // until this point so plugin authors don't have to handle a
+    // "map not ready" race.
+    loadPlugins(pluginRegistry)
+
     // Apply basemap opacity live when the setting changes.
     watch(
       () => settingsStore.basemapOpacity,
@@ -713,6 +720,13 @@ onUnmounted(async () => {
         <ChatPanel
           v-if="chatPanelOpen"
           @close="chatPanelOpen = false"
+        />
+        <PluginPanel
+          v-for="panel in pluginRegistry.allPanels.value"
+          v-show="pluginRegistry.isPanelOpen(panel.id)"
+          :key="panel.id"
+          :panel="panel"
+          @close="pluginRegistry.closePanel(panel.id)"
         />
         <BloodhoundPanel
           v-if="bloodhoundPanelOpen"
