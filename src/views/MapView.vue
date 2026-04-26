@@ -29,6 +29,7 @@ import { useMapManualTracks } from '@/composables/useMapManualTracks'
 import { useMapGhosts } from '@/composables/useMapGhosts'
 import { useMapAis } from '@/composables/useMapAis'
 import { useMapAdsb } from '@/composables/useMapAdsb'
+import { MapPitchControl } from '@/composables/maplibrePitchControl'
 import { getBasemap } from '@/services/basemaps'
 import { usePluginRegistry } from '@/composables/usePluginRegistry'
 import { loadPlugins } from '@/services/pluginLoader'
@@ -520,7 +521,8 @@ onMounted(async () => {
     preserveDrawingBuffer: true
   })
 
-  map.addControl(new maplibregl.NavigationControl(), 'top-right')
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
+  map.addControl(new MapPitchControl(), 'top-right')
 
   map.on('mousemove', (e) => { mouseCoord.value = e.lngLat })
   map.on('mouseout', () => { mouseCoord.value = null })

@@ -21,6 +21,7 @@ export const RELEASES = [
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
     added: [
+      'Map gets a vertical pitch slider in the top-right control stack, just below the compass / zoom buttons. Drag to set the camera pitch (0 – 85°), double-click the thumb to snap back to 0; the slider stays in sync if pitch changes via mouse drag or the compass. The built-in compass disc also now visualises pitch (`visualizePitch: true`) so it tilts as you tilt the map.',
       'ADS-B aircraft feed via airplanes.live — new toolbar button (`mdi-airplane`) next to AIS opens an `AdsbPanel` with three toggles (Active / Visible on map / Heading arrows). The endpoint is free and key-less so there is no feed URL or API key to configure. Aircraft render in magenta (outside the MIL-STD-2525 affiliation palette) to stay visually distinct from CoT/manual symbology and AIS yellow; clicking one opens a draggable detail panel showing hex, flight, registration, type, altitude in feet, ground speed, track, heading, vertical rate, and squawk. Six assistant tools mirror the AIS set: `adsb_get_status`, `adsb_list_aircraft`, `adsb_aircraft_near`, `adsb_set_enabled`, `adsb_set_visible`, `adsb_set_heading_arrows`. Polled every 10 s with a viewport-derived radius capped at 250 nm; breadcrumbs share the global `Track breadcrumbs` setting.'
     ],
     changed: [

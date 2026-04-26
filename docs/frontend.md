@@ -302,6 +302,10 @@ The `MANIFEST/manifest.xml` uses `MissionPackageManifest version="2"` with a `Co
 ## Map Footer
 `MapFooter` is an absolutely positioned overlay anchored to the bottom of `.map-container`. It tracks the mouse position via `mousemove` / `mouseout` handlers registered on the MapLibre instance in `MapView` and passed in as a `coord` prop (`{ lng, lat } | null`). The footer is `pointer-events: none` so it never intercepts map interactions. The coordinate text is formatted by `formatCoordinate` from `src/services/coordinates.js` using the `coordinateFormat` setting.
 
+## Map controls
+
+`MapView` adds two MapLibre `IControl` instances to the top-right corner: the built-in `NavigationControl` (with `visualizePitch: true` so the compass disc indicates pitch as well as bearing), and a custom `MapPitchControl` (`src/composables/maplibrePitchControl.js`) — a vertical slider that stacks below the compass and binds two-way to `map.getPitch()` / `map.setPitch()`. Double-click the slider thumb to snap pitch back to 0. The control is plain-DOM (no Vue) so it integrates cleanly with MapLibre's control row.
+
 ## Map provide/inject
 `MapView` is the owner of the MapLibre instance; components below it in the tree can ask for map-centric helpers via Vue's `inject` API without prop-drilling.
 
