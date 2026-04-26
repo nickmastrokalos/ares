@@ -32,9 +32,13 @@ The store stores raw airplanes.live records, keyed by `hex`. The endpoint return
 Magenta (`#ff4081`, Material pink A200) throughout — distinct from AIS yellow and outside the MIL-STD-2525 affiliation palette (Friend cyan, Hostile red, Neutral green, Unknown yellow).
 
 - `adsb-breadcrumbs` source + `adsb-breadcrumbs-line` line layer — synthetic backward projection along reverse `track`, fixed length `ADSB_BREADCRUMB_METERS` (currently 1.5 km). Toggled by the ADS-B-local `breadcrumbs` switch in `AdsbPanel`, independent of the global CoT `trackBreadcrumbs` setting. Suppressed below 5 kts ground speed; speed is only used as a "is it moving?" gate.
-- `adsb-aircraft` source feeding two mutually exclusive icon layers:
-  - `adsb-aircraft-points` — circle, shown when `headingArrows = false`. Military aircraft (decoded from `dbFlags & 1`) get a thicker white stroke and a slightly larger radius.
-  - `adsb-aircraft-arrows` — symbol with `icon-rotate: ['get', 'track']`, shown when `headingArrows = true`. The image is picked per-feature via a `case` expression: civilian aircraft use `adsb-arrow` (magenta with a thin black edge), military aircraft use `adsb-arrow-mil` (magenta with a white halo + thin black inner edge so the symbol pops against any basemap).
+- `adsb-aircraft` source feeding two mutually exclusive icon layers (both `symbol` type so they share the elevation machinery — see below):
+  - `adsb-aircraft-points` — circle icon, shown when `headingArrows = false`. Military aircraft (decoded from `dbFlags & 1`) use the `adsb-circle-mil` image (white stroke, slightly larger).
+  - `adsb-aircraft-arrows` — chevron icon with `icon-rotate: ['get', 'track']`, shown when `headingArrows = true`. Military variant uses `adsb-arrow-mil` (magenta fill with a white halo + thin black inner edge).
+
+### 3D elevation effect
+
+When the camera is tilted past 25°, aircraft visually float above the map: `useMapAdsb` derives a `renderedCollection` that adds a per-feature `iconOffset` (pixels) and `textOffset` (ems) to each feature, scaled by `altitude × sin(pitch − 25°)`. The icon and label layers reference those properties via `['array','number',2,['get','iconOffset' / 'textOffset']]`. A `map.on('pitch')` listener keeps the offset in sync as the user tilts. The offset is screen-space — not a true 3D projection — but at typical pitches it reads convincingly as elevation, and at low pitches it collapses to zero so the markers stay anchored to ground positions.
 - `adsb-aircraft-labels` — flight callsign, gated by `settingsStore.showFeatureLabels`.
 
 ## Assistant tools
