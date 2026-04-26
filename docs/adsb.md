@@ -23,7 +23,7 @@ Live aircraft positions from the free, key-less [airplanes.live](https://airplan
 
 ## Aircraft record shape
 
-The store stores raw airplanes.live records, keyed by `hex`. The endpoint returns the array under the top-level key `ac` (their public field-description page calls it `aircraft`, but the live response uses `ac` — the store accepts either). Used fields: `hex`, `flight` (callsign), `lat`, `lon`, `alt_baro` (number ft or string `"ground"`), `gs` (kts), `track` (°), `r` (registration), `t` (type), `squawk`, `true_heading` / `mag_heading`, `baro_rate` / `geom_rate` (ft/min), `seen` (s).
+The store stores raw airplanes.live records, keyed by `hex`. The endpoint returns the array under the top-level key `ac` (their public field-description page calls it `aircraft`, but the live response uses `ac` — the store accepts either). Used fields: `hex`, `flight` (callsign), `lat`, `lon`, `alt_baro` (number ft or string `"ground"`), `gs` (kts), `track` (°), `r` (registration), `t` (type), `squawk`, `true_heading` / `mag_heading`, `baro_rate` / `geom_rate` (ft/min), `seen` (s), `dbFlags` (bitfield; bit 0 = military).
 
 `AdsbTrackPanel` renders altitudes ≥ 18,000 ft as flight levels (`FL250`), below as plain feet, and `"ground"` as `Ground`.
 
@@ -33,8 +33,8 @@ Magenta (`#ff4081`, Material pink A200) throughout — distinct from AIS yellow 
 
 - `adsb-breadcrumbs` source + `adsb-breadcrumbs-line` line layer — synthetic backward projection along reverse `track`, fixed length `ADSB_BREADCRUMB_METERS` (currently 1.5 km). Toggled by the ADS-B-local `breadcrumbs` switch in `AdsbPanel`, independent of the global CoT `trackBreadcrumbs` setting. Suppressed below 5 kts ground speed; speed is only used as a "is it moving?" gate.
 - `adsb-aircraft` source feeding two mutually exclusive icon layers:
-  - `adsb-aircraft-points` — circle, shown when `headingArrows = false`.
-  - `adsb-aircraft-arrows` — symbol with `icon-rotate: ['get', 'track']`, shown when `headingArrows = true`.
+  - `adsb-aircraft-points` — circle, shown when `headingArrows = false`. Military aircraft (decoded from `dbFlags & 1`) get a thicker white stroke and a slightly larger radius.
+  - `adsb-aircraft-arrows` — symbol with `icon-rotate: ['get', 'track']`, shown when `headingArrows = true`. The image is picked per-feature via a `case` expression: civilian aircraft use `adsb-arrow` (magenta with a thin black edge), military aircraft use `adsb-arrow-mil` (magenta with a white halo + thin black inner edge so the symbol pops against any basemap).
 - `adsb-aircraft-labels` — flight callsign, gated by `settingsStore.showFeatureLabels`.
 
 ## Assistant tools
@@ -48,7 +48,7 @@ Magenta (`#ff4081`, Material pink A200) throughout — distinct from AIS yellow 
 | `adsb_set_visible` | w | Show/hide on map (data still fetches when hidden). |
 | `adsb_set_heading_arrows` | w | Toggle between circles and arrows. |
 
-The `summariseAircraft` shape returned by the read tools: `{ hex, callsign, registration, type, coordinate, altitudeFt, onGround, speedKnots, trackDeg, headingDeg, squawk }`.
+The `summariseAircraft` shape returned by the read tools: `{ hex, callsign, registration, type, coordinate, altitudeFt, onGround, speedKnots, trackDeg, headingDeg, squawk, military }`. `adsb_list_aircraft` also accepts a `military_only: true` flag to restrict results to flagged aircraft.
 
 ## Why mirror AIS instead of unifying
 

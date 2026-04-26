@@ -32,6 +32,11 @@ function val(v) {
   return v != null && v !== '' ? v : '—'
 }
 
+const isMilitary = computed(() => {
+  const flags = aircraft.value?.dbFlags
+  return Number.isFinite(flags) ? Boolean(flags & 1) : false
+})
+
 const flightDisplay = computed(() => {
   const f = aircraft.value?.flight?.trim()
   return f || props.hex.toUpperCase()
@@ -143,6 +148,8 @@ watch(() => adsbStore.focusedHex, (h) => {
         <span class="attr-val attr-val--mono">{{ val(aircraft?.r) }}</span>
         <span class="attr-key">TYPE</span>
         <span class="attr-val attr-val--mono">{{ val(aircraft?.t) }}</span>
+        <span class="attr-key">CLASS</span>
+        <span class="attr-val">{{ isMilitary ? 'Military' : 'Civilian' }}</span>
         <span class="attr-key">SQUAWK</span>
         <span class="attr-val attr-val--mono">{{ val(aircraft?.squawk) }}</span>
       </div>
