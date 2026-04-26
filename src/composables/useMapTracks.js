@@ -2,6 +2,7 @@ import { computed, watch, onUnmounted } from 'vue'
 import { useTracksStore } from '@/stores/tracks'
 import { useSettingsStore } from '@/stores/settings'
 import { cotTypeToSidc, getOrCreateIcon, clearIconCache } from '@/services/sidc'
+import { distanceBetween } from '@/services/geometry'
 
 const TRACKS_SOURCE        = 'cot-tracks'
 const TRACKS_LAYER_POINTS  = 'cot-tracks-points'
@@ -46,23 +47,53 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
   let initialized = false
 
   // GeoJSON LineString collection for breadcrumb trails.
-  // Recomputes whenever tracks update OR settings change.
+  // Tail length is `trackBreadcrumbLength` meters of map distance —
+  // independent of how fast the track is moving, so a walking foot
+  // soldier and a transiting jet draw tails of identical visual
+  // length. We walk backward through the recorded history,
+  // accumulating segment distances until we reach the target length,
+  // then truncate the last segment proportionally.
   const breadcrumbCollection = computed(() => {
     if (!settingsStore.trackBreadcrumbs) {
       return { type: 'FeatureCollection', features: [] }
     }
-    const cutoff = Date.now() - settingsStore.trackBreadcrumbLength * 1_000
+    const targetMeters = Math.max(0, settingsStore.trackBreadcrumbLength)
+    if (targetMeters <= 0) return { type: 'FeatureCollection', features: [] }
 
     const features = []
     for (const t of tracksStore.tracks.values()) {
       if (tracksStore.hiddenIds.has(t.uid)) continue
-      const coords = (t.history ?? [])
-        .filter(h => h.t >= cutoff)
-        .map(h => [h.lon, h.lat])
-      if (coords.length < 2) continue
+      const history = t.history ?? []
+      if (history.length < 2) continue
+
+      // Walk newest → oldest, accumulating distance. Build the trail
+      // newest-first and reverse at the end so the LineString is in
+      // chronological order (which the map style expects).
+      const trail = [[history[history.length - 1].lon, history[history.length - 1].lat]]
+      let acc = 0
+      for (let i = history.length - 1; i > 0; i--) {
+        const newer = [history[i].lon,     history[i].lat]
+        const older = [history[i - 1].lon, history[i - 1].lat]
+        const segLen = distanceBetween(newer, older)
+        if (segLen <= 0) continue
+        if (acc + segLen >= targetMeters) {
+          const remaining = targetMeters - acc
+          const f = remaining / segLen
+          trail.push([
+            newer[0] + (older[0] - newer[0]) * f,
+            newer[1] + (older[1] - newer[1]) * f
+          ])
+          acc = targetMeters
+          break
+        }
+        trail.push(older)
+        acc += segLen
+      }
+      if (trail.length < 2) continue
+      trail.reverse()
       features.push({
         type: 'Feature',
-        geometry: { type: 'LineString', coordinates: coords },
+        geometry: { type: 'LineString', coordinates: trail },
         properties: { uid: t.uid, affiliation: affiliationFromCotType(t.cotType) }
       })
     }
@@ -111,7 +142,9 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
         'circle-radius': 6,
         'circle-color': AFFIL_MATCH,
         'circle-stroke-width': 1,
-        'circle-stroke-color': '#000000'
+        'circle-stroke-color': '#000000',
+        // Lay flat with the map plane on pitch (matches AIS / ADS-B).
+        'circle-pitch-alignment': 'map'
       }
     })
 
@@ -123,6 +156,9 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
         'icon-image': ['get', 'sidc'],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
+        // Pitch-align only — yaw stays viewport-locked so 2525 symbol
+        // orientation isn't rotated when the operator yaws the map.
+        'icon-pitch-alignment': 'map',
         'visibility': settingsStore.milStdSymbology ? 'visible' : 'none'
       }
     })

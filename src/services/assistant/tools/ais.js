@@ -23,6 +23,8 @@ function summariseVessel(v) {
   }
 }
 
+
+
 // Resolve a center point from either a featureId (uses feature center) or a
 // raw coordinate.
 function resolveCenter(featuresStore, featureId, coordinate) {
@@ -49,6 +51,7 @@ export function aisTools({ aisStore, featuresStore }) {
           enabled:       aisStore.enabled,
           visible:       aisStore.visible,
           headingArrows: aisStore.headingArrows,
+          breadcrumbs:   aisStore.breadcrumbs,
           configured:    !configMissing(aisStore),
           feedUrl:       aisStore.feedUrl || '',
           vesselCount:   aisStore.vesselCount
@@ -172,7 +175,7 @@ export function aisTools({ aisStore, featuresStore }) {
 
     {
       name: 'ais_set_heading_arrows',
-      description: 'Switch the AIS vessel icon between plain circles and direction-aware arrows (rotated to each vessel\'s COG). The history-trail rendering — fading polylines behind each vessel — is governed by the global `Track breadcrumbs` setting (Settings → Tracks), not this tool.',
+      description: 'Switch the AIS vessel icon between plain circles and direction-aware arrows (rotated to each vessel\'s COG). Independent of the breadcrumb tail (`ais_set_breadcrumbs`).',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -187,6 +190,26 @@ export function aisTools({ aisStore, featuresStore }) {
       async handler({ arrows }) {
         await aisStore.setHeadingArrows(arrows)
         return { success: true, headingArrows: aisStore.headingArrows }
+      }
+    },
+
+    {
+      name: 'ais_set_breadcrumbs',
+      description: 'Toggle the short backward heading tail behind each moving AIS vessel. Length is fixed (~500 m) and not user-adjustable. Independent of the global CoT `Track breadcrumbs` setting and of `ais_set_heading_arrows`.',
+      readonly: false,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          breadcrumbs: { type: 'boolean', description: 'True to draw heading tails, false to hide them.' }
+        },
+        required: ['breadcrumbs']
+      },
+      previewRender({ breadcrumbs }) {
+        return `AIS breadcrumbs → ${breadcrumbs ? 'on' : 'off'}`
+      },
+      async handler({ breadcrumbs }) {
+        await aisStore.setBreadcrumbs(breadcrumbs)
+        return { success: true, breadcrumbs: aisStore.breadcrumbs }
       }
     }
 

@@ -13,7 +13,11 @@ const DEFAULTS = {
   distanceUnits: 'metric',
   coordinateFormat: 'dd',
   trackBreadcrumbs: false,
-  trackBreadcrumbLength: 30,  // seconds
+  // Tail length is now a fixed map distance in meters, not a time window.
+  // Same value applies to every track type (CoT history trails, AIS and
+  // ADS-B synthetic backward projections), so a slow vessel and a fast
+  // jet draw tails of identical visual length.
+  trackBreadcrumbLength: 1000,  // meters
   milStdSymbology: false,
   basemapOpacity: 1.0,
   enabledPlugins: [],         // plugin ids the operator has opted into
@@ -22,8 +26,53 @@ const DEFAULTS = {
   assistantApiKey: '',
   // Last app version the user dismissed the "what's new" overlay for.
   // null = never seen (i.e. fresh install) — see App.vue mount logic.
-  lastSeenVersion: null
+  lastSeenVersion: null,
+
+  // ---- TAK identity ----
+  // Callsign shown to peers in GeoChat and outbound CoT. `null` means the
+  // operator has never set one — chat features gate on this and prompt the
+  // user to pick a callsign before sending or announcing presence.
+  selfCallsign: null,
+  // Stable per-install UID. Generated on first load if missing — peers key
+  // direct chat threads by this. Don't reuse across reinstalls.
+  selfUid: null
 }
+
+// Three protected listeners are seeded on first run so the standard TAK
+// multicast groups are always present in the listeners list. They can be
+// edited (e.g. point them at a custom group on a non-default network) or
+// disabled, but not deleted — the chat store derives its outbound
+// destination from the `tak-chat-messages` listener, so removing it would
+// silently break chat.
+const PROTECTED_LISTENERS = [
+  {
+    kind: 'tak-chat-messages',
+    name: 'GeoChat Messages',
+    address: '224.10.10.1',
+    port: 17012,
+    protocol: 'udp',
+    enabled: true,
+    protected: true
+  },
+  {
+    kind: 'tak-chat-announce',
+    name: 'GeoChat Announce',
+    address: '224.10.10.1',
+    port: 18740,
+    protocol: 'udp',
+    enabled: true,
+    protected: true
+  },
+  {
+    kind: 'tak-sa',
+    name: 'SA Multicast',
+    address: '239.2.3.1',
+    port: 6969,
+    protocol: 'udp',
+    enabled: true,
+    protected: true
+  }
+]
 
 export const useSettingsStore = defineStore('settings', () => {
   const appStore = useAppStore()
@@ -42,6 +91,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const assistantModel = ref(DEFAULTS.assistantModel)
   const assistantApiKey = ref(DEFAULTS.assistantApiKey)
   const lastSeenVersion = ref(DEFAULTS.lastSeenVersion)
+  const selfCallsign    = ref(DEFAULTS.selfCallsign)
+  const selfUid         = ref(DEFAULTS.selfUid)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
   // without a growing switch statement as we add more settings.
@@ -59,7 +110,9 @@ export const useSettingsStore = defineStore('settings', () => {
     assistantProvider,
     assistantModel,
     assistantApiKey,
-    lastSeenVersion
+    lastSeenVersion,
+    selfCallsign,
+    selfUid
   }
 
   // Promise cache: `load()` may be called from multiple places during boot
@@ -80,6 +133,39 @@ export const useSettingsStore = defineStore('settings', () => {
           if (stored !== undefined && stored !== null) {
             refs[key].value = stored
           }
+        }
+        // One-time migration: trackBreadcrumbLength was previously stored
+        // in seconds (range 5..60) and is now stored in meters (range
+        // 100..5000). Any persisted value at or below the old maximum is
+        // a leftover from the old unit and would render as an invisibly
+        // short tail — bump it to the new default.
+        if (trackBreadcrumbLength.value <= 60) {
+          trackBreadcrumbLength.value = DEFAULTS.trackBreadcrumbLength
+          await store.set('trackBreadcrumbLength', trackBreadcrumbLength.value)
+        }
+        // Generate a stable selfUid on first run. Persists from then on,
+        // so direct chat threads keyed by this UID stay consistent.
+        if (!selfUid.value) {
+          selfUid.value = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `ares-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+          await store.set('selfUid', selfUid.value)
+        }
+
+        // Seed protected listeners (TAK chat + SA multicast) if they're
+        // not already in the saved list. Match by `kind` so a user who
+        // happens to have a listener at the same address/port doesn't
+        // get a duplicate. Existing user-added entries are untouched.
+        let listenersChanged = false
+        for (const seed of PROTECTED_LISTENERS) {
+          const exists = cotListeners.value.some(l => l.kind === seed.kind)
+          if (!exists) {
+            cotListeners.value.push({ ...seed })
+            listenersChanged = true
+          }
+        }
+        if (listenersChanged) {
+          await store.set('cotListeners', cotListeners.value)
         }
       } finally {
         appStore.endLoad()
@@ -135,6 +221,8 @@ export const useSettingsStore = defineStore('settings', () => {
     assistantModel,
     assistantApiKey,
     lastSeenVersion,
+    selfCallsign,
+    selfUid,
     load,
     setSetting,
     addCotListener,

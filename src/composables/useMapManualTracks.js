@@ -192,7 +192,9 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
         'circle-radius': 6,
         'circle-color': AFFIL_MATCH,
         'circle-stroke-width': 1,
-        'circle-stroke-color': '#000000'
+        'circle-stroke-color': '#000000',
+        // Lay flat with the map plane on pitch (matches AIS / ADS-B).
+        'circle-pitch-alignment': 'map'
       }
     }
     if (use2525) circleSpec.filter = FILTER_CIRCLE_MILSTD
@@ -208,6 +210,9 @@ export function useMapManualTracks(getMap, suppress = { value: false }, dispatch
         'icon-image':            ['get', 'sidc'],
         'icon-allow-overlap':    true,
         'icon-ignore-placement': true,
+        // Pitch-align only — yaw stays viewport-locked so 2525 symbol
+        // orientation isn't rotated when the operator yaws the map.
+        'icon-pitch-alignment':  'map',
         'visibility':            use2525 ? 'visible' : 'none'
       }
     })

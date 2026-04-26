@@ -3,7 +3,7 @@ import { useDisplay } from 'vuetify'
 
 const { mdAndUp, smAndDown } = useDisplay()
 
-const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-bullseye', 'toggle-annotations', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-listeners', 'toggle-settings', 'exit-mission', 'toggle-io', 'snapshot', 'capture-video'])
+const emit = defineEmits(['toggle-draw', 'toggle-layers', 'toggle-route', 'toggle-overlays', 'toggle-measure', 'toggle-bloodhound', 'toggle-perimeter', 'toggle-bullseye', 'toggle-annotations', 'toggle-track-drop', 'toggle-track-list', 'toggle-ghost', 'toggle-intercept', 'toggle-ais', 'toggle-adsb', 'toggle-chat', 'toggle-connections', 'toggle-settings', 'exit-mission', 'toggle-io', 'snapshot', 'capture-video'])
 
 const props = defineProps({
   drawPanelOpen: Boolean,
@@ -20,6 +20,8 @@ const props = defineProps({
   ghostPanelOpen: Boolean,
   interceptPanelOpen: Boolean,
   aisPanelOpen: Boolean,
+  adsbPanelOpen: Boolean,
+  chatPanelOpen: Boolean,
   recordingVideo: Boolean,
   missionName: { type: String, default: '' },
   pluginButtons: { type: Array, default: () => [] }
@@ -36,7 +38,7 @@ const VIDEO_DURATIONS = [
 const annotationActive = () => props.drawPanelOpen || props.layersPanelOpen || props.routing || props.trackDropPanelOpen || props.trackListOpen || props.annotationsPanelOpen
 const analysisActive   = () => props.measuring || props.bloodhoundPanelOpen || props.perimeterPanelOpen || props.bullseyePanelOpen
 const operationsActive = () => props.ghostPanelOpen || props.interceptPanelOpen
-const feedsActive      = () => props.aisPanelOpen
+const feedsActive      = () => props.aisPanelOpen || props.adsbPanelOpen || props.chatPanelOpen
 </script>
 
 <template>
@@ -202,6 +204,24 @@ const feedsActive      = () => props.aisPanelOpen
           </template>
         </v-tooltip>
 
+        <v-tooltip text="ADS-B Feed" location="bottom">
+          <template #activator="{ props: tip }">
+            <v-btn v-bind="tip" icon="mdi-airplane" size="small"
+              :color="adsbPanelOpen ? 'primary' : undefined"
+              :class="[adsbPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+              @click="emit('toggle-adsb')" />
+          </template>
+        </v-tooltip>
+
+        <v-tooltip text="Chat" location="bottom">
+          <template #activator="{ props: tip }">
+            <v-btn v-bind="tip" icon="mdi-chat-outline" size="small"
+              :color="chatPanelOpen ? 'primary' : undefined"
+              :class="[chatPanelOpen ? 'toolbar-active' : 'text-medium-emphasis']"
+              @click="emit('toggle-chat')" />
+          </template>
+        </v-tooltip>
+
       </template>
 
       <!-- ============================================================ -->
@@ -297,6 +317,12 @@ const feedsActive      = () => props.aisPanelOpen
             <v-list-item prepend-icon="mdi-ferry" title="AIS Feed"
               :active="aisPanelOpen" active-color="primary"
               @click="emit('toggle-ais')" />
+            <v-list-item prepend-icon="mdi-airplane" title="ADS-B Feed"
+              :active="adsbPanelOpen" active-color="primary"
+              @click="emit('toggle-adsb')" />
+            <v-list-item prepend-icon="mdi-chat-outline" title="Chat"
+              :active="chatPanelOpen" active-color="primary"
+              @click="emit('toggle-chat')" />
           </v-list>
         </v-menu>
 
@@ -378,11 +404,11 @@ const feedsActive      = () => props.aisPanelOpen
 
       <v-divider vertical class="mx-2 toolbar-divider" />
 
-      <v-tooltip text="Listeners" location="bottom">
+      <v-tooltip text="Connections" location="bottom">
         <template #activator="{ props: tip }">
           <v-btn v-bind="tip" icon="mdi-access-point" size="small"
             class="text-medium-emphasis"
-            @click="emit('toggle-listeners')" />
+            @click="emit('toggle-connections')" />
         </template>
       </v-tooltip>
 

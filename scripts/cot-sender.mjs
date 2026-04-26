@@ -25,7 +25,7 @@ import * as net from 'node:net'
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const args = { host: '127.0.0.1', port: 4242, protocol: 'udp', tracks: 5, speed: 25 }
+  const args = { host: '239.2.3.1', port: 6969, protocol: 'udp', tracks: 5, speed: 25 }
   for (let i = 2; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, '')
     const val = argv[i + 1]

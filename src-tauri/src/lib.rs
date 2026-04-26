@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 mod assistant;
 mod cot;
+mod cot_sender;
 mod listeners;
 mod migrations;
 mod plugins;
@@ -78,6 +79,24 @@ fn stop_all_listeners(state: tauri::State<ListenerState>) {
     state.0.lock().unwrap().stop_all();
 }
 
+/// Send a single CoT XML payload to a destination.
+///
+/// `protocol` is "udp" (functional in v1) or "tcp" (returns an error from
+/// `cot_sender::send_tcp` until streaming/TAK Server support lands).
+/// Multicast detection happens inside the sender module.
+#[tauri::command]
+async fn send_cot(
+    address: String,
+    port: u16,
+    protocol: String,
+    xml: String,
+) -> Result<(), String> {
+    match protocol.to_lowercase().as_str() {
+        "tcp" => cot_sender::send_tcp(&address, port, &xml).await,
+        _     => cot_sender::send_udp(&address, port, &xml).await,
+    }
+}
+
 /// Proxy an AIS vessel fetch through Rust to avoid CORS restrictions.
 /// Returns the parsed JSON response body on success, or an error string.
 #[tauri::command]
@@ -102,6 +121,41 @@ async fn fetch_ais_vessels(
         .get(&endpoint)
         .header("x-api-key", &api_key)
         .query(&[("geometry", geometry.to_string())])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = res.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {}", status.as_u16()));
+    }
+
+    res.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Proxy an ADS-B aircraft fetch through Rust. The endpoint
+/// `https://api.airplanes.live/v2/point/{lat}/{lon}/{radius_nm}` is free and
+/// unauthenticated; routing through Rust avoids any CORS questions and gives
+/// a single place to set a User-Agent / customise the call later. The
+/// `radius_nm` is clamped to the airplanes.live cap of 250 nm before the
+/// request is sent.
+#[tauri::command]
+async fn fetch_adsb_aircraft(
+    lat: f64,
+    lon: f64,
+    radius_nm: f64,
+) -> Result<serde_json::Value, String> {
+    let radius = radius_nm.clamp(1.0, 250.0);
+    let endpoint = format!(
+        "https://api.airplanes.live/v2/point/{lat}/{lon}/{radius}"
+    );
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(&endpoint)
+        .header("User-Agent", "Ares/1.x (https://github.com/)")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -166,7 +220,9 @@ pub fn run() {
             start_listener,
             stop_listener,
             stop_all_listeners,
+            send_cot,
             fetch_ais_vessels,
+            fetch_adsb_aircraft,
             add_tile_path,
             remove_tile_path,
             list_tilesets,

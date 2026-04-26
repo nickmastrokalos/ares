@@ -10,6 +10,7 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use tower_http::cors::CorsLayer;
 
 pub const PORT: u16 = 3650;
 
@@ -144,7 +145,8 @@ pub fn start(registry: Registry) {
         let app = Router::new()
             .route("/{name}/{z}/{x}/{y}", get(serve_tile))
             .route("/tilesets",           get(serve_tilesets))
-            .with_state(registry);
+            .with_state(registry)
+            .layer(CorsLayer::permissive());
 
         let Ok(listener) = tokio::net::TcpListener::bind(
             format!("127.0.0.1:{PORT}")
@@ -195,8 +197,6 @@ async fn serve_tile(
             let mut headers = HeaderMap::new();
             headers.insert(header::CONTENT_TYPE,
                 HeaderValue::from_static(content_type));
-            headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN,
-                HeaderValue::from_static("*"));
             (headers, data).into_response()
         }
         // Empty tile — MapLibre handles 204 gracefully (renders nothing).

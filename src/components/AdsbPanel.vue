@@ -1,37 +1,21 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useAisStore } from '@/stores/ais'
+import { useAdsbStore } from '@/stores/adsb'
 import { useDraggable } from '@/composables/useDraggable'
 import { useZIndex } from '@/composables/useZIndex'
 
 const emit = defineEmits(['close'])
 
-const aisStore = useAisStore()
+const adsbStore = useAdsbStore()
 
 const positioned = ref(false)
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
 
-// Local draft inputs — committed on blur or save
-const draftUrl    = ref('')
-const draftApiKey = ref('')
-const showApiKey  = ref(false)
-
 onMounted(() => {
-  draftUrl.value    = aisStore.feedUrl
-  draftApiKey.value = aisStore.apiKey
-  pos.value         = { x: 12, y: 80 }
-  positioned.value  = true
+  pos.value        = { x: 12, y: 80 }
+  positioned.value = true
 })
-
-function commitConfig() {
-  const url = draftUrl.value.trim()
-  const key = draftApiKey.value.trim()
-  if (url !== aisStore.feedUrl)  aisStore.setFeedUrl(url)
-  if (key !== aisStore.apiKey)   aisStore.setApiKey(key)
-}
-
-// ---- Status helpers ----
 
 function formatLastFetch(date) {
   if (!date) return null
@@ -44,7 +28,7 @@ function formatLastFetch(date) {
 
 <template>
   <div
-    class="ais-panel"
+    class="adsb-panel"
     :style="{
       left: pos.x + 'px',
       top: pos.y + 'px',
@@ -55,9 +39,9 @@ function formatLastFetch(date) {
   >
     <!-- Header -->
     <div class="panel-header" @pointerdown="onPointerDown">
-      <v-icon size="14" class="text-medium-emphasis" style="flex-shrink:0">mdi-ferry</v-icon>
-      <span class="panel-title">AIS Feed</span>
-      <span v-if="aisStore.enabled" class="status-dot" :class="aisStore.loading ? 'status-dot--loading' : 'status-dot--active'" />
+      <v-icon size="14" class="text-medium-emphasis" style="flex-shrink:0">mdi-airplane</v-icon>
+      <span class="panel-title">ADS-B Feed</span>
+      <span v-if="adsbStore.enabled" class="status-dot" :class="adsbStore.loading ? 'status-dot--loading' : 'status-dot--active'" />
       <v-spacer />
       <v-btn
         icon="mdi-close"
@@ -72,42 +56,10 @@ function formatLastFetch(date) {
     <!-- Body -->
     <div class="panel-body">
 
-      <!-- Feed URL -->
-      <div class="field-label">FEED URL</div>
-      <input
-        v-model="draftUrl"
-        class="text-input"
-        type="url"
-        placeholder="https://aisfeed.com"
-        spellcheck="false"
-        autocomplete="off"
-        @blur="commitConfig"
-        @keydown.enter.prevent="commitConfig"
-        @pointerdown.stop
-      />
-
-      <!-- API Key -->
-      <div class="field-label mt">API KEY</div>
-      <div class="key-row">
-        <input
-          v-model="draftApiKey"
-          class="text-input key-input"
-          :type="showApiKey ? 'text' : 'password'"
-          placeholder="ais_..."
-          spellcheck="false"
-          autocomplete="off"
-          @blur="commitConfig"
-          @keydown.enter.prevent="commitConfig"
-          @pointerdown.stop
-        />
-        <button
-          class="eye-btn"
-          :title="showApiKey ? 'Hide key' : 'Show key'"
-          @pointerdown.stop
-          @click.stop="showApiKey = !showApiKey"
-        >
-          <v-icon size="14">{{ showApiKey ? 'mdi-eye-off-outline' : 'mdi-eye-outline' }}</v-icon>
-        </button>
+      <div class="hint">
+        Tracks provided via
+        <a href="https://airplanes.live" target="_blank" rel="noopener">airplanes.live</a>.
+        Polled at most once per 10 s; viewport radius is capped at 250 nm.
       </div>
 
       <div class="divider" />
@@ -117,8 +69,8 @@ function formatLastFetch(date) {
         <span class="toggle-label">Active</span>
         <button
           class="toggle-btn"
-          :class="{ 'toggle-btn--on': aisStore.enabled }"
-          @click="aisStore.setEnabled(!aisStore.enabled)"
+          :class="{ 'toggle-btn--on': adsbStore.enabled }"
+          @click="adsbStore.setEnabled(!adsbStore.enabled)"
         >
           <span class="toggle-knob" />
         </button>
@@ -128,8 +80,8 @@ function formatLastFetch(date) {
         <span class="toggle-label">Visible on map</span>
         <button
           class="toggle-btn"
-          :class="{ 'toggle-btn--on': aisStore.visible }"
-          @click="aisStore.setVisible(!aisStore.visible)"
+          :class="{ 'toggle-btn--on': adsbStore.visible }"
+          @click="adsbStore.setVisible(!adsbStore.visible)"
         >
           <span class="toggle-knob" />
         </button>
@@ -139,8 +91,8 @@ function formatLastFetch(date) {
         <span class="toggle-label">Heading arrows</span>
         <button
           class="toggle-btn"
-          :class="{ 'toggle-btn--on': aisStore.headingArrows }"
-          @click="aisStore.setHeadingArrows(!aisStore.headingArrows)"
+          :class="{ 'toggle-btn--on': adsbStore.headingArrows }"
+          @click="adsbStore.setHeadingArrows(!adsbStore.headingArrows)"
         >
           <span class="toggle-knob" />
         </button>
@@ -150,28 +102,28 @@ function formatLastFetch(date) {
         <span class="toggle-label">Heading breadcrumbs</span>
         <button
           class="toggle-btn"
-          :class="{ 'toggle-btn--on': aisStore.breadcrumbs }"
-          @click="aisStore.setBreadcrumbs(!aisStore.breadcrumbs)"
+          :class="{ 'toggle-btn--on': adsbStore.breadcrumbs }"
+          @click="adsbStore.setBreadcrumbs(!adsbStore.breadcrumbs)"
         >
           <span class="toggle-knob" />
         </button>
       </div>
 
       <!-- Status -->
-      <template v-if="aisStore.enabled">
+      <template v-if="adsbStore.enabled">
         <div class="divider" />
 
-        <div v-if="aisStore.fetchError" class="status-error">
+        <div v-if="adsbStore.fetchError" class="status-error">
           <v-icon size="13">mdi-alert-circle-outline</v-icon>
-          {{ aisStore.fetchError }}
+          {{ adsbStore.fetchError }}
         </div>
 
-        <div v-else-if="aisStore.lastFetch" class="status-ok">
+        <div v-else-if="adsbStore.lastFetch" class="status-ok">
           <v-icon size="13" class="text-medium-emphasis">mdi-check-circle-outline</v-icon>
-          {{ aisStore.vesselCount }} vessels · {{ formatLastFetch(aisStore.lastFetch) }}
+          {{ adsbStore.aircraftCount }} aircraft · {{ formatLastFetch(adsbStore.lastFetch) }}
         </div>
 
-        <div v-else-if="aisStore.loading" class="status-loading">
+        <div v-else-if="adsbStore.loading" class="status-loading">
           <v-progress-circular indeterminate size="12" width="1" color="primary" />
           Fetching…
         </div>
@@ -186,7 +138,7 @@ function formatLastFetch(date) {
 </template>
 
 <style scoped>
-.ais-panel {
+.adsb-panel {
   position: absolute;
   width: 260px;
   background: rgba(var(--v-theme-surface), 0.95);
@@ -195,8 +147,6 @@ function formatLastFetch(date) {
   overflow: hidden;
   user-select: none;
 }
-
-/* ---- Header ---- */
 
 .panel-header {
   display: flex;
@@ -221,7 +171,6 @@ function formatLastFetch(date) {
   flex-shrink: 0;
 }
 
-/* Active indicator dot in header */
 .status-dot {
   width: 6px;
   height: 6px;
@@ -243,80 +192,26 @@ function formatLastFetch(date) {
   to   { opacity: 1; }
 }
 
-/* ---- Body ---- */
-
 .panel-body {
   padding: 6px 8px 8px;
 }
 
-/* ---- Field labels ---- */
-
-.field-label {
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: rgba(var(--v-theme-on-surface), 0.38);
-  margin-bottom: 3px;
+.hint {
+  font-size: 10px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  line-height: 1.4;
 }
 
-.field-label.mt {
-  margin-top: 5px;
+.hint a {
+  color: rgba(var(--v-theme-on-surface), 0.75);
+  text-decoration: underline;
 }
-
-/* ---- Inputs ---- */
-
-.text-input {
-  width: 100%;
-  font-size: 11px;
-  font-family: monospace;
-  background: rgba(var(--v-theme-surface-variant), 0.4);
-  border: 1px solid rgb(var(--v-theme-surface-variant));
-  border-radius: 2px;
-  color: rgb(var(--v-theme-on-surface));
-  padding: 3px 6px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.text-input::placeholder {
-  color: rgba(var(--v-theme-on-surface), 0.3);
-}
-
-.key-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.key-input {
-  flex: 1;
-}
-
-.eye-btn {
-  background: none;
-  border: none;
-  padding: 2px;
-  cursor: pointer;
-  color: rgba(var(--v-theme-on-surface), 0.45);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
-.eye-btn:hover {
-  color: rgba(var(--v-theme-on-surface), 0.7);
-}
-
-/* ---- Divider ---- */
 
 .divider {
   height: 1px;
   background: rgb(var(--v-theme-surface-variant));
   margin: 6px 0;
 }
-
-/* ---- Toggle rows ---- */
 
 .toggle-row {
   display: flex;
@@ -360,8 +255,6 @@ function formatLastFetch(date) {
 .toggle-btn--on .toggle-knob {
   left: 17px;
 }
-
-/* ---- Status ---- */
 
 .status-ok,
 .status-error,
