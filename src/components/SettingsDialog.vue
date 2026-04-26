@@ -82,8 +82,8 @@ const trackBreadcrumbLength = computed({
   set: (v) => settingsStore.setSetting('trackBreadcrumbLength', v)
 })
 
-function breadcrumbLengthLabel(secs) {
-  return secs === 60 ? '1 min' : `${secs}s`
+function breadcrumbLengthLabel(meters) {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`
 }
 
 // ---- Offline maps ----
@@ -268,7 +268,7 @@ function formatBadge(ts) {
                 <div class="flex-grow-1">
                   <div class="text-body-2">Breadcrumb length</div>
                   <div class="text-caption text-medium-emphasis">
-                    How far back the trail extends.
+                    Fixed map distance — same visual length for every track type, regardless of speed.
                   </div>
                 </div>
                 <span class="text-body-2 length-value">
@@ -277,9 +277,9 @@ function formatBadge(ts) {
               </div>
               <v-slider
                 v-model="trackBreadcrumbLength"
-                :min="5"
-                :max="60"
-                :step="5"
+                :min="100"
+                :max="5000"
+                :step="100"
                 :disabled="!trackBreadcrumbs"
                 density="compact"
                 hide-details
