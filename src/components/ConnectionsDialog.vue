@@ -155,7 +155,7 @@ function formatListener(listener) {
     <v-card color="surface" rounded="sm" flat>
       <v-card-title class="d-flex align-center pa-3">
         <v-icon icon="mdi-access-point" size="20" class="me-2 text-medium-emphasis" />
-        <span class="text-body-1">CoT Listeners</span>
+        <span class="text-body-1">Connections</span>
         <v-spacer />
         <v-btn
           icon="mdi-close"
@@ -168,9 +168,9 @@ function formatListener(listener) {
 
       <v-divider />
 
-      <!-- Add new listener -->
+      <!-- Add new connection -->
       <div class="pa-3">
-        <div class="section-label mb-3">New Listener</div>
+        <div class="section-label mb-3">New Connection</div>
         <v-text-field
           v-model="newName"
           placeholder="Name"
@@ -265,6 +265,22 @@ function formatListener(listener) {
                 </v-list-item-action>
               </template>
               <template #append>
+                <v-icon
+                  v-if="listener.kind === 'tak-chat-messages' || listener.kind === 'tak-chat-announce'"
+                  icon="mdi-swap-vertical-variant"
+                  size="14"
+                  class="text-medium-emphasis me-1"
+                  :title="listener.kind === 'tak-chat-messages'
+                    ? 'Bidirectional — outbound chat goes through this connection'
+                    : 'Bidirectional — presence announces go out through this connection'"
+                />
+                <v-icon
+                  v-if="listener.protected"
+                  icon="mdi-shield-lock-outline"
+                  size="14"
+                  class="text-medium-emphasis me-1"
+                  title="System connection — editable but cannot be removed"
+                />
                 <v-btn
                   icon="mdi-pencil-outline"
                   size="x-small"
@@ -273,6 +289,7 @@ function formatListener(listener) {
                   @click="startEdit(index)"
                 />
                 <v-btn
+                  v-if="!listener.protected"
                   icon="mdi-close"
                   size="x-small"
                   variant="text"

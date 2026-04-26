@@ -20,6 +20,7 @@ const open = computed({
 const TABS = [
   { id: 'display', label: 'Display', icon: 'mdi-monitor-eye' },
   { id: 'tracks',  label: 'Tracks',  icon: 'mdi-radar' },
+  { id: 'network', label: 'Network', icon: 'mdi-lan' },
   { id: 'maps',    label: 'Maps',    icon: 'mdi-map-outline' },
   { id: 'plugins', label: 'Plugins', icon: 'mdi-puzzle-outline' }
 ]
@@ -85,6 +86,37 @@ const trackBreadcrumbLength = computed({
 function breadcrumbLengthLabel(meters) {
   return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`
 }
+
+// ---- TAK identity ----
+//
+// Chat outbound destination is derived from the protected
+// `tak-chat-messages` listener (configured in the Connections panel,
+// not duplicated here) so there's only one place to point at the
+// right multicast group.
+
+const selfCallsign = computed({
+  // Empty string surfaces as null in the store so "unset" stays
+  // distinguishable from a deliberate placeholder. The chat panel
+  // re-prompts the user if they clear it.
+  get: () => settingsStore.selfCallsign ?? '',
+  set: (v) => {
+    const trimmed = (v ?? '').trim()
+    settingsStore.setSetting('selfCallsign', trimmed || null)
+  }
+})
+
+function regenerateSelfUid() {
+  const uid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `ares-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+  settingsStore.setSetting('selfUid', uid)
+}
+
+const chatMessagesEndpoint = computed(() => {
+  const l = settingsStore.cotListeners.find(x => x.kind === 'tak-chat-messages')
+  if (!l) return '— not configured —'
+  return `${(l.protocol || 'udp').toUpperCase()} ${l.address}:${l.port}`
+})
 
 // ---- Offline maps ----
 
@@ -310,6 +342,62 @@ function formatBadge(ts) {
                 inset
               />
             </div>
+          </div>
+        </v-window-item>
+
+        <!-- ---- Network (TAK identity + chat) ---- -->
+        <v-window-item value="network">
+          <div class="pa-4">
+
+            <div class="text-overline mb-1">TAK Identity</div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Callsign and UID peers see when you send chat or other CoT.
+              The UID is generated on first run and persists across sessions.
+            </div>
+
+            <v-text-field
+              v-model="selfCallsign"
+              label="Callsign"
+              density="compact"
+              hide-details
+              variant="outlined"
+              spellcheck="false"
+              autocomplete="off"
+              class="mb-3"
+            />
+
+            <div class="d-flex align-center ga-2 mb-4">
+              <v-text-field
+                :model-value="settingsStore.selfUid ?? ''"
+                label="UID"
+                density="compact"
+                hide-details
+                variant="outlined"
+                readonly
+                class="flex-grow-1"
+                style="font-family: monospace;"
+              />
+              <v-btn
+                size="small"
+                variant="tonal"
+                @click="regenerateSelfUid"
+              >
+                Regenerate
+              </v-btn>
+            </div>
+
+            <v-divider class="my-3" />
+
+            <div class="text-overline mb-1">Network groups</div>
+            <div class="text-caption text-medium-emphasis">
+              GeoChat outbound is sent to whatever address is configured for
+              the <strong>GeoChat Messages</strong> listener (currently
+              <code>{{ chatMessagesEndpoint }}</code>). Edit it from the
+              Connections panel if your network uses a different multicast
+              group. The seeded TAK groups (Messages, Announce, SA Multicast)
+              can be retargeted or disabled but not deleted.
+            </div>
+
           </div>
         </v-window-item>
 

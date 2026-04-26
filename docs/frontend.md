@@ -328,11 +328,11 @@ Currently provided:
 - The selected basemap id is persisted via `settingsStore.selectedBasemap` and restored on map init.
 - `LayersPanel` is a floating draggable panel with Online and Offline tabs. Offline is scaffolded for a future map server integration.
 
-## CoT Listeners
+## Connections
 - Listener configuration is **global** (not mission-scoped) — persisted in the key-value settings store as `cotListeners`, an array of `{ name, address, port, protocol, enabled }` objects.
-- `ListenersDialog` is a modal dialog opened from the toolbar's `mdi-access-point` button. Users can add listeners (name, protocol, address, port), toggle individual listeners on/off, edit, and remove them.
+- `ConnectionsDialog` is a modal dialog opened from the toolbar's `mdi-access-point` button. Users can add listeners (name, protocol, address, port), toggle individual listeners on/off, edit, and remove them.
 - The settings store exposes `addCotListener`, `updateCotListener`, `removeCotListener`, and `toggleCotListener` helpers that mutate the array and persist in one step.
-- **Wiring to the backend:** `ListenersDialog` calls `invoke('start_listener', ...)` / `invoke('stop_listener', ...)` on toggle and remove. `MapView` starts all enabled listeners on map load and calls `invoke('stop_all_listeners')` on unmount.
+- **Wiring to the backend:** `ConnectionsDialog` calls `invoke('start_listener', ...)` / `invoke('stop_listener', ...)` on toggle and remove. `MapView` starts all enabled listeners on map load and calls `invoke('stop_all_listeners')` on unmount.
 - `useTracksStore.startListening()` wires the `cot-event` Tauri event to the track map and starts a 30-second stale-track pruning interval.
 
 ## Toolbar layout
@@ -342,7 +342,7 @@ Currently provided:
 - **Wide (`mdAndUp`, ≥960px):** flat buttons per group with vertical dividers — the default look. Four groups left-to-right: Annotation, Analysis, Operations, Feeds.
 - **Narrow (<960px):** each group collapses into a single icon button that opens a `v-menu` dropdown listing the group's tools. The group activator inherits the `toolbar-active` / `primary` colour when any of its tools is currently open, so state is still visible without opening the menu.
 - **Plugin buttons:** always rendered as a single `mdi-puzzle-outline` dropdown regardless of viewport width. Because plugins are unbounded in number, inlining them is never safe.
-- **Right cluster** (Import/Export, Listeners, Settings) and the **mission chevron** are always pinned and never collapse.
+- **Right cluster** (Import/Export, Connections, Settings) and the **mission chevron** are always pinned and never collapse.
 - The mission name is hidden on `smAndDown` (<600px) to reclaim horizontal space.
 
 When adding a new core tool, place it in the appropriate group in *both* the `v-if="mdAndUp"` flat section and the `v-else` collapsed `v-list` for that group.
@@ -382,6 +382,10 @@ Sticky-note style text pins the operator drops on the map (free text, colour, dr
 ## ADS-B feed
 
 Live aircraft positions from the free [airplanes.live](https://airplanes.live) REST API are documented in [adsb.md](./adsb.md). Toolbar entry is the `mdi-airplane` button in the Feeds group next to AIS; the `AdsbPanel` exposes three toggles (Active / Visible / Heading arrows) — there is no feed URL or API key since the endpoint is unauthenticated. Aircraft render in magenta (`#ff4081`) — outside the MIL-STD-2525 affiliation palette (Friend cyan, Hostile red, Neutral green, Unknown yellow) and distinct from AIS yellow. Click an aircraft to open an `AdsbTrackPanel` with hex / flight / altitude / track / squawk / vertical rate. Six assistant tools mirror the AIS set: `adsb_get_status`, `adsb_list_aircraft`, `adsb_aircraft_near`, `adsb_set_enabled`, `adsb_set_visible`, `adsb_set_heading_arrows`.
+
+## TAK GeoChat
+
+CoT-based chat with WinTAK / iTAK / ATAK is documented in [chat.md](./chat.md). Toolbar entry is the `mdi-chat-outline` button in the Feeds group; the `ChatPanel` is a draggable floating panel with an "All Chat Rooms" group thread + per-peer direct threads. Self identity (callsign + auto-generated UID) and the outbound chat destination live in Settings → Network. Outbound CoT goes through a new `send_cot` Tauri command (UDP only in v1); inbound chat events ride on the existing `cot-event` channel — `parse_cot` was extended to extract `<__chat>`, `<chatgrp>`, and `<remarks>` into optional fields on the event payload.
 
 ## Intercept
 

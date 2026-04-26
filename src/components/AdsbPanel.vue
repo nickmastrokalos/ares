@@ -57,7 +57,7 @@ function formatLastFetch(date) {
     <div class="panel-body">
 
       <div class="hint">
-        Free, key-less feed from
+        Tracks provided via
         <a href="https://airplanes.live" target="_blank" rel="noopener">airplanes.live</a>.
         Polled at most once per 10 s; viewport radius is capped at 250 nm.
       </div>
