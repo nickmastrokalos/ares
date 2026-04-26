@@ -52,6 +52,10 @@ Converts CoT types to MIL-STD-2525C SIDCs and renders them via the `milsymbol` l
 
 `settingsStore.milStdSymbology` (default `false`) is the single on/off switch. When enabled, typed manual tracks render as 2525 icons rather than colored circles. The toggle lives in the Display tab of the Settings dialog.
 
+### Pitch alignment
+
+Both the affiliation circle layer and the SIDC symbol layer (for CoT tracks and manual tracks alike) use `circle-pitch-alignment: 'map'` / `icon-pitch-alignment: 'map'`. When the user tilts the camera, icons lay flat on the map plane — matching the AIS / ADS-B feeds. Yaw alignment stays at the viewport default, so 2525 symbol orientation is preserved when the operator rotates the map. Labels remain billboards (viewport-aligned) so they stay readable at any pitch.
+
 ---
 
 ## CoT-Feed Tracks
