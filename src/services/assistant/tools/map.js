@@ -165,22 +165,33 @@ export function mapTools({ featuresStore, tracksStore, aisStore, settingsStore, 
 
         if (!allow || allow.has('feature')) {
           for (const f of featuresStore.features) {
-            const props = JSON.parse(f.properties)
-            const fname = props.name ?? props.callsign ?? f.type
-            if (fname.toLowerCase().includes(needle)) {
-              const entry = {
-                kind: 'feature',
-                id: f.id,
-                type: f.type,
-                name: fname,
-                color: props.color ?? DEFAULT_FEATURE_COLOR
-              }
-              if (f.type === 'manual-track') {
-                entry.affiliation = AFFIL_WORD[props.affiliation] ?? 'unknown'
-                if (props.cotType) entry.cotType = props.cotType
-              }
-              results.push(entry)
+            // Defensive: a malformed `properties` blob shouldn't kill the
+            // whole search loop. Skip the row and move on.
+            let props
+            try { props = JSON.parse(f.properties) }
+            catch { continue }
+            // Manual-track features carry user-typed identifiers in
+            // BOTH `props.name` and `props.callsign` depending on how
+            // they were created/renamed (the editing flow writes to
+            // `callsign`). Search every candidate so a match in any
+            // one wins; pick the most user-friendly one for the
+            // returned `name` (callsign first because that's what the
+            // user typed for manual tracks).
+            const candidates = [props.callsign, props.name, f.type].filter(s => typeof s === 'string' && s)
+            if (!candidates.some(s => s.toLowerCase().includes(needle))) continue
+            const fname = candidates[0]
+            const entry = {
+              kind: 'feature',
+              id: f.id,
+              type: f.type,
+              name: fname,
+              color: props.color ?? DEFAULT_FEATURE_COLOR
             }
+            if (f.type === 'manual-track') {
+              entry.affiliation = AFFIL_WORD[props.affiliation] ?? 'unknown'
+              if (props.cotType) entry.cotType = props.cotType
+            }
+            results.push(entry)
           }
         }
 

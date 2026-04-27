@@ -19,7 +19,10 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased'
+    version: 'unreleased',
+    fixed: [
+      'Assistant: `map_find_entity` now matches manual-track names whether the user-typed identifier lives in `props.name` or `props.callsign` (previously only the first field was searched, so renamed manual tracks could appear "missing" to the assistant).'
+    ]
   },
   {
     version: '1.1.3',
