@@ -19,7 +19,11 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased',
+    version: 'unreleased'
+  },
+  {
+    version: '1.1.4',
+    date: '2026-04-26',
     added: [
       'Plugins can place layers in the map stack via `api.map.addLayer({ ..., beforeId })`; `\'@bottom\'` is a sentinel for "just above the basemap, below all host content".'
     ],
