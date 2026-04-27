@@ -14,7 +14,11 @@ A toolbar button or other registered UI appears immediately on enable, and is to
 
 ### Installing a packaged plugin
 
-If you received a plugin as a `.zip` (the format `pnpm package` produces), you don't have to extract it yourself. Drop the `.zip` directly into the Ares plugins folder and restart — the host extracts it on launch into a folder of the same name and renames the source to `*.zip.installed` so it isn't re-extracted on every startup. To update later, drop in the new `.zip` and restart; files inside the archive overwrite the previously-extracted files.
+If you received a plugin as a `.zip` (the format `pnpm package` produces), you don't have to extract it yourself.
+
+**Easiest path** — drag the `.zip` from Finder / Explorer onto the Ares map window. The host shows a "Drop to install plugin" overlay; release to install. The zip is copied into the plugins folder, extracted in place, and the plugin appears in Settings → Plugins immediately (toggled off — turn it on to activate). A snackbar reports success or any errors.
+
+**Equivalent manual path** — drop the `.zip` directly into the Ares plugins folder and restart. Either way, the host extracts it into a folder of the same name and renames the source to `*.zip.installed` so it isn't re-extracted on every startup. To update later, drop in the new `.zip` (drag-drop or manual); files inside the archive overwrite the previously-extracted files.
 
 > **Single-file plugins** (a bare `.js` file directly in the plugins folder, no directory) are also supported as a convenience for simple scripts.
 

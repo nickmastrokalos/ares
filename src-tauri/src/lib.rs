@@ -228,6 +228,7 @@ pub fn run() {
             list_tilesets,
             plugins::list_plugin_files,
             plugins::read_plugin_file,
+            plugins::install_plugin_zip,
             scenes::commands::scene_data_fetch_batch,
             assistant::commands::assistant_chat,
         ])
