@@ -227,7 +227,7 @@ function formatBadge(ts) {
 </script>
 
 <template>
-  <v-dialog v-model="open" max-width="560">
+  <v-dialog v-model="open" max-width="640">
     <v-card color="surface" rounded="sm" flat>
       <v-card-title class="d-flex align-center pa-3">
         <v-icon icon="mdi-cog-outline" size="20" class="me-2 text-medium-emphasis" />
@@ -433,23 +433,22 @@ function formatBadge(ts) {
         <v-window-item value="network">
           <div class="pa-4">
 
-            <div class="d-flex align-center mb-3">
-              <div class="flex-grow-1">
-                <div class="text-body-2">TAK comms active</div>
-                <div class="text-caption text-medium-emphasis">
-                  Master switch for outbound traffic. When off, Ares does not
-                  emit presence announces or chat messages. Inbound listeners
-                  stay running so peer broadcasts still populate the track
-                  list.
-                </div>
-              </div>
+            <div class="d-flex align-center mb-1">
+              <div class="text-body-2 flex-grow-1">TAK comms active</div>
               <v-switch
                 v-model="takActive"
                 color="primary"
                 density="compact"
                 hide-details
                 inset
+                class="flex-shrink-0 ma-0"
               />
+            </div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Master switch for outbound traffic. When off, Ares does not
+              emit presence announces or chat messages. Inbound listeners
+              stay running so peer broadcasts still populate the track
+              list.
             </div>
 
             <v-divider class="my-3" />
