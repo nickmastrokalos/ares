@@ -14,6 +14,39 @@
 
 use std::net::Ipv4Addr;
 
+/// Best-effort guess at the host's LAN IPv4 address — the address
+/// to advertise on `<contact endpoint>` so peers know where to
+/// unicast direct chat. Returns `None` when the only addresses
+/// available are loopback / link-local / virtual.
+///
+/// Heuristic: pick the first non-loopback, non-link-local, non-CGNAT
+/// IPv4 interface. CGNAT (100.64.0.0/10) is excluded because Tailscale
+/// and similar overlays land there and aren't typically the right
+/// answer for LAN TAK peers. If no interface meets that bar, fall
+/// back to the first non-loopback IPv4 we find (better than nothing).
+#[tauri::command]
+pub fn get_lan_ipv4() -> Option<String> {
+    let addrs = if_addrs::get_if_addrs().ok()?;
+    let mut candidates: Vec<Ipv4Addr> = addrs.into_iter().filter_map(|i| match i.addr {
+        if_addrs::IfAddr::V4(v) => Some(v.ip),
+        _ => None,
+    }).collect();
+    candidates.sort();
+    candidates.dedup();
+
+    let is_cgnat = |ip: &Ipv4Addr| {
+        let o = ip.octets();
+        o[0] == 100 && (o[1] >= 64 && o[1] <= 127)
+    };
+
+    for ip in &candidates {
+        if !ip.is_loopback() && !ip.is_link_local() && !is_cgnat(ip) {
+            return Some(ip.to_string());
+        }
+    }
+    candidates.into_iter().find(|ip| !ip.is_loopback()).map(|ip| ip.to_string())
+}
+
 /// Send a single CoT payload to `address:port` over UDP.
 ///
 /// For *multicast* destinations we send the same packet on every

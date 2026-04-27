@@ -192,11 +192,32 @@ export const useChatStore = defineStore('chat', () => {
     )
     if (!targets.length) return
 
+    // Build a real `<contact endpoint>` value from our LAN IP + the
+    // chat-messages port. ATAK / WinTAK treat the legacy `*:-1:stcp`
+    // placeholder as "no endpoint, peer not eligible for direct
+    // chat" — we want them to direct-message us, so we advertise
+    // a unicast UDP address that our `0.0.0.0:<port>` listener
+    // already accepts. Falls back to the placeholder when the IP
+    // lookup fails (e.g. no non-loopback interface yet).
+    let endpoint = '*:-1:stcp'
+    try {
+      const lanIp = await invoke('get_lan_ipv4')
+      const chatMsgs = settingsStore.cotListeners.find(l => l.kind === 'tak-chat-messages')
+      const chatPort = chatMsgs?.port
+      if (lanIp && chatPort) {
+        endpoint = `${lanIp}:${chatPort}:udp`
+      }
+    } catch {
+      // Stay with the placeholder; broadcast still goes out, peers
+      // just won't be able to direct-message us.
+    }
+
     const xml = composeAnnounceXml({
       selfUid:      uid,
       selfCallsign: callsign,
       selfCotType:  settingsStore.selfCotType ?? undefined,
-      selfLocation: settingsStore.selfLocation ?? null
+      selfLocation: settingsStore.selfLocation ?? null,
+      endpoint
     })
 
     for (const t of targets) {
