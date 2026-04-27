@@ -178,29 +178,40 @@ export const useChatStore = defineStore('chat', () => {
     const uid      = settingsStore.selfUid
     if (!callsign || !uid) return
 
-    const announceListener = settingsStore.cotListeners.find(
-      l => l.kind === 'tak-chat-announce'
+    // Send the same presence announce to BOTH the chat-announce group
+    // AND the SA group. ATAK / WinTAK track contact liveness primarily
+    // off the SA bus (239.2.3.1:6969 by default); a peer that only
+    // shows on the chat-announce group is listed in their contacts but
+    // marked stale (the "dotted circle" in WinTAK's contact list),
+    // which disables direct chat to that peer. Mesh-mode TAK clients
+    // dual-publish to both groups for exactly this reason.
+    const targets = settingsStore.cotListeners.filter(l =>
+      (l.kind === 'tak-chat-announce' || l.kind === 'tak-sa') &&
+      l.enabled !== false &&
+      l.address && l.port
     )
-    if (!announceListener?.address || !announceListener?.port) return
-    if (announceListener.enabled === false) return
+    if (!targets.length) return
 
-    try {
-      const xml = composeAnnounceXml({
-        selfUid:      uid,
-        selfCallsign: callsign,
-        selfCotType:  settingsStore.selfCotType ?? undefined,
-        selfLocation: settingsStore.selfLocation ?? null
-      })
-      await invoke('send_cot', {
-        address:  announceListener.address,
-        port:     announceListener.port,
-        protocol: announceListener.protocol || 'udp',
-        xml
-      })
-    } catch (err) {
-      // Non-fatal — silently retry next tick. Surface in dev console only.
-      // eslint-disable-next-line no-console
-      console.warn('[chat] announce broadcast failed:', err)
+    const xml = composeAnnounceXml({
+      selfUid:      uid,
+      selfCallsign: callsign,
+      selfCotType:  settingsStore.selfCotType ?? undefined,
+      selfLocation: settingsStore.selfLocation ?? null
+    })
+
+    for (const t of targets) {
+      try {
+        await invoke('send_cot', {
+          address:  t.address,
+          port:     t.port,
+          protocol: t.protocol || 'udp',
+          xml
+        })
+      } catch (err) {
+        // Non-fatal — silently retry next tick. Surface in dev console only.
+        // eslint-disable-next-line no-console
+        console.warn(`[chat] announce broadcast failed for ${t.kind}:`, err)
+      }
     }
   }
 
