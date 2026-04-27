@@ -78,8 +78,14 @@ export function composeAnnounceXml({
   // `0.0.0.0:<port>` listener already accepts.
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    // `how="h-e"` — HUMAN, ESTIMATED. The operator selects their
+    // location off the map (or types lat/lon in Settings → Network)
+    // rather than reading from a GPS device, so the position is
+    // human-entered and estimated. `m-g` (MACHINE / GPS) would be a
+    // small lie and some TAK clients use the `how` value as a hint
+    // when rendering peers (machine-reported vs human-reported).
     `<event version="2.0" uid="${escapeXml(selfUid)}" type="${escapeXml(selfCotType)}" ` +
-    `how="m-g" time="${time}" start="${time}" stale="${stale}">` +
+    `how="h-e" time="${time}" start="${time}" stale="${stale}">` +
       `<point lat="${lat}" lon="${lon}" hae="9999999.0" ce="9999999.0" le="9999999.0"/>` +
       `<detail>` +
         `<contact callsign="${escapeXml(selfCallsign)}" endpoint="${escapeXml(endpoint)}"/>` +
