@@ -168,6 +168,21 @@ const state = api.map.getState()
 api.map.onMove((state) => { /* fired on moveend */ })
 api.map.onZoom((state) => { /* fired on zoomend */ })
 // Both return unregister functions; auto-cleaned on deactivation.
+
+// Register a sprite image with the map's style so it can be referenced
+// from `icon-image` in symbol layers. Useful when you want to avoid
+// `text-field` entirely — `text-field` triggers fetches against the
+// host's glyph server for codepoints not handled by the local-emoji
+// fallback, which may not be available in offline / air-gapped
+// deployments. With `addImage` you can bake every glyph into a
+// canvas-rendered PNG and reference it as an icon, keeping your
+// plugin fully self-contained.
+const removeImage = api.map.addImage('my-icon', canvasOrImage, {
+  pixelRatio: 2          // optional; same options as MapLibre's addImage
+})
+removeImage()            // unregister; image is also auto-removed on disable
+
+api.map.removeImage('my-icon')   // imperative form
 ```
 
 ### UI registration — toolbar buttons

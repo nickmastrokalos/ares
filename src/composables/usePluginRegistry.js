@@ -41,6 +41,8 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   //
   // Map<pluginId, Set<layerId>>
   const _layers   = new Map()
+  // Map<pluginId, Set<imageId>> — sprites registered via api.map.addImage
+  const _images   = new Map()
   // Map<pluginId, Array<{ event, handler, mapHandler }>>
   const _events   = new Map()
   // Map<panelId, panelDef> — global, but each entry carries its owner pluginId.
@@ -63,6 +65,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     const cleanups = []
     _cleanups.set(manifest.id, cleanups)
     if (!_layers.has(manifest.id)) _layers.set(manifest.id, new Set())
+    if (!_images.has(manifest.id)) _images.set(manifest.id, new Set())
     if (!_events.has(manifest.id)) _events.set(manifest.id, [])
 
     function _captureMapState() {
@@ -211,7 +214,47 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
 
         getState: _captureMapState,
         onMove:   (handler) => _onMapEvent('moveend', handler),
-        onZoom:   (handler) => _onMapEvent('zoomend', handler)
+        onZoom:   (handler) => _onMapEvent('zoomend', handler),
+
+        // Register a sprite image with the map's style so it can be
+        // referenced from `icon-image` in symbol layers — useful for
+        // plugins that want to avoid `text-field` (which triggers
+        // glyph-server fetches) in favour of self-contained PNGs they
+        // bake themselves via canvas.
+        //
+        // `image` accepts anything MapLibre's `map.addImage` does:
+        // HTMLImageElement, HTMLCanvasElement, ImageBitmap, ImageData,
+        // or { width, height, data: Uint8Array }. `options` passes
+        // through (`pixelRatio`, `sdf`, `content`, `stretchX/Y`).
+        //
+        // Returns an unregister fn (consistent with addLayer). All
+        // images are also auto-removed on plugin deactivation.
+        addImage(id, image, options = {}) {
+          const map = getMap()
+          if (!map) throw new Error('Map not ready yet.')
+          if (!id || typeof id !== 'string') throw new Error('addImage: id is required')
+          if (map.hasImage(id)) {
+            throw new Error(`addImage: id "${id}" already in use`)
+          }
+          map.addImage(id, image, options)
+          _images.get(manifest.id).add(id)
+          const unregister = () => {
+            const m = getMap()
+            if (m && m.hasImage(id)) m.removeImage(id)
+            _images.get(manifest.id)?.delete(id)
+          }
+          cleanups.push(unregister)
+          return unregister
+        },
+
+        // Imperative removal — use the unregister fn returned by
+        // addImage instead when possible. Provided for symmetry and
+        // for cases where the plugin loses the unregister reference.
+        removeImage(id) {
+          const map = getMap()
+          if (map && map.hasImage(id)) map.removeImage(id)
+          _images.get(manifest.id)?.delete(id)
+        }
       },
 
       // ---- UI ----
@@ -326,11 +369,19 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
           console.warn(`[plugin-registry] Failed to remove layer "${layerId}":`, e)
         }
       }
+      for (const imageId of _images.get(id) ?? []) {
+        try {
+          if (map.hasImage(imageId)) map.removeImage(imageId)
+        } catch (e) {
+          console.warn(`[plugin-registry] Failed to remove image "${imageId}":`, e)
+        }
+      }
       for (const { event, mapHandler } of _events.get(id) ?? []) {
         try { map.off(event, mapHandler) } catch { /* ignore */ }
       }
     }
     _layers.delete(id)
+    _images.delete(id)
     _events.delete(id)
 
     // Remove any orphan panels owned by this plugin and drop them from the
