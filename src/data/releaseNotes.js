@@ -25,7 +25,8 @@ export const RELEASES = [
     version: '1.1.4',
     date: '2026-04-26',
     added: [
-      'Plugins can place layers in the map stack via `api.map.addLayer({ ..., beforeId })`; `\'@bottom\'` is a sentinel for "just above the basemap, below all host content".'
+      'Plugins can place layers in the map stack via `api.map.addLayer({ ..., beforeId })`; `\'@bottom\'` is a sentinel for "just above the basemap, below all host content".',
+      'Plugin install: drop a packaged `.zip` directly into the plugins folder. The host extracts it on next launch and renames the source to `*.zip.installed`. Updating is one drop-in too.'
     ],
     fixed: [
       'Assistant: `map_find_entity` now matches manual-track names whether the user-typed identifier lives in `props.name` or `props.callsign` (previously only the first field was searched, so renamed manual tracks could appear "missing" to the assistant).'
