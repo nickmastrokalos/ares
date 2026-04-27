@@ -163,6 +163,70 @@ fn with_extension(path: &Path, ext: &str) -> PathBuf {
     parent.join(name)
 }
 
+/// Install a plugin from a `.zip` outside the plugins directory
+/// (typically a path delivered by Tauri's drag-drop event when the
+/// user drags an archive onto the window). Copies the zip into the
+/// plugins folder, extracts it in place, then renames the source to
+/// `*.zip.installed` so it isn't re-extracted on subsequent
+/// launches. Returns the destination path of the extracted folder
+/// (or single .js file) so the frontend can refresh its plugin list.
+#[tauri::command]
+pub fn install_plugin_zip(
+    source: String,
+    app: tauri::AppHandle,
+) -> Result<InstallResult, String> {
+    let source_path = PathBuf::from(&source);
+    if !source_path.is_file() {
+        return Err(format!("Source is not a file: {}", source_path.display()));
+    }
+    if source_path.extension().and_then(|e| e.to_str()) != Some("zip") {
+        return Err("Only .zip plugin archives are supported".to_string());
+    }
+
+    let plugins_dir = resolve_plugins_dir(&app)?;
+    std::fs::create_dir_all(&plugins_dir)
+        .map_err(|e| format!("Failed to create plugins directory: {e}"))?;
+
+    let basename = source_path
+        .file_name()
+        .ok_or_else(|| "Source path has no filename".to_string())?;
+    let dest = plugins_dir.join(basename);
+
+    // Copy in. If a same-named zip is already present (e.g. the user
+    // drops in a re-download), overwrite it; the next step extracts
+    // into the same target dir, which is the intended behavior.
+    std::fs::copy(&source_path, &dest)
+        .map_err(|e| format!("Failed to copy zip into plugins folder: {e}"))?;
+
+    if let Err(e) = extract_zip(&dest, &plugins_dir) {
+        // Clean up the partially-installed copy so the next launch
+        // doesn't try to extract a broken archive.
+        let _ = std::fs::remove_file(&dest);
+        return Err(format!("Failed to extract: {e}"));
+    }
+
+    let installed = with_extension(&dest, "installed");
+    if let Err(e) = std::fs::rename(&dest, &installed) {
+        eprintln!(
+            "[plugin-loader] extracted {} but couldn't rename to .installed: {e}",
+            dest.display()
+        );
+    }
+
+    Ok(InstallResult {
+        archive: installed.to_string_lossy().into_owned(),
+        installed_at: plugins_dir.to_string_lossy().into_owned(),
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct InstallResult {
+    /// Renamed-source path, e.g. `<plugins>/weather-0.3.0.zip.installed`.
+    pub archive: String,
+    /// Plugins directory the archive was extracted into.
+    pub installed_at: String,
+}
+
 #[tauri::command]
 pub fn read_plugin_file(path: String, app: tauri::AppHandle) -> Result<String, String> {
     let plugins_dir = resolve_plugins_dir(&app)?;
