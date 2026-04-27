@@ -19,7 +19,11 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased',
+    version: 'unreleased'
+  },
+  {
+    version: '1.1.3',
+    date: '2026-04-26',
     added: [
       'Plugins can register custom sprite icons (`api.map.addImage`) for fully offline-friendly map symbology.',
       'Plugins can expose tools to the AI assistant (`api.tools.register`); auto-prefixed names, same confirm-card flow as built-in tools.'

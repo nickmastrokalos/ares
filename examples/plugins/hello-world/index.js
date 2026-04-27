@@ -25,10 +25,11 @@ export default {
   id:             'com.example.hello-world',
   name:           'Hello World',
   version:        '1.1.0',
-  // Uses api.registerPanel, api.settings, api.map.addLayer / onMove —
-  // all 1.1.2 surfaces. Older hosts will refuse to activate this plugin
-  // and surface the version mismatch in Settings → Plugins.
-  minHostVersion: '1.1.2',
+  // Uses api.registerPanel, api.settings, api.map.addLayer / onMove
+  // (1.1.2) and api.tools.register (1.1.3). Older hosts will refuse to
+  // activate this plugin and surface the version mismatch in
+  // Settings → Plugins.
+  minHostVersion: '1.1.3',
 
   async activate(api) {
     api.log('Plugin activated.')
