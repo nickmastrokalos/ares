@@ -473,13 +473,18 @@ function formatTs(iso) {
 
 .room-unread {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: rgb(var(--v-theme-primary));
   color: rgb(var(--v-theme-on-primary));
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 8px;
-  min-width: 16px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  min-width: 20px;
+  height: 18px;
   text-align: center;
 }
 
