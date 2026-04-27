@@ -23,6 +23,9 @@ export const RELEASES = [
     added: [
       'TAK Protocol v1 (binary protobuf) on UDP mesh — bidirectional. Inbound: WinTAK presence + GeoChat now appear in Ares alongside XML peers. Outbound: Ares transcodes its own announces and chat to v1 binary so strict WinTAK builds (which silently drop XML inbound) finally see us.'
     ],
+    changed: [
+      'TAK comms `Active` toggle no longer persists across app restarts — outbound CoT is off by default on every launch and the operator opts in explicitly per session. Inbound listeners still run regardless.'
+    ],
     fixed: [
       'Track list no longer ingests chat events as Null-Island ghosts. The store now requires `cot_type` to start with `a-` (atom / unit), filtering out `b-t-f` chat and other non-track CoT kinds that previously slipped through on TAK Protocol v1 packets.'
     ]
