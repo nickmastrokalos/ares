@@ -141,11 +141,27 @@ pub fn encode_xml_to_v1(xml: &str) -> Result<Vec<u8>, String> {
     let group = extras.group.map(|(name, role)| proto::Group { name, role });
     let status = extras.battery.map(|battery| proto::Status { battery });
 
+    // For announces, `event.uid` IS the sender's UID and `event.callsign`
+    // IS the sender's display name — that's how the XML is shaped.
+    // For chat events, `event.uid` is a per-message string
+    // (`GeoChat.<sender>.<room>.<msgid>`) and the actual sender lives in
+    // the chat detail blocks: `<link uid=…>` and `<__chat senderCallsign=…>`.
+    // WinTAK's chat router demuxes by `TakControl.contact_uid` and renders
+    // peers by `Detail.contact.callsign`, so we MUST send the sender —
+    // not the per-message uid — in both. Prefer the chat-sender fields
+    // whenever they're populated; for non-chat events those Options are
+    // None and we fall through to the event-level values.
+    let sender_uid = event.chat_sender_uid.clone().unwrap_or_else(|| event.uid.clone());
+    let sender_callsign = event
+        .chat_sender_callsign
+        .clone()
+        .unwrap_or_else(|| event.callsign.clone());
+
     let msg = proto::TakMessage {
         tak_control: Some(proto::TakControl {
             min_proto_version: 1,
             max_proto_version: 1,
-            contact_uid: event.uid.clone(),
+            contact_uid: sender_uid,
         }),
         cot_event: Some(proto::CotEvent {
             r#type:     event.cot_type,
@@ -177,7 +193,7 @@ pub fn encode_xml_to_v1(xml: &str) -> Result<Vec<u8>, String> {
                     } else {
                         extras.endpoint
                     },
-                    callsign: event.callsign,
+                    callsign: sender_callsign,
                 }),
                 group,
                 precision_location: None,

@@ -16,6 +16,14 @@ use std::net::Ipv4Addr;
 
 /// Send a single CoT payload to `address:port` over UDP.
 ///
+/// For *multicast* destinations we send the same packet on every
+/// non-loopback IPv4 interface the host advertises. Multicast egress
+/// is otherwise OS-selected from the routing table — on macOS that's
+/// often a VPN / virtual adapter rather than the LAN interface where
+/// TAK peers actually live, so a `0.0.0.0:0`-bound send goes
+/// somewhere Wireshark and WinTAK both don't see. Sending on every
+/// V4 interface is the same robustness trick most TAK clients use.
+///
 /// The frontend always composes XML; we transcode it to TAK Protocol
 /// v1 binary on the way out so strict WinTAK builds (which silently
 /// drop XML inbound on the standard mesh groups) receive us in their
@@ -27,9 +35,6 @@ use std::net::Ipv4Addr;
 /// transcode (parse failure, encode failure) so the legacy path
 /// stays operational. Logs a single line so the failure is visible
 /// in stderr without spamming the channel.
-///
-/// Binds an ephemeral local socket, sends one datagram, drops the socket.
-/// For multicast destinations the socket's TTL is set to 1 (local segment).
 pub async fn send_udp(address: &str, port: u16, xml: &str) -> Result<(), String> {
     let payload: Vec<u8> = match crate::tak_v1::encode_xml_to_v1(xml) {
         Ok(bytes) => bytes,
@@ -39,23 +44,93 @@ pub async fn send_udp(address: &str, port: u16, xml: &str) -> Result<(), String>
         }
     };
 
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| format!("bind: {e}"))?;
-
-    if let Ok(addr) = address.parse::<Ipv4Addr>() {
-        if addr.is_multicast() {
-            socket
-                .set_multicast_ttl_v4(1)
-                .map_err(|e| format!("multicast ttl: {e}"))?;
-        }
-    }
-
     let target = format!("{address}:{port}");
-    socket
-        .send_to(&payload, &target)
+    let parsed = address.parse::<Ipv4Addr>().ok();
+    let is_multicast = parsed.map(|a| a.is_multicast()).unwrap_or(false);
+
+    if is_multicast {
+        // Enumerate every non-loopback IPv4 interface and send on each.
+        // OS-default multicast egress on macOS often picks the wrong
+        // adapter (default route ≠ TAK LAN). Empty list → fall back to
+        // 0.0.0.0:0 which lets the OS pick (better than failing).
+        let mut interfaces: Vec<Ipv4Addr> = if_addrs::get_if_addrs()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i.addr {
+                if_addrs::IfAddr::V4(v) if !v.ip.is_loopback() && !v.ip.is_link_local()
+                    => Some(v.ip),
+                _ => None,
+            })
+            .collect();
+        interfaces.sort();
+        interfaces.dedup();
+
+        if interfaces.is_empty() {
+            return send_via(None, &target, &payload, true).await;
+        }
+
+        let mut sent_any = false;
+        let mut last_err: Option<String> = None;
+        for iface in &interfaces {
+            match send_via(Some(*iface), &target, &payload, true).await {
+                Ok(()) => sent_any = true,
+                Err(e) => {
+                    eprintln!("[cot] → {target} via {iface} FAILED: {e}");
+                    last_err = Some(e);
+                }
+            }
+        }
+        if !sent_any {
+            return Err(last_err.unwrap_or_else(|| "no interfaces sent".into()));
+        }
+        Ok(())
+    } else {
+        // Unicast: bind to all-interfaces, OS routing picks correctly.
+        send_via(None, &target, &payload, false).await
+    }
+}
+
+/// Bind a UDP socket — to a specific local interface IP if `iface` is
+/// `Some`, otherwise to `0.0.0.0:0` and let the OS choose — and send
+/// `payload` to `target`. For multicast destinations, sets TTL=1
+/// (local segment); the bound source IP also tells the kernel which
+/// interface to egress on.
+async fn send_via(
+    iface: Option<Ipv4Addr>,
+    target: &str,
+    payload: &[u8],
+    is_multicast: bool,
+) -> Result<(), String> {
+    let bind = match iface {
+        Some(ip) => format!("{ip}:0"),
+        None     => "0.0.0.0:0".to_string(),
+    };
+    let socket = tokio::net::UdpSocket::bind(&bind)
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| format!("bind {bind}: {e}"))?;
+    if is_multicast {
+        // TTL=64 matches what ATAK / WinTAK use on the wire (verified
+        // from a captured WinTAK announce: IP-header TTL byte = 0x40).
+        // TTL=1 (the "stay on local segment" default) silently drops
+        // outbound at the first router — fine when every peer is on
+        // the same broadcast domain, broken on any deployment that
+        // routes multicast between subnets, which is the common TAK
+        // setup.
+        socket
+            .set_multicast_ttl_v4(64)
+            .map_err(|e| format!("multicast ttl: {e}"))?;
+    }
+    let where_ = iface.map(|i| i.to_string()).unwrap_or_else(|| "0.0.0.0".into());
+    eprintln!(
+        "[cot] → {target} via {where_} ({} B, head: {})",
+        payload.len(),
+        payload.iter().take(16).map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(" ")
+    );
+    let bytes_sent = socket
+        .send_to(payload, target)
+        .await
+        .map_err(|e| format!("send via {where_}: {e}"))?;
+    eprintln!("[cot] → {target} via {where_} sent {bytes_sent} B");
     Ok(())
 }
 
