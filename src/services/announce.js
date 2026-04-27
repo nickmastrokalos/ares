@@ -62,6 +62,8 @@ export function composeAnnounceXml({
   selfLocation = null,
   appVersion   = '1.x',
   endpoint     = '*:-1:stcp',
+  team         = 'Cyan',
+  role         = 'Team Member',
   now          = new Date()
 }) {
   const time  = iso(now)
@@ -89,7 +91,7 @@ export function composeAnnounceXml({
       `<point lat="${lat}" lon="${lon}" hae="9999999.0" ce="9999999.0" le="9999999.0"/>` +
       `<detail>` +
         `<contact callsign="${escapeXml(selfCallsign)}" endpoint="${escapeXml(endpoint)}"/>` +
-        `<__group name="Cyan" role="Team Member"/>` +
+        `<__group name="${escapeXml(team)}" role="${escapeXml(role)}"/>` +
         `<takv platform="Ares" version="${escapeXml(appVersion)}" device="Ares" os="Tauri"/>` +
         `<status readiness="true"/>` +
         `<uid Droid="${escapeXml(selfCallsign)}"/>` +

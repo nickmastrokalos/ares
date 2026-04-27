@@ -217,6 +217,8 @@ export const useChatStore = defineStore('chat', () => {
       selfCallsign: callsign,
       selfCotType:  settingsStore.selfCotType ?? undefined,
       selfLocation: settingsStore.selfLocation ?? null,
+      team:         settingsStore.selfTeam ?? undefined,
+      role:         settingsStore.selfRole ?? undefined,
       endpoint
     })
 
@@ -268,7 +270,12 @@ export const useChatStore = defineStore('chat', () => {
   // for the next 60 s tick. Skipped if we're not yet announcing
   // (callsign + UID not set, listener not started).
   watch(
-    () => [settingsStore.selfCotType, settingsStore.selfLocation],
+    () => [
+      settingsStore.selfCotType,
+      settingsStore.selfLocation,
+      settingsStore.selfTeam,
+      settingsStore.selfRole
+    ],
     () => { if (announceTimer) broadcastAnnounce() },
     { deep: true }
   )
