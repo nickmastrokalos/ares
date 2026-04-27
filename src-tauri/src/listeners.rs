@@ -1,8 +1,39 @@
 use std::collections::HashMap;
+use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tauri::async_runtime::JoinHandle;
 
 use crate::cot::parse_cot;
+
+/// How inbound bytes from a listener are routed.
+///
+/// `Cot` — bytes go through `parse_cot` and the resulting `CotEvent`
+/// is emitted on the `cot-event` channel. The host's tracks / chat /
+/// ais / adsb / etc. stores already subscribe.
+///
+/// `Raw { kind }` — bytes are emitted as-is on the `connection-packet`
+/// channel, tagged with the connection's `kind` so a frontend
+/// dispatcher can route the bytes to the right plugin's `onPacket`.
+#[derive(Clone)]
+pub enum Parser {
+    Cot,
+    Raw { kind: String },
+}
+
+/// Payload of the `connection-packet` event emitted by raw-mode
+/// listeners. The `kind` lets the frontend dispatcher map bytes back
+/// to the right plugin without knowing addresses; `source_ip` /
+/// `source_port` matter for plugins that talk to multiple peers
+/// over the same multicast group (drone telemetry, mostly).
+#[derive(Serialize, Clone)]
+pub struct ConnectionPacket {
+    pub kind:        String,
+    pub address:     String,
+    pub port:        u16,
+    pub bytes:       Vec<u8>,
+    pub source_ip:   String,
+    pub source_port: u16,
+}
 
 /// Manages active UDP/TCP CoT listener tasks.
 ///
@@ -19,15 +50,19 @@ impl ListenerManager {
         }
     }
 
-    /// Start a UDP listener bound to `address:port`. Emits `cot-event` for
-    /// every successfully parsed CoT message. If a listener already exists
-    /// for this address:port it is stopped and replaced.
+    /// Start a UDP listener bound to `address:port`. The `parser`
+    /// argument decides how received bytes are routed:
+    ///   - `Parser::Cot` → `parse_cot` then emit `cot-event` (legacy behavior)
+    ///   - `Parser::Raw { kind }` → emit `connection-packet` with the bytes
+    ///
+    /// If a listener already exists for this address:port it is stopped
+    /// and replaced.
     ///
     /// When `address` is an IPv4 multicast address (`224.0.0.0/4`) the socket
     /// is bound to `0.0.0.0:port` and the OS is told to join the multicast
     /// group via `IP_ADD_MEMBERSHIP` / `join_multicast_v4`. Without this the
     /// kernel silently drops all inbound multicast packets.
-    pub fn start_udp(&mut self, address: String, port: u16, app: AppHandle) {
+    pub fn start_udp(&mut self, address: String, port: u16, parser: Parser, app: AppHandle) {
         let key = format!("{address}:{port}");
         self.stop(&key);
 
@@ -133,32 +168,48 @@ impl ListenerManager {
             let mut buf = vec![0u8; 65536];
             loop {
                 match socket.recv_from(&mut buf).await {
-                    Ok((len, _peer)) => {
+                    Ok((len, peer)) => {
                         let data = &buf[..len];
-                        match parse_cot(data) {
-                            Ok(event) => {
-                                if let Err(e) = app.emit("cot-event", &event) {
-                                    eprintln!("[cot] emit error: {e}");
+                        match &parser {
+                            Parser::Cot => match parse_cot(data) {
+                                Ok(event) => {
+                                    if let Err(e) = app.emit("cot-event", &event) {
+                                        eprintln!("[cot] emit error: {e}");
+                                    }
                                 }
-                            }
-                            Err(e) => {
-                                // Diagnostic: dump the first 96 bytes so we
-                                // can tell XML / TAK-protocol-v1 / garbage
-                                // apart. Strip after the issue is resolved.
-                                let n = data.len().min(96);
-                                let head = &data[..n];
-                                let hex = head
-                                    .iter()
-                                    .map(|b| format!("{:02x}", b))
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-                                let ascii: String = head
-                                    .iter()
-                                    .map(|&b| if (32..127).contains(&b) { b as char } else { '.' })
-                                    .collect();
-                                eprintln!(
-                                    "[cot] parse error from UDP ({address}:{port}, {len}B): {e}\n  hex:   {hex}\n  ascii: {ascii}"
-                                );
+                                Err(e) => {
+                                    // Diagnostic: dump the first 96 bytes so we
+                                    // can tell XML / TAK-protocol-v1 / garbage
+                                    // apart. Useful when a peer suddenly switches
+                                    // wire formats.
+                                    let n = data.len().min(96);
+                                    let head = &data[..n];
+                                    let hex = head
+                                        .iter()
+                                        .map(|b| format!("{:02x}", b))
+                                        .collect::<Vec<_>>()
+                                        .join(" ");
+                                    let ascii: String = head
+                                        .iter()
+                                        .map(|&b| if (32..127).contains(&b) { b as char } else { '.' })
+                                        .collect();
+                                    eprintln!(
+                                        "[cot] parse error from UDP ({address}:{port}, {len}B): {e}\n  hex:   {hex}\n  ascii: {ascii}"
+                                    );
+                                }
+                            },
+                            Parser::Raw { kind } => {
+                                let pkt = ConnectionPacket {
+                                    kind:        kind.clone(),
+                                    address:     address.clone(),
+                                    port,
+                                    bytes:       data.to_vec(),
+                                    source_ip:   peer.ip().to_string(),
+                                    source_port: peer.port(),
+                                };
+                                if let Err(e) = app.emit("connection-packet", &pkt) {
+                                    eprintln!("[connection] emit error ({kind}): {e}");
+                                }
                             }
                         }
                     }
@@ -175,7 +226,17 @@ impl ListenerManager {
 
     /// Start a TCP listener bound to `address:port`. Each accepted connection
     /// is handled in its own task; messages are framed by `</event>`.
-    pub fn start_tcp(&mut self, address: String, port: u16, app: AppHandle) {
+    ///
+    /// TCP listeners are CoT-only for now — plugin-owned raw streaming
+    /// isn't in scope yet (TAK Server SSL framing is a separate piece of
+    /// work). If `parser` is `Raw` we refuse to start and log a warning.
+    pub fn start_tcp(&mut self, address: String, port: u16, parser: Parser, app: AppHandle) {
+        if let Parser::Raw { kind } = &parser {
+            eprintln!(
+                "[connection] TCP raw-mode not supported yet (kind={kind}, {address}:{port}); skipping"
+            );
+            return;
+        }
         let key = format!("{address}:{port}");
         self.stop(&key);
 

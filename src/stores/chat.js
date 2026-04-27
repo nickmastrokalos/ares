@@ -185,7 +185,7 @@ export const useChatStore = defineStore('chat', () => {
     // marked stale (the "dotted circle" in WinTAK's contact list),
     // which disables direct chat to that peer. Mesh-mode TAK clients
     // dual-publish to both groups for exactly this reason.
-    const targets = settingsStore.cotListeners.filter(l =>
+    const targets = settingsStore.connections.filter(l =>
       (l.kind === 'tak-chat-announce' || l.kind === 'tak-sa') &&
       l.enabled !== false &&
       l.address && l.port
@@ -202,7 +202,7 @@ export const useChatStore = defineStore('chat', () => {
     let endpoint = '*:-1:stcp'
     try {
       const lanIp = await invoke('get_lan_ipv4')
-      const chatMsgs = settingsStore.cotListeners.find(l => l.kind === 'tak-chat-messages')
+      const chatMsgs = settingsStore.connections.find(l => l.kind === 'tak-chat-messages')
       const chatPort = chatMsgs?.port
       if (lanIp && chatPort) {
         endpoint = `${lanIp}:${chatPort}:udp`
@@ -296,7 +296,7 @@ export const useChatStore = defineStore('chat', () => {
     // listener so it stays in sync if the user retargets the chat group on
     // a non-default network. The listener is seeded on first run and can't
     // be deleted, so absence here means the user did something unusual.
-    const messagesListener = settingsStore.cotListeners.find(
+    const messagesListener = settingsStore.connections.find(
       l => l.kind === 'tak-chat-messages'
     )
     if (!messagesListener?.address || !messagesListener?.port) {

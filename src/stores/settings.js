@@ -9,7 +9,13 @@ import { useAppStore } from '@/stores/app'
 const DEFAULTS = {
   showFeatureLabels: true,
   selectedBasemap: 'osm',
-  cotListeners: [],
+  // Inbound network connections — UDP / TCP listeners. Each entry has
+  // an `ownerKind` of 'host' (Ares-owned, CoT-parsed protected core),
+  // 'adhoc' (user-added CoT listener for additional TAK groups), or
+  // 'plugin' (a plugin registered the kind via api.connections.registerKind
+  // and parses bytes itself). See `PROTECTED_CONNECTIONS` below for the
+  // three host-owned entries seeded on first run.
+  connections: [],
   distanceUnits: 'metric',
   coordinateFormat: 'dd',
   trackBreadcrumbs: false,
@@ -66,13 +72,13 @@ const DEFAULTS = {
   takActive: false
 }
 
-// Three protected listeners are seeded on first run so the standard TAK
-// multicast groups are always present in the listeners list. They can be
+// Three protected (host-owned) connections seeded on first run. They can be
 // edited (e.g. point them at a custom group on a non-default network) or
 // disabled, but not deleted — the chat store derives its outbound
-// destination from the `tak-chat-messages` listener, so removing it would
-// silently break chat.
-const PROTECTED_LISTENERS = [
+// destination from the `tak-chat-messages` entry, so removing it would
+// silently break chat. `parser: 'cot'` routes inbound bytes through the
+// host's `parse_cot` pipeline.
+const PROTECTED_CONNECTIONS = [
   {
     kind: 'tak-chat-messages',
     name: 'GeoChat Messages',
@@ -80,7 +86,10 @@ const PROTECTED_LISTENERS = [
     port: 17012,
     protocol: 'udp',
     enabled: true,
-    protected: true
+    protected: true,
+    ownerKind: 'host',
+    ownerPluginId: null,
+    parser: 'cot'
   },
   {
     kind: 'tak-chat-announce',
@@ -89,7 +98,10 @@ const PROTECTED_LISTENERS = [
     port: 18740,
     protocol: 'udp',
     enabled: true,
-    protected: true
+    protected: true,
+    ownerKind: 'host',
+    ownerPluginId: null,
+    parser: 'cot'
   },
   {
     kind: 'tak-sa',
@@ -98,16 +110,48 @@ const PROTECTED_LISTENERS = [
     port: 6969,
     protocol: 'udp',
     enabled: true,
-    protected: true
+    protected: true,
+    ownerKind: 'host',
+    ownerPluginId: null,
+    parser: 'cot'
   }
 ]
+
+const HOST_PROTECTED_KINDS = new Set(PROTECTED_CONNECTIONS.map(c => c.kind))
+
+/**
+ * Normalize a saved connection row to the new schema. Pre-1.1.6 rows
+ * only had `kind`/`name`/`address`/`port`/`protocol`/`enabled`/`protected`
+ * — the rest is inferred:
+ *   - kinds matching the protected core → ownerKind 'host', parser 'cot'
+ *   - everything else → ownerKind 'adhoc', parser 'cot'
+ *
+ * Plugin-owned rows are persisted with their full schema once they're
+ * created via `api.connections.registerKind`, so on a clean upgrade we
+ * never see a row with a plugin kind that's missing ownerKind.
+ */
+function normalizeConnection(row, freshUuid) {
+  const isHost = HOST_PROTECTED_KINDS.has(row.kind)
+  return {
+    kind:          row.kind ?? (isHost ? row.kind : `cot-adhoc-${freshUuid()}`),
+    name:          row.name ?? row.kind ?? 'Listener',
+    address:       row.address,
+    port:          row.port,
+    protocol:      row.protocol ?? 'udp',
+    enabled:       row.enabled !== false,
+    protected:     row.protected ?? isHost,
+    ownerKind:     row.ownerKind ?? (isHost ? 'host' : 'adhoc'),
+    ownerPluginId: row.ownerPluginId ?? null,
+    parser:        row.parser ?? 'cot'
+  }
+}
 
 export const useSettingsStore = defineStore('settings', () => {
   const appStore = useAppStore()
 
   const showFeatureLabels = ref(DEFAULTS.showFeatureLabels)
   const selectedBasemap = ref(DEFAULTS.selectedBasemap)
-  const cotListeners = ref([...DEFAULTS.cotListeners])
+  const connections = ref([...DEFAULTS.connections])
   const distanceUnits = ref(DEFAULTS.distanceUnits)
   const coordinateFormat = ref(DEFAULTS.coordinateFormat)
   const trackBreadcrumbs = ref(DEFAULTS.trackBreadcrumbs)
@@ -133,7 +177,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const refs = {
     showFeatureLabels,
     selectedBasemap,
-    cotListeners,
+    connections,
     distanceUnits,
     coordinateFormat,
     trackBreadcrumbs,
@@ -202,20 +246,46 @@ export const useSettingsStore = defineStore('settings', () => {
           await store.set('selfUid', selfUid.value)
         }
 
-        // Seed protected listeners (TAK chat + SA multicast) if they're
-        // not already in the saved list. Match by `kind` so a user who
-        // happens to have a listener at the same address/port doesn't
-        // get a duplicate. Existing user-added entries are untouched.
-        let listenersChanged = false
-        for (const seed of PROTECTED_LISTENERS) {
-          const exists = cotListeners.value.some(l => l.kind === seed.kind)
-          if (!exists) {
-            cotListeners.value.push({ ...seed })
-            listenersChanged = true
+        // One-time migration: pre-1.1.6 stored connections under the
+        // `cotListeners` key without owner / parser metadata. If we see
+        // that key and `connections` is empty, copy the rows over and
+        // delete the legacy key. Each row is normalized through
+        // `normalizeConnection` to gain ownerKind / parser / protected
+        // defaults.
+        const legacy = await store.get('cotListeners')
+        if (Array.isArray(legacy) && !connections.value.length) {
+          const newId = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+          connections.value = legacy.map(row => normalizeConnection(row, newId))
+          await store.set('connections', connections.value)
+          await store.delete('cotListeners')
+        }
+
+        // Re-normalize any rows that came back from the new key but
+        // lack the new fields (defensive — a downgrade-then-upgrade
+        // cycle could leave partial schema).
+        let connectionsChanged = false
+        for (let i = 0; i < connections.value.length; i++) {
+          const row = connections.value[i]
+          if (!row.ownerKind || !row.parser) {
+            connections.value[i] = normalizeConnection(row, () => crypto.randomUUID?.() ?? Date.now().toString(36))
+            connectionsChanged = true
           }
         }
-        if (listenersChanged) {
-          await store.set('cotListeners', cotListeners.value)
+
+        // Seed protected (host-owned) connections. Match by `kind` so
+        // a user who happens to have an entry on the same address /
+        // port doesn't get a duplicate. Existing rows are untouched.
+        for (const seed of PROTECTED_CONNECTIONS) {
+          const exists = connections.value.some(c => c.kind === seed.kind)
+          if (!exists) {
+            connections.value.push({ ...seed })
+            connectionsChanged = true
+          }
+        }
+        if (connectionsChanged) {
+          await store.set('connections', connections.value)
         }
       } finally {
         appStore.endLoad()
@@ -232,35 +302,94 @@ export const useSettingsStore = defineStore('settings', () => {
     await store.set(key, value)
   }
 
-  async function saveCotListeners() {
+  async function saveConnections() {
     const store = await getStore()
-    await store.set('cotListeners', cotListeners.value)
+    await store.set('connections', connections.value)
   }
 
-  async function addCotListener({ name, address, port, protocol }) {
-    cotListeners.value.push({ name, address, port, protocol, enabled: true })
-    await saveCotListeners()
+  /**
+   * Add a user-owned ad-hoc CoT listener. The new row is fully editable
+   * and deletable (`ownerKind: 'adhoc'`, `parser: 'cot'`). Used by the
+   * "Add CoT Listener" wizard for additional TAK groups beyond the
+   * three protected core entries.
+   */
+  async function addAdhocCotConnection({ name, address, port, protocol = 'udp' }) {
+    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+    connections.value.push({
+      kind:          `cot-adhoc-${newId}`,
+      name:          name || 'CoT Listener',
+      address,
+      port,
+      protocol,
+      enabled:       true,
+      protected:     false,
+      ownerKind:     'adhoc',
+      ownerPluginId: null,
+      parser:        'cot'
+    })
+    await saveConnections()
   }
 
-  async function updateCotListener(index, patch) {
-    Object.assign(cotListeners.value[index], patch)
-    await saveCotListeners()
+  /**
+   * Add or refresh a plugin-owned connection. Called by
+   * `api.connections.registerKind` from the plugin host registry. If
+   * a row with this `kind` already exists, only the metadata fields
+   * (name / ownerPluginId) are touched — the user's persisted
+   * address / port / protocol / enabled values stay so plugin
+   * reinstalls don't blow away their config.
+   */
+  async function upsertPluginConnection({
+    kind, name, ownerPluginId,
+    defaultAddress, defaultPort, defaultProtocol = 'udp'
+  }) {
+    const existing = connections.value.find(c => c.kind === kind)
+    if (existing) {
+      existing.name          = name
+      existing.ownerKind     = 'plugin'
+      existing.ownerPluginId = ownerPluginId
+      existing.parser        = 'plugin'
+      existing.protected     = true
+      await saveConnections()
+      return existing
+    }
+    const fresh = {
+      kind,
+      name,
+      address:       defaultAddress,
+      port:          defaultPort,
+      protocol:      defaultProtocol,
+      enabled:       false,            // user opts in
+      protected:     true,
+      ownerKind:     'plugin',
+      ownerPluginId,
+      parser:        'plugin'
+    }
+    connections.value.push(fresh)
+    await saveConnections()
+    return fresh
   }
 
-  async function removeCotListener(index) {
-    cotListeners.value.splice(index, 1)
-    await saveCotListeners()
+  async function updateConnection(index, patch) {
+    Object.assign(connections.value[index], patch)
+    await saveConnections()
   }
 
-  async function toggleCotListener(index) {
-    cotListeners.value[index].enabled = !cotListeners.value[index].enabled
-    await saveCotListeners()
+  async function removeConnection(index) {
+    connections.value.splice(index, 1)
+    await saveConnections()
+  }
+
+  async function toggleConnection(index) {
+    connections.value[index].enabled = !connections.value[index].enabled
+    await saveConnections()
   }
 
   return {
     showFeatureLabels,
     selectedBasemap,
-    cotListeners,
+    connections,
     distanceUnits,
     coordinateFormat,
     trackBreadcrumbs,
@@ -282,9 +411,10 @@ export const useSettingsStore = defineStore('settings', () => {
     takActive,
     load,
     setSetting,
-    addCotListener,
-    updateCotListener,
-    removeCotListener,
-    toggleCotListener
+    addAdhocCotConnection,
+    upsertPluginConnection,
+    updateConnection,
+    removeConnection,
+    toggleConnection
   }
 })
