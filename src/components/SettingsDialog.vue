@@ -187,6 +187,11 @@ function commitSelfLocation() {
 // warning and returns undefined, which is why the buttons silently
 // no-op'd before).
 const pickSelfLocationOnMap = inject('pickSelfLocation', null)
+// Reactive flag that flips true while the map is in self-location-pick
+// mode, then back to false when the operator clicks (or hits Escape).
+// We close the dialog on entry and reopen when the flag goes false so
+// the operator returns to the same Network tab they came from.
+const selfLocationPicking = inject('selfLocationPicking', ref(false))
 
 function pickOnMap() {
   // Close the settings dialog so the operator can click the map directly,
@@ -195,6 +200,13 @@ function pickOnMap() {
   emit('update:modelValue', false)
   pickSelfLocationOnMap()
 }
+
+// When the picker disarms (after a click commit OR Escape cancel),
+// reopen the settings dialog so the operator can verify / continue
+// without manually re-navigating.
+watch(selfLocationPicking, (picking, prev) => {
+  if (prev && !picking) emit('update:modelValue', true)
+})
 
 const chatMessagesEndpoint = computed(() => {
   const l = settingsStore.cotListeners.find(x => x.kind === 'tak-chat-messages')

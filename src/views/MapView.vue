@@ -280,6 +280,10 @@ function pickSelfLocation() {
   selfLocationPicking.value = true
 }
 provide('pickSelfLocation', pickSelfLocation)
+// Expose the picking ref too so SettingsDialog can watch it and
+// reopen itself once the pick completes (or is cancelled), saving
+// the operator the round-trip back to Settings → Network.
+provide('selfLocationPicking', selfLocationPicking)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
 provide('draggingTrack', draggingTrack)
