@@ -20,6 +20,9 @@ export const RELEASES = [
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
+    added: [
+      'Plugins can place layers in the map stack via `api.map.addLayer({ ..., beforeId })`; `\'@bottom\'` is a sentinel for "just above the basemap, below all host content".'
+    ],
     fixed: [
       'Assistant: `map_find_entity` now matches manual-track names whether the user-typed identifier lives in `props.name` or `props.callsign` (previously only the first field was searched, so renamed manual tracks could appear "missing" to the assistant).'
     ]

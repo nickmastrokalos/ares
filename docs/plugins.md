@@ -147,7 +147,15 @@ const layer = api.map.addLayer({
   onHoverEnd() {
     // Optional. Fires when the cursor leaves the layer. Use to hide
     // your tooltip element.
-  }
+  },
+  beforeId: '@bottom'                     // Optional layer-stack placement.
+                                           // '@top' (default) → on top of everything.
+                                           // '@bottom'         → just above the basemap,
+                                           //                     below all host content.
+                                           // any other string  → MapLibre layer id to
+                                           //                     anchor against (the new
+                                           //                     layer is inserted before
+                                           //                     it).
 })
 
 // Cursor automatically turns to a pointer on hover whenever any
