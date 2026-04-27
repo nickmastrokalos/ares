@@ -170,7 +170,7 @@ async function saveEdit() {
         port:     patch.port,
         protocol: patch.protocol,
         kind:     c.kind,
-        parser:   c.parser ?? 'cot'
+        parser:   c.parser === 'plugin' ? 'raw' : 'cot'
       })
     } catch (err) {
       console.error('Failed to restart listener after edit:', err)
@@ -198,7 +198,7 @@ async function toggleConnection(index) {
         port:     c.port,
         protocol: c.protocol ?? 'udp',
         kind:     c.kind,
-        parser:   c.parser ?? 'cot'
+        parser:   c.parser === 'plugin' ? 'raw' : 'cot'
       })
     } else {
       await invoke('stop_listener', { address: c.address, port: c.port })

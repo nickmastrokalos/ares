@@ -346,6 +346,7 @@ const unregister = api.connections.registerKind({
   label:       'Armada SA telemetry',     // shown in Connections panel
   description: 'DroneState messages from Armada SA drones.',
   protocol:    'udp',                     // tcp not yet supported
+  parser:      'plugin',                  // 'plugin' | 'cot' (default 'plugin')
   defaults:    { address: '239.x.x.x', port: 15550 },
   onPacket(bytes, { sourceIp, sourcePort }) {
     const msg = MyProtoSchema.decode(bytes)   // plugin-owned parsing
@@ -353,6 +354,17 @@ const unregister = api.connections.registerKind({
   }
 })
 ```
+
+`parser` decides how inbound bytes are routed:
+
+- `'plugin'` (default) — bytes are handed to your `onPacket` callback
+  as a `Uint8Array`. Use this for non-CoT wire formats (proprietary
+  protobufs, JSON over UDP, drone telemetry, …).
+- `'cot'` — bytes are parsed by the host as CoT XML / TAK Protocol v1
+  and emitted on the shared `cot-event` channel. The host's track /
+  chat / alert stores pick them up unchanged. `onPacket` is not
+  required (and not called) in this mode; subscribe via
+  `api.cot.onEvent` if your plugin needs to react to messages.
 
 Behavior:
 
@@ -393,6 +405,17 @@ The event flows through the same `cot-event` channel the host's
 protected CoT listeners use, so the existing tracks / chat / alert
 stores pick it up unchanged. Required fields: `uid`, `cot_type`
 (or `cotType`), `lat`, `lon`. Everything else has sane defaults.
+
+To listen for incoming CoT messages — host listeners, ad-hoc CoT
+listeners, plugin-registered CoT kinds, and any `api.cot.emit`
+injection all flow through the same channel:
+
+```js
+const off = api.cot.onEvent((event) => {
+  // event.cot_type, event.uid, event.lat, event.lon, event.callsign, …
+})
+// off() to unsubscribe; auto-cleaned on plugin disable
+```
 
 ### Plugin-scoped persistent settings
 

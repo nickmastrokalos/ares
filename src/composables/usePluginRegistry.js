@@ -397,15 +397,20 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       // the Connections panel is on. Disabling either drops the
       // socket; enabling both resumes it.
       connections: {
-        registerKind({ kind, label, description, protocol = 'udp', defaults, onPacket }) {
+        registerKind({ kind, label, description, protocol = 'udp', parser = 'plugin', defaults, onPacket }) {
           if (typeof kind !== 'string' || !kind) {
             throw new Error('connections.registerKind: `kind` is required')
           }
           if (typeof label !== 'string' || !label) {
             throw new Error('connections.registerKind: `label` is required')
           }
-          if (typeof onPacket !== 'function') {
-            throw new Error('connections.registerKind: `onPacket(bytes, src)` is required')
+          if (parser !== 'cot' && parser !== 'plugin') {
+            throw new Error('connections.registerKind: `parser` must be "cot" or "plugin"')
+          }
+          // Plugin-parsed kinds need the bytes; CoT-parsed kinds don't —
+          // the host parses and routes through the cot-event channel.
+          if (parser === 'plugin' && typeof onPacket !== 'function') {
+            throw new Error('connections.registerKind: `onPacket(bytes, src)` is required when parser="plugin"')
           }
           const d = defaults ?? {}
           if (typeof d.address !== 'string' || !d.address) {
@@ -423,7 +428,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
               `connections.registerKind: kind "${kind}" already registered by ${existing.ownerPluginId}`
             )
           }
-          _connKinds.set(kind, { ownerPluginId: manifest.id, onPacket })
+          _connKinds.set(kind, { ownerPluginId: manifest.id, onPacket: onPacket ?? null })
           _conns.get(manifest.id).add(kind)
 
           // Seed / refresh the row in the connections store.
@@ -433,7 +438,8 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
             ownerPluginId:  manifest.id,
             defaultAddress: d.address,
             defaultPort:    d.port,
-            defaultProtocol: protocol
+            defaultProtocol: protocol,
+            parser
           }).then((row) => {
             // If the row was already enabled (user opted in on a
             // previous run), start the socket immediately.
@@ -443,7 +449,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
                 port:     row.port,
                 protocol: row.protocol ?? 'udp',
                 kind:     row.kind,
-                parser:   'raw'
+                parser:   row.parser === 'cot' ? 'cot' : 'raw'
               }).catch(err => {
                 console.error(`[connections] failed to start ${kind}:`, err)
               })
@@ -476,6 +482,37 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       // listeners use, so all the existing track / chat / annotation
       // stores pick it up unchanged.
       cot: {
+        // Subscribe to host CoT events. Fires for every parsed CoT
+        // message — host listeners, ad-hoc CoT listeners, plugin-
+        // registered CoT kinds, and `api.cot.emit` injections all
+        // flow through the same channel. Returns an unsubscribe fn;
+        // also auto-cleaned on plugin disable.
+        onEvent(handler) {
+          if (typeof handler !== 'function') {
+            throw new Error('cot.onEvent: handler is required')
+          }
+          let live = true
+          let off = null
+          listen('cot-event', (event) => {
+            if (!live) return
+            try { handler(event.payload) }
+            catch (err) {
+              console.error(`[plugin:${manifest.id}] cot.onEvent handler threw:`, err)
+            }
+          }).then((unsubscribe) => {
+            if (!live) { unsubscribe(); return }
+            off = unsubscribe
+          }).catch(err => {
+            console.error(`[plugin:${manifest.id}] cot.onEvent subscribe failed:`, err)
+          })
+          const unregister = () => {
+            live = false
+            if (off) { try { off() } catch { /* ignore */ } }
+          }
+          cleanups.push(unregister)
+          return unregister
+        },
+
         emit(event) {
           if (!event || typeof event !== 'object') {
             throw new Error('cot.emit: event is required')
@@ -609,6 +646,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         if (!p || typeof p.kind !== 'string') return
         const reg = _connKinds.get(p.kind)
         if (!reg) return  // no plugin owns this kind right now
+        if (typeof reg.onPacket !== 'function') return  // CoT-parsed kind, dispatcher not used
         try {
           reg.onPacket(
             // Tauri serialises Vec<u8> as Array<number>. Hand plugins a

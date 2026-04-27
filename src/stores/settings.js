@@ -342,14 +342,15 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   async function upsertPluginConnection({
     kind, name, ownerPluginId,
-    defaultAddress, defaultPort, defaultProtocol = 'udp'
+    defaultAddress, defaultPort, defaultProtocol = 'udp',
+    parser = 'plugin'
   }) {
     const existing = connections.value.find(c => c.kind === kind)
     if (existing) {
       existing.name          = name
       existing.ownerKind     = 'plugin'
       existing.ownerPluginId = ownerPluginId
-      existing.parser        = 'plugin'
+      existing.parser        = parser
       existing.protected     = true
       await saveConnections()
       return existing
@@ -364,7 +365,7 @@ export const useSettingsStore = defineStore('settings', () => {
       protected:     true,
       ownerKind:     'plugin',
       ownerPluginId,
-      parser:        'plugin'
+      parser
     }
     connections.value.push(fresh)
     await saveConnections()
