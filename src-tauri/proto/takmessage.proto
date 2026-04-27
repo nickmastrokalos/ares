@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+// TAK Protocol v1 schema — used on the wire by ATAK / WinTAK / iTAK
+// when broadcasting CoT events as binary protobuf instead of XML.
+// Each UDP-mesh datagram on a TAK multicast group looks like:
+//
+//   0xbf 0x01 0xbf  <protobuf-encoded TakMessage>
+//
+// The schema below mirrors the public `commoncommo` definitions
+// (Apache-2.0) used by the ATAK CIV codebase, vendored here so the
+// Ares build can decode WinTAK packets without a runtime fetch and
+// without depending on a system `protoc` install.
+package atakmap.commoncommo.protobuf.v1;
+
+// Top-level wire envelope. Carries an optional control block (used
+// for proto-version negotiation by some peers) and a single CoT
+// event. Per the TAK Protocol v1 spec one TakMessage = one event.
+message TakMessage {
+  TakControl tak_control = 1;
+  CotEvent   cot_event   = 2;
+}
+
+// Control / capability advertisement attached to peer broadcasts.
+// Most consumers only care about `contact_uid`; the version fields
+// are advisory.
+message TakControl {
+  uint32 min_proto_version = 1;
+  uint32 max_proto_version = 2;
+  string contact_uid       = 3;
+}
+
+// Mirrors the on-wire CoT event shape, with epoch-millisecond
+// timestamps in place of XML's ISO-8601 strings. The `detail` block
+// is structured (Contact / Group / Status / Takv / Track /
+// PrecisionLocation) plus an `xml_detail` blob that carries any
+// extra detail fragments the producer chose not to or couldn't
+// structure (chat, remarks, custom plugins, …).
+message CotEvent {
+  string type        = 1;
+  string access      = 2;
+  string qos         = 3;
+  string opex        = 4;
+  string uid         = 5;
+  uint64 send_time   = 6;
+  uint64 start_time  = 7;
+  uint64 stale_time  = 8;
+  string how         = 9;
+  double lat         = 10;
+  double lon         = 11;
+  double hae         = 12;
+  double ce          = 13;
+  double le          = 14;
+  Detail detail      = 15;
+}
+
+message Detail {
+  // XML fragments the producer didn't / couldn't put in structured
+  // fields below. Concatenated into the parent <detail> tag when the
+  // event is round-tripped to XML form. WinTAK puts <__chat>,
+  // <chatgrp>, and <remarks> here for chat events.
+  string xml_detail                  = 1;
+  Contact contact                    = 2;
+  Group group                        = 3;
+  PrecisionLocation precision_location = 4;
+  Status status                      = 5;
+  Takv takv                          = 6;
+  Track track                        = 7;
+}
+
+message Contact {
+  string endpoint = 1;
+  string callsign = 2;
+}
+
+message Group {
+  string name = 1;
+  string role = 2;
+}
+
+message PrecisionLocation {
+  string geopointsrc = 1;
+  string altsrc      = 2;
+}
+
+message Status {
+  uint32 battery = 1;
+}
+
+message Takv {
+  string device   = 1;
+  string platform = 2;
+  string os       = 3;
+  string version  = 4;
+}
+
+message Track {
+  double speed  = 1;
+  double course = 2;
+}
