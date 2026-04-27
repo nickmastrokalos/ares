@@ -21,7 +21,8 @@ export const RELEASES = [
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
     added: [
-      'Plugin host gains `api.map.addImage(id, image, options?)` and `api.map.removeImage(id)` so plugins can register their own sprite icons and reference them from `icon-image` in symbol layers. Useful for offline-friendly plugins that want to skip `text-field` (which fetches glyph PBFs on demand) and bake their glyphs into self-contained PNGs.'
+      'Plugins can register custom sprite icons (`api.map.addImage`) for fully offline-friendly map symbology.',
+      'Plugins can expose tools to the AI assistant (`api.tools.register`); auto-prefixed names, same confirm-card flow as built-in tools.'
     ]
   },
   {

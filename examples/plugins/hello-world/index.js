@@ -8,6 +8,10 @@
  *   - registerPanel          — opens a draggable panel with a click counter.
  *   - settings.get/set       — persists the click counter across reopen +
  *                              plugin disable/enable cycles.
+ *   - tools.register         — registers two assistant tools: a read-only
+ *                              `count` tool that the assistant can call
+ *                              freely, and a `log` tool that triggers the
+ *                              confirmation flow before running.
  *
  * Installation:
  *   Copy the hello-world/ directory into your Ares plugins directory, then
@@ -125,6 +129,38 @@ export default {
       icon:    'mdi-hand-wave-outline',
       tooltip: 'Hello World — open panel',
       onClick() { panel.toggle() }
+    })
+
+    // ---- Assistant tools ----
+    // One read-only tool the model can call freely, and one
+    // write-style tool that exercises the confirm-card flow.
+    api.tools.register({
+      name:        'count',
+      description: 'Return the current number of features and CoT tracks on the map.',
+      inputSchema: { type: 'object', properties: {} },
+      readonly:    true,
+      execute() {
+        return {
+          features: api.features.value.length,
+          tracks:   api.tracks.value.length
+        }
+      }
+    })
+
+    api.tools.register({
+      name:        'log',
+      description: 'Log a message to the developer console with the hello-world prefix.',
+      inputSchema: {
+        type: 'object',
+        properties: { message: { type: 'string' } },
+        required: ['message']
+      },
+      readonly:    false,
+      previewRender: ({ message }) => `Log "${message}" to the developer console.`,
+      execute({ message }) {
+        api.log(message)
+        return { logged: message }
+      }
     })
 
     api.onDeactivate(() => {
