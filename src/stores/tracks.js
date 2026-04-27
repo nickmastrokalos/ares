@@ -68,6 +68,17 @@ export const useTracksStore = defineStore('tracks', () => {
 
     unlistenFn = await listen('cot-event', (event) => {
       const e = event.payload
+      // Type filter: only "atom" CoT types (`a-…`) are units / vessels /
+      // aircraft — i.e. things that belong on the track list. Chat
+      // (`b-t-f`), drawings, markers, replies, etc. ride the same
+      // listeners but are routed to other stores. Previously the XML
+      // parser silently dropped chat events because they ship with
+      // `point lat=0 lon=0` which read as NaN through some encoders;
+      // TAK Protocol v1 events carry valid 0/0 floats so the bad ones
+      // would land here as Null-Island ghosts. Explicit filter keeps
+      // both wire formats producing the same track list.
+      if (typeof e.cot_type !== 'string' || !e.cot_type.startsWith('a-')) return
+
       // Drop our own announce echo only when no manual location is set.
       // Without a location the announce broadcasts at lat/lon (0, 0) as a
       // presence-only beacon and self-echoing it would pin a phantom

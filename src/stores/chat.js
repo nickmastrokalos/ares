@@ -178,29 +178,63 @@ export const useChatStore = defineStore('chat', () => {
     const uid      = settingsStore.selfUid
     if (!callsign || !uid) return
 
-    const announceListener = settingsStore.cotListeners.find(
-      l => l.kind === 'tak-chat-announce'
+    // Send the same presence announce to BOTH the chat-announce group
+    // AND the SA group. ATAK / WinTAK track contact liveness primarily
+    // off the SA bus (239.2.3.1:6969 by default); a peer that only
+    // shows on the chat-announce group is listed in their contacts but
+    // marked stale (the "dotted circle" in WinTAK's contact list),
+    // which disables direct chat to that peer. Mesh-mode TAK clients
+    // dual-publish to both groups for exactly this reason.
+    const targets = settingsStore.cotListeners.filter(l =>
+      (l.kind === 'tak-chat-announce' || l.kind === 'tak-sa') &&
+      l.enabled !== false &&
+      l.address && l.port
     )
-    if (!announceListener?.address || !announceListener?.port) return
-    if (announceListener.enabled === false) return
+    if (!targets.length) return
 
+    // Build a real `<contact endpoint>` value from our LAN IP + the
+    // chat-messages port. ATAK / WinTAK treat the legacy `*:-1:stcp`
+    // placeholder as "no endpoint, peer not eligible for direct
+    // chat" — we want them to direct-message us, so we advertise
+    // a unicast UDP address that our `0.0.0.0:<port>` listener
+    // already accepts. Falls back to the placeholder when the IP
+    // lookup fails (e.g. no non-loopback interface yet).
+    let endpoint = '*:-1:stcp'
     try {
-      const xml = composeAnnounceXml({
-        selfUid:      uid,
-        selfCallsign: callsign,
-        selfCotType:  settingsStore.selfCotType ?? undefined,
-        selfLocation: settingsStore.selfLocation ?? null
-      })
-      await invoke('send_cot', {
-        address:  announceListener.address,
-        port:     announceListener.port,
-        protocol: announceListener.protocol || 'udp',
-        xml
-      })
-    } catch (err) {
-      // Non-fatal — silently retry next tick. Surface in dev console only.
-      // eslint-disable-next-line no-console
-      console.warn('[chat] announce broadcast failed:', err)
+      const lanIp = await invoke('get_lan_ipv4')
+      const chatMsgs = settingsStore.cotListeners.find(l => l.kind === 'tak-chat-messages')
+      const chatPort = chatMsgs?.port
+      if (lanIp && chatPort) {
+        endpoint = `${lanIp}:${chatPort}:udp`
+      }
+    } catch {
+      // Stay with the placeholder; broadcast still goes out, peers
+      // just won't be able to direct-message us.
+    }
+
+    const xml = composeAnnounceXml({
+      selfUid:      uid,
+      selfCallsign: callsign,
+      selfCotType:  settingsStore.selfCotType ?? undefined,
+      selfLocation: settingsStore.selfLocation ?? null,
+      team:         settingsStore.selfTeam ?? undefined,
+      role:         settingsStore.selfRole ?? undefined,
+      endpoint
+    })
+
+    for (const t of targets) {
+      try {
+        await invoke('send_cot', {
+          address:  t.address,
+          port:     t.port,
+          protocol: t.protocol || 'udp',
+          xml
+        })
+      } catch (err) {
+        // Non-fatal — silently retry next tick. Surface in dev console only.
+        // eslint-disable-next-line no-console
+        console.warn(`[chat] announce broadcast failed for ${t.kind}:`, err)
+      }
     }
   }
 
@@ -236,7 +270,12 @@ export const useChatStore = defineStore('chat', () => {
   // for the next 60 s tick. Skipped if we're not yet announcing
   // (callsign + UID not set, listener not started).
   watch(
-    () => [settingsStore.selfCotType, settingsStore.selfLocation],
+    () => [
+      settingsStore.selfCotType,
+      settingsStore.selfLocation,
+      settingsStore.selfTeam,
+      settingsStore.selfRole
+    ],
     () => { if (announceTimer) broadcastAnnounce() },
     { deep: true }
   )

@@ -8,6 +8,7 @@ mod listeners;
 mod migrations;
 mod plugins;
 mod scenes;
+mod tak_v1;
 mod tileserver;
 
 use listeners::ListenerManager;
@@ -221,6 +222,7 @@ pub fn run() {
             stop_listener,
             stop_all_listeners,
             send_cot,
+            cot_sender::get_lan_ipv4,
             fetch_ais_vessels,
             fetch_adsb_aircraft,
             add_tile_path,

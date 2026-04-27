@@ -147,6 +147,43 @@ const selfCotType = computed({
   set: (v) => settingsStore.setSetting('selfCotType', v)
 })
 
+// ---- Self team + role ----
+//
+// 14 standard TAK team colors. The `name` is what goes on the wire
+// in `<__group name>`; `hex` is purely for the swatch rendering in
+// the picker. Values match the canonical ATAK/WinTAK palette.
+const TAK_TEAM_COLORS = [
+  { name: 'White',      hex: '#FFFFFF' },
+  { name: 'Yellow',     hex: '#FFFF00' },
+  { name: 'Orange',     hex: '#FF8C00' },
+  { name: 'Magenta',    hex: '#FF00FF' },
+  { name: 'Red',        hex: '#FF0000' },
+  { name: 'Maroon',     hex: '#800000' },
+  { name: 'Purple',     hex: '#800080' },
+  { name: 'Dark Blue',  hex: '#000080' },
+  { name: 'Blue',       hex: '#0000FF' },
+  { name: 'Cyan',       hex: '#00FFFF' },
+  { name: 'Teal',       hex: '#008080' },
+  { name: 'Green',      hex: '#00FF00' },
+  { name: 'Dark Green', hex: '#008000' },
+  { name: 'Brown',      hex: '#A52A2A' }
+]
+
+const TAK_TEAM_ROLES = [
+  'Team Member', 'Team Lead', 'HQ', 'Sniper',
+  'Medic', 'Forward Observer', 'RTO', 'K9'
+]
+
+const selfTeam = computed({
+  get: () => settingsStore.selfTeam ?? 'Cyan',
+  set: (v) => settingsStore.setSetting('selfTeam', v)
+})
+
+const selfRole = computed({
+  get: () => settingsStore.selfRole ?? 'Team Member',
+  set: (v) => settingsStore.setSetting('selfRole', v)
+})
+
 function clearSelfCotType() {
   settingsStore.setSetting('selfCotType', null)
 }
@@ -187,6 +224,11 @@ function commitSelfLocation() {
 // warning and returns undefined, which is why the buttons silently
 // no-op'd before).
 const pickSelfLocationOnMap = inject('pickSelfLocation', null)
+// Reactive flag that flips true while the map is in self-location-pick
+// mode, then back to false when the operator clicks (or hits Escape).
+// We close the dialog on entry and reopen when the flag goes false so
+// the operator returns to the same Network tab they came from.
+const selfLocationPicking = inject('selfLocationPicking', ref(false))
 
 function pickOnMap() {
   // Close the settings dialog so the operator can click the map directly,
@@ -195,6 +237,13 @@ function pickOnMap() {
   emit('update:modelValue', false)
   pickSelfLocationOnMap()
 }
+
+// When the picker disarms (after a click commit OR Escape cancel),
+// reopen the settings dialog so the operator can verify / continue
+// without manually re-navigating.
+watch(selfLocationPicking, (picking, prev) => {
+  if (prev && !picking) emit('update:modelValue', true)
+})
 
 const chatMessagesEndpoint = computed(() => {
   const l = settingsStore.cotListeners.find(x => x.kind === 'tak-chat-messages')
@@ -227,7 +276,7 @@ function formatBadge(ts) {
 </script>
 
 <template>
-  <v-dialog v-model="open" max-width="560">
+  <v-dialog v-model="open" max-width="640">
     <v-card color="surface" rounded="sm" flat>
       <v-card-title class="d-flex align-center pa-3">
         <v-icon icon="mdi-cog-outline" size="20" class="me-2 text-medium-emphasis" />
@@ -433,23 +482,22 @@ function formatBadge(ts) {
         <v-window-item value="network">
           <div class="pa-4">
 
-            <div class="d-flex align-center mb-3">
-              <div class="flex-grow-1">
-                <div class="text-body-2">TAK comms active</div>
-                <div class="text-caption text-medium-emphasis">
-                  Master switch for outbound traffic. When off, Ares does not
-                  emit presence announces or chat messages. Inbound listeners
-                  stay running so peer broadcasts still populate the track
-                  list.
-                </div>
-              </div>
+            <div class="d-flex align-center mb-1">
+              <div class="text-body-2 flex-grow-1">TAK comms active</div>
               <v-switch
                 v-model="takActive"
                 color="primary"
                 density="compact"
                 hide-details
                 inset
+                class="flex-shrink-0 ma-0"
               />
+            </div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Master switch for outbound traffic. When off, Ares does not
+              emit presence announces or chat messages. Inbound listeners
+              stay running so peer broadcasts still populate the track
+              list.
             </div>
 
             <v-divider class="my-3" />
@@ -526,6 +574,53 @@ function formatBadge(ts) {
               :model-value="selfCotType"
               @update:model-value="(v) => selfCotType = v"
             />
+
+            <v-divider class="my-3" />
+
+            <div class="text-overline mb-1">Team</div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Color and role peers see in their contact list and chat
+              roster. Color drives the halo around your icon on other
+              clients' maps.
+            </div>
+
+            <div class="d-flex align-center ga-2 mb-3">
+              <v-select
+                v-model="selfTeam"
+                :items="TAK_TEAM_COLORS"
+                item-title="name"
+                item-value="name"
+                label="Team color"
+                density="compact"
+                hide-details
+                variant="outlined"
+                style="flex: 1;"
+              >
+                <template #selection="{ item }">
+                  <div class="d-flex align-center ga-2">
+                    <span class="self-team-swatch" :style="{ background: item.raw.hex }" />
+                    <span>{{ item.raw.name }}</span>
+                  </div>
+                </template>
+                <template #item="{ props: itemProps, item }">
+                  <v-list-item v-bind="itemProps" :title="''">
+                    <template #prepend>
+                      <span class="self-team-swatch" :style="{ background: item.raw.hex }" />
+                    </template>
+                    <v-list-item-title>{{ item.raw.name }}</v-list-item-title>
+                  </v-list-item>
+                </template>
+              </v-select>
+              <v-select
+                v-model="selfRole"
+                :items="TAK_TEAM_ROLES"
+                label="Role"
+                density="compact"
+                hide-details
+                variant="outlined"
+                style="flex: 1;"
+              />
+            </div>
 
             <v-divider class="my-3" />
 
@@ -709,6 +804,18 @@ function formatBadge(ts) {
 .length-value {
   min-width: 48px;
   text-align: right;
+}
+
+/* TAK team-color swatch in the Network → Team picker. Inline-block
+   so it sits next to the color name in both the selection chip and
+   the dropdown rows. */
+.self-team-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  flex-shrink: 0;
 }
 
 /* ---- Offline maps tab ---- */

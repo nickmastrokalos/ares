@@ -35,6 +35,23 @@ pub struct CotEvent {
     pub chat_text: Option<String>,
 }
 
+/// Parse a raw CoT message into a `CotEvent`. Auto-detects the wire
+/// format by looking at the first few bytes:
+///
+///   - `0xbf 0x01 0xbf` → TAK Protocol v1 (binary protobuf, used by
+///     WinTAK and current ATAK builds). Decoded via `crate::tak_v1`.
+///   - anything else → legacy XML (`<event>...</event>`) decoded by
+///     `parse_cot_xml`.
+///
+/// Both paths return the same `CotEvent` shape so listeners and the
+/// `cot-event` channel are agnostic to which format the peer used.
+pub fn parse_cot(data: &[u8]) -> Result<CotEvent, String> {
+    if let Some(result) = crate::tak_v1::try_parse_v1(data) {
+        return result;
+    }
+    parse_cot_xml(data)
+}
+
 /// Parse a raw CoT XML message into a `CotEvent`.
 ///
 /// Returns `Err` with a human-readable string if the XML is malformed or any
@@ -44,7 +61,7 @@ pub struct CotEvent {
 /// GeoChat detail blocks (`<__chat>`, `<chatgrp>`, `<remarks>`) are extracted
 /// when present so the frontend can route chat events to the chat store
 /// without re-parsing the XML.
-pub fn parse_cot(data: &[u8]) -> Result<CotEvent, String> {
+pub fn parse_cot_xml(data: &[u8]) -> Result<CotEvent, String> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
 
@@ -215,4 +232,103 @@ pub fn parse_cot(data: &[u8]) -> Result<CotEvent, String> {
         chat_recipient_uid,
         chat_text,
     })
+}
+
+/// Holder for the optional chat-detail fields. Used by the v1 path to
+/// merge XML-fragment chat metadata into a CotEvent built from
+/// protobuf — WinTAK puts the GeoChat `<__chat>` / `<chatgrp>` /
+/// `<remarks>` blocks inside `Detail.xml_detail` rather than the
+/// structured fields, so we re-parse them here with the same rules
+/// the full-XML path uses above.
+#[derive(Default)]
+pub struct ChatDetail {
+    pub chat_room:            Option<String>,
+    pub chat_room_id:         Option<String>,
+    pub chat_sender_uid:      Option<String>,
+    pub chat_sender_callsign: Option<String>,
+    pub chat_recipient_uid:   Option<String>,
+    pub chat_text:            Option<String>,
+}
+
+/// Extract chat-detail fields from a `<detail>...</detail>` XML
+/// fragment (without the wrapping `<event>`). Pass the contents of a
+/// protobuf `Detail.xml_detail` blob — wraps it in a synthetic
+/// `<detail>` so the parser sees a well-formed root, then walks the
+/// same element rules as the full-XML path.
+pub fn extract_chat_detail_fragment(xml_detail: &str) -> ChatDetail {
+    let mut out = ChatDetail::default();
+    if xml_detail.trim().is_empty() {
+        return out;
+    }
+    // Wrap so the parser has a single root regardless of how many
+    // sibling elements the producer put in the blob.
+    let wrapped = format!("<detail>{xml_detail}</detail>");
+    let mut reader = Reader::from_reader(wrapped.as_bytes());
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut in_remarks = false;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                match e.name().as_ref() {
+                    b"__chat" => {
+                        for attr in e.attributes().flatten() {
+                            let key = attr.key.as_ref();
+                            let val = attr.unescape_value().unwrap_or_default().into_owned();
+                            match key {
+                                b"chatroom"       => out.chat_room = Some(val),
+                                b"id"             => out.chat_room_id = Some(val),
+                                b"senderCallsign" => out.chat_sender_callsign = Some(val),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"chatgrp" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"uid0" {
+                                let val = attr.unescape_value().unwrap_or_default().into_owned();
+                                out.chat_recipient_uid = Some(val);
+                            }
+                        }
+                    }
+                    b"link" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"uid" && out.chat_sender_uid.is_none() {
+                                let val = attr.unescape_value().unwrap_or_default().into_owned();
+                                out.chat_sender_uid = Some(val);
+                            }
+                        }
+                    }
+                    b"remarks" => {
+                        in_remarks = true;
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"to" && out.chat_recipient_uid.is_none() {
+                                let val = attr.unescape_value().unwrap_or_default().into_owned();
+                                out.chat_recipient_uid = Some(val);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(ref t)) => {
+                if in_remarks {
+                    let text = t.unescape().unwrap_or_default().into_owned();
+                    if !text.trim().is_empty() {
+                        out.chat_text = Some(text);
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                if e.name().as_ref() == b"remarks" {
+                    in_remarks = false;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break, // bad fragment — bail with whatever we got
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
 }

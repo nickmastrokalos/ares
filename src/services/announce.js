@@ -44,6 +44,14 @@ function addMinutes(d, m) {
  *                                                  null, the announce uses lat/lon
  *                                                  (0, 0) as a presence-only beacon.
  * @param {string} [params.appVersion]             App version label for the takv block.
+ * @param {string} [params.endpoint]               TAK `<contact endpoint>` value.
+ *                                                  Format `host:port:proto` (typically
+ *                                                  `<lan-ip>:17012:udp` for mesh peers).
+ *                                                  Defaults to the legacy `*:-1:stcp`
+ *                                                  placeholder, but real TAK clients
+ *                                                  treat that as "no endpoint, can't
+ *                                                  direct-message" — pass a real LAN
+ *                                                  IP for direct chat to work.
  * @param {Date}   [params.now]
  * @returns {string}
  */
@@ -53,6 +61,9 @@ export function composeAnnounceXml({
   selfCotType  = 'a-f-G-U-C',
   selfLocation = null,
   appVersion   = '1.x',
+  endpoint     = '*:-1:stcp',
+  team         = 'Cyan',
+  role         = 'Team Member',
   now          = new Date()
 }) {
   const time  = iso(now)
@@ -61,16 +72,26 @@ export function composeAnnounceXml({
   const lat = (selfLocation && Number.isFinite(selfLocation.lat)) ? selfLocation.lat : 0
   const lon = (selfLocation && Number.isFinite(selfLocation.lon)) ? selfLocation.lon : 0
 
-  // `endpoint="*:-1:stcp"` is TAK shorthand for "I'm not on a streaming
-  // server; reach me through whatever multicast group we share."
+  // `endpoint` controls how peers route direct chat to us. The legacy
+  // placeholder `*:-1:stcp` is treated by ATAK / WinTAK as "no
+  // streaming endpoint" — peer is mesh-only AND not eligible for
+  // direct messaging. A real `<lan-ip>:<port>:udp` value tells peers
+  // "send direct chat as UDP unicast to this address," which our
+  // `0.0.0.0:<port>` listener already accepts.
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    // `how="h-e"` — HUMAN, ESTIMATED. The operator selects their
+    // location off the map (or types lat/lon in Settings → Network)
+    // rather than reading from a GPS device, so the position is
+    // human-entered and estimated. `m-g` (MACHINE / GPS) would be a
+    // small lie and some TAK clients use the `how` value as a hint
+    // when rendering peers (machine-reported vs human-reported).
     `<event version="2.0" uid="${escapeXml(selfUid)}" type="${escapeXml(selfCotType)}" ` +
-    `how="m-g" time="${time}" start="${time}" stale="${stale}">` +
+    `how="h-e" time="${time}" start="${time}" stale="${stale}">` +
       `<point lat="${lat}" lon="${lon}" hae="9999999.0" ce="9999999.0" le="9999999.0"/>` +
       `<detail>` +
-        `<contact callsign="${escapeXml(selfCallsign)}" endpoint="*:-1:stcp"/>` +
-        `<__group name="Cyan" role="Team Member"/>` +
+        `<contact callsign="${escapeXml(selfCallsign)}" endpoint="${escapeXml(endpoint)}"/>` +
+        `<__group name="${escapeXml(team)}" role="${escapeXml(role)}"/>` +
         `<takv platform="Ares" version="${escapeXml(appVersion)}" device="Ares" os="Tauri"/>` +
         `<status readiness="true"/>` +
         `<uid Droid="${escapeXml(selfCallsign)}"/>` +

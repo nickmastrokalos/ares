@@ -50,6 +50,15 @@ const DEFAULTS = {
   // broadcasts these coordinates so peers see the operator on their map
   // at the right place.
   selfLocation: null,
+  // TAK team color — drives the `<__group name>` value in outbound
+  // announces. ATAK / WinTAK render the named color as a halo around
+  // the operator's icon and use it for team-coordination grouping in
+  // the chat panel. Defaults to Cyan, the historical ATAK default.
+  selfTeam: 'Cyan',
+  // TAK team role — drives the `<__group role>` value. Defaults to
+  // Team Member; other valid values are Team Lead, HQ, Sniper, Medic,
+  // Forward Observer, RTO, K9.
+  selfRole: 'Team Member',
   // Master switch for TAK outbound. Defaults off — nothing emits until
   // the operator explicitly activates from the chat panel or
   // Settings → Network. Inbound listeners stay on regardless so peers'
@@ -115,6 +124,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const selfAffiliation = ref(DEFAULTS.selfAffiliation)
   const selfCotType     = ref(DEFAULTS.selfCotType)
   const selfLocation    = ref(DEFAULTS.selfLocation)
+  const selfTeam        = ref(DEFAULTS.selfTeam)
+  const selfRole        = ref(DEFAULTS.selfRole)
   const takActive       = ref(DEFAULTS.takActive)
 
   // Keyed lookup so `setSetting(key, value)` can update the right ref
@@ -139,6 +150,8 @@ export const useSettingsStore = defineStore('settings', () => {
     selfAffiliation,
     selfCotType,
     selfLocation,
+    selfTeam,
+    selfRole,
     takActive
   }
 
@@ -150,8 +163,11 @@ export const useSettingsStore = defineStore('settings', () => {
   // Settings that intentionally don't persist across restarts. The user
   // has to opt back in each session; saved values from prior runs are
   // ignored on load and writes are no-ops on disk (the ref value still
-  // updates so in-session UI works normally).
-  const SESSION_ONLY = new Set(['enabledPlugins'])
+  // updates so in-session UI works normally). `takActive` is in here
+  // because outbound CoT (presence announces + GeoChat send) should be
+  // an explicit per-session opt-in, not a stale flag that quietly
+  // re-enables the radio across restarts.
+  const SESSION_ONLY = new Set(['enabledPlugins', 'takActive'])
 
   async function load() {
     if (loadPromise) return loadPromise
@@ -261,6 +277,8 @@ export const useSettingsStore = defineStore('settings', () => {
     selfAffiliation,
     selfCotType,
     selfLocation,
+    selfTeam,
+    selfRole,
     takActive,
     load,
     setSetting,

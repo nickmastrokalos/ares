@@ -83,8 +83,18 @@ export function composeChatXml({
       `<detail>` +
         `<__chat parent="RootContactGroup" groupOwner="false" ` +
         `chatroom="${escapeXml(roomName)}" id="${escapeXml(roomId)}" ` +
-        `senderCallsign="${escapeXml(selfCallsign)}">` +
-          `<chatgrp uid0="${escapeXml(recipientUid)}" id="${escapeXml(roomId)}"/>` +
+        `senderCallsign="${escapeXml(selfCallsign)}" ` +
+        `messageId="${escapeXml(nonce)}">` +
+          // chatgrp shape: `uid0` = sender, `uid1` = recipient. WinTAK's
+          // chat router demuxes direct messages by checking whether its
+          // own UID appears in chatgrp's uid* slots — emitting only the
+          // recipient (or only "All Chat Rooms") in `uid0` works for
+          // group chat (it's identified by `<__chat chatroom>` instead)
+          // but causes WinTAK to silently drop direct-chat events. For
+          // group chat the recipient slot is the literal "All Chat
+          // Rooms" string, which matches what WinTAK itself emits.
+          `<chatgrp uid0="${escapeXml(selfUid)}" uid1="${escapeXml(recipientUid)}" ` +
+          `id="${escapeXml(roomId)}"/>` +
         `</__chat>` +
         `<link uid="${escapeXml(selfUid)}" type="a-f-G" relation="p-p"/>` +
         `<remarks source="${escapeXml(remarksSrc)}" to="${escapeXml(recipientUid)}" time="${time}">` +

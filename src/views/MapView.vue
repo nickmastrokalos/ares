@@ -280,6 +280,10 @@ function pickSelfLocation() {
   selfLocationPicking.value = true
 }
 provide('pickSelfLocation', pickSelfLocation)
+// Expose the picking ref too so SettingsDialog can watch it and
+// reopen itself once the pick completes (or is cancelled), saving
+// the operator the round-trip back to Settings → Network.
+provide('selfLocationPicking', selfLocationPicking)
 provide('moveFeature', (id) => moveFeature(id))
 provide('draggingFeature', draggingFeature)
 provide('draggingTrack', draggingTrack)
@@ -302,6 +306,13 @@ const pluginInstallToast = ref(null)   // { kind: 'success'|'error', message }
 function basenameOf(path) {
   return String(path).split(/[\\/]/).pop() ?? path
 }
+// Holds the unsubscribe fn returned by `webview.onDragDropEvent` once
+// the map has loaded (the listener registers from inside the async
+// `map.on('load', ...)` callback). The synchronous `onUnmounted`
+// below is the one Vue requires us to register during setup; it then
+// reaches out to whatever the load callback has assigned.
+let stopPluginDragDrop = null
+onUnmounted(() => { try { stopPluginDragDrop?.() } catch {} })
 
 function resolveBasemapTiles(id) {
   if (id?.startsWith('offline:')) {
@@ -655,7 +666,7 @@ onMounted(async () => {
     // `enabledPlugins` is session-only). Updates to an already-active
     // plugin still need a restart — we just refresh the registry.
     const webview = getCurrentWebviewWindow()
-    const stopDragDrop = await webview.onDragDropEvent(async (event) => {
+    stopPluginDragDrop = await webview.onDragDropEvent(async (event) => {
       const payload = event.payload
       if (payload.type === 'enter' || payload.type === 'over') {
         pluginDropOver.value = payload.paths?.some(p => p.toLowerCase().endsWith('.zip')) ?? false
@@ -684,7 +695,6 @@ onMounted(async () => {
         try { await loadPlugins(pluginRegistry) } catch { /* logged in loader */ }
       }
     })
-    onUnmounted(() => stopDragDrop?.())
 
     // Apply basemap opacity live when the setting changes.
     watch(

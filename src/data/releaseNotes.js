@@ -22,6 +22,25 @@ export const RELEASES = [
     version: 'unreleased'
   },
   {
+    version: '1.1.5',
+    date: '2026-04-27',
+    added: [
+      'TAK Protocol v1 (binary protobuf) on UDP mesh — bidirectional. Inbound + outbound interop with WinTAK and current ATAK peers; presence + GeoChat (group and direct) flow both ways.',
+      'Settings → Network gains team color + role pickers — 14 standard TAK colors with swatch chips, 8 standard roles. Updates broadcast immediately.'
+    ],
+    changed: [
+      '`Active` toggle for TAK comms is per-session — off on every app start; operator opts in explicitly.',
+      'Outbound multicast: TTL bumped 1 → 64 and sent on every non-loopback IPv4 interface, so peers across routed subnets actually receive Ares.',
+      'Presence announces dual-publish to SA + chat-announce groups, advertise a real `<contact endpoint>` (LAN IP + chat port), and use `how="h-e"` for manually-set locations — peers list Ares as a fully addressable contact instead of stale / unreachable.'
+    ],
+    fixed: [
+      'Track list no longer ingests chat events as Null-Island ghosts (now filters non-`a-*` CoT types).',
+      'Settings → Network: TAK toggle row no longer crowds against its description; dialog reopens automatically after picking self-location on the map; dialog widened to 640.',
+      'Chat panel unread-count badge renders as a proper circle / pill instead of a narrow sliver.',
+      'MapView drag-drop teardown registers synchronously — the `onUnmounted is called when there is no active component instance` warning is gone.'
+    ]
+  },
+  {
     version: '1.1.4',
     date: '2026-04-26',
     added: [
