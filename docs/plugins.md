@@ -334,6 +334,66 @@ Returned values are JSON-stringified into the assistant's
 returned as `{ error: <message> }` so the model can react. All
 registrations are auto-removed on plugin disable.
 
+### Network connections
+
+Plugins can declare their own UDP connection kinds. The host owns
+the socket lifecycle and the row in **Settings → Connections**;
+inbound bytes are forwarded to the plugin's `onPacket` callback.
+
+```js
+const unregister = api.connections.registerKind({
+  kind:        'armada-sa-telemetry',     // unique across all plugins
+  label:       'Armada SA telemetry',     // shown in Connections panel
+  description: 'DroneState messages from Armada SA drones.',
+  protocol:    'udp',                     // tcp not yet supported
+  defaults:    { address: '239.x.x.x', port: 15550 },
+  onPacket(bytes, { sourceIp, sourcePort }) {
+    const msg = MyProtoSchema.decode(bytes)   // plugin-owned parsing
+    // do plugin things — update store, draw on map, render in panel…
+  }
+})
+```
+
+Behavior:
+
+- The first time `registerKind` runs, a row is seeded in the
+  Connections panel with the supplied defaults — disabled by default
+  (the operator opts in) and labeled with `label`.
+- On subsequent activations the persisted address / port / protocol /
+  enabled state survives — plugin authors can change `defaults`
+  without trampling user edits.
+- Socket runs only when **both** the plugin is enabled (Settings →
+  Plugins) **and** the connection's `enabled` toggle is on. Either
+  flag false → socket stops.
+- Plugin-owned rows can't be deleted from the Connections UI; only
+  the plugin's `unregister()` (or its uninstall) removes them.
+- `bytes` is a `Uint8Array`. `sourceIp` is the dotted IPv4 / colon
+  IPv6 string of the sender; `sourcePort` is its UDP source port.
+
+### CoT bridge
+
+Plugins ingesting CoT from a non-host source (TAK Server SSL, custom
+gateway, PCAP replay, …) can inject parsed CoT events into the
+host's pipeline:
+
+```js
+api.cot.emit({
+  uid:      'DRONE-7',
+  cot_type: 'a-f-A-M-F-Q',          // standard CoT type string
+  lat:      38.78, lon: -75.10,
+  hae:      0,
+  callsign: 'Drone 7',
+  speed:    0, course: 0,
+  time:     new Date().toISOString(),
+  stale:    new Date(Date.now() + 60_000).toISOString()
+})
+```
+
+The event flows through the same `cot-event` channel the host's
+protected CoT listeners use, so the existing tracks / chat / alert
+stores pick it up unchanged. Required fields: `uid`, `cot_type`
+(or `cotType`), `lat`, `lon`. Everything else has sane defaults.
+
 ### Plugin-scoped persistent settings
 
 ```js

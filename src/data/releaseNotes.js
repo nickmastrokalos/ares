@@ -19,7 +19,14 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased'
+    version: 'unreleased',
+    added: [
+      'Plugin host: `api.connections.registerKind` lets plugins declare their own UDP connections. Rows show up in Settings → Connections owned by the plugin; the host runs the socket and forwards bytes to the plugin\'s `onPacket`.',
+      'Plugin host: `api.cot.emit(event)` injects a parsed CoT event into the host\'s `cot-event` pipeline, so plugins ingesting CoT from non-host sources (TAK Server, gateways, replays) reach all the existing track / chat stores.'
+    ],
+    changed: [
+      'Connections panel reworked: rows now show an Owner badge (Ares / Plugin name / User), edit affordances respect ownership (only ad-hoc rows are renamable / deletable), and the "Add" button is now "Add CoT Listener" with a clarifying note. Underlying store renamed from `cotListeners` to `connections` with one-shot migration on first launch.'
+    ]
   },
   {
     version: '1.1.5',

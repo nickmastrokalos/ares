@@ -1,4 +1,6 @@
 import { ref, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { listen, emit } from '@tauri-apps/api/event'
 import { useFeaturesStore } from '@/stores/features'
 import { useTracksStore } from '@/stores/tracks'
 import { useSettingsStore } from '@/stores/settings'
@@ -62,6 +64,16 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   // registered via api.tools.register. One token per tool so we can
   // unregister individually.
   const _tools    = new Map()
+  // Map<pluginId, Set<kind>> — connection kinds the plugin owns via
+  // api.connections.registerKind.
+  const _conns    = new Map()
+  // Flat Map<kind, { ownerPluginId, onPacket }> for the global
+  // connection-packet dispatcher. Faster than walking every plugin's
+  // set on each inbound packet.
+  const _connKinds = new Map()
+  // Set once we've installed the global `connection-packet` listener
+  // so we don't double-subscribe.
+  let _connPacketUnsubscribe = null
   // Map<pluginId, Array<{ event, handler, mapHandler }>>
   const _events   = new Map()
   // Map<panelId, panelDef> — global, but each entry carries its owner pluginId.
@@ -86,7 +98,10 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     if (!_layers.has(manifest.id)) _layers.set(manifest.id, new Set())
     if (!_images.has(manifest.id)) _images.set(manifest.id, new Set())
     if (!_tools.has(manifest.id))  _tools.set(manifest.id,  new Map())
+    if (!_conns.has(manifest.id))  _conns.set(manifest.id,  new Set())
     if (!_events.has(manifest.id)) _events.set(manifest.id, [])
+
+    _ensureConnectionPacketDispatcher()
 
     function _resolveBeforeId(beforeId) {
       // Default / '@top' → append on top of everything (current
@@ -368,6 +383,136 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         getLandPolygons(bbox)      { return getLandPolygons(bbox) }
       },
 
+      // ---- Network connections ----
+      // Plugins can declare their own UDP / TCP connection kinds. The
+      // host materializes each as a row in Settings → Connections,
+      // owns the socket lifecycle, and forwards inbound bytes to the
+      // plugin's `onPacket` callback. The user controls address /
+      // port / enabled in the Connections UI; the plugin name is
+      // fixed by `label`. Plugin-owned rows can't be deleted from
+      // the UI — only the plugin can unregister them.
+      //
+      // The socket runs only when BOTH the plugin is enabled (via
+      // Settings → Plugins) AND the connection's `enabled` toggle in
+      // the Connections panel is on. Disabling either drops the
+      // socket; enabling both resumes it.
+      connections: {
+        registerKind({ kind, label, description, protocol = 'udp', defaults, onPacket }) {
+          if (typeof kind !== 'string' || !kind) {
+            throw new Error('connections.registerKind: `kind` is required')
+          }
+          if (typeof label !== 'string' || !label) {
+            throw new Error('connections.registerKind: `label` is required')
+          }
+          if (typeof onPacket !== 'function') {
+            throw new Error('connections.registerKind: `onPacket(bytes, src)` is required')
+          }
+          const d = defaults ?? {}
+          if (typeof d.address !== 'string' || !d.address) {
+            throw new Error('connections.registerKind: `defaults.address` is required')
+          }
+          if (!Number.isInteger(d.port) || d.port < 1 || d.port > 65535) {
+            throw new Error('connections.registerKind: `defaults.port` must be 1–65535')
+          }
+          // Collision check: only this plugin can register/replace its
+          // own kinds; another plugin trying to grab the same `kind`
+          // throws so the second plugin can pick a different name.
+          const existing = _connKinds.get(kind)
+          if (existing && existing.ownerPluginId !== manifest.id) {
+            throw new Error(
+              `connections.registerKind: kind "${kind}" already registered by ${existing.ownerPluginId}`
+            )
+          }
+          _connKinds.set(kind, { ownerPluginId: manifest.id, onPacket })
+          _conns.get(manifest.id).add(kind)
+
+          // Seed / refresh the row in the connections store.
+          settingsStore.upsertPluginConnection({
+            kind,
+            name:           label,
+            ownerPluginId:  manifest.id,
+            defaultAddress: d.address,
+            defaultPort:    d.port,
+            defaultProtocol: protocol
+          }).then((row) => {
+            // If the row was already enabled (user opted in on a
+            // previous run), start the socket immediately.
+            if (row.enabled) {
+              invoke('start_listener', {
+                address:  row.address,
+                port:     row.port,
+                protocol: row.protocol ?? 'udp',
+                kind:     row.kind,
+                parser:   'raw'
+              }).catch(err => {
+                console.error(`[connections] failed to start ${kind}:`, err)
+              })
+            }
+          })
+
+          const unregister = () => {
+            // Stop the socket so we don't leak it on plugin reload.
+            const row = settingsStore.connections.find(c => c.kind === kind)
+            if (row?.enabled) {
+              invoke('stop_listener', { address: row.address, port: row.port })
+                .catch(() => {})
+            }
+            _connKinds.delete(kind)
+            _conns.get(manifest.id)?.delete(kind)
+            // Note: we leave the row in place per the lifecycle agreement
+            // — disabling a plugin should not erase the user's
+            // address / port edits.
+          }
+          cleanups.push(unregister)
+          return unregister
+        }
+      },
+
+      // ---- CoT bridge ----
+      // Plugins ingesting CoT from a non-host source (TAK Server SSL,
+      // a custom gateway, a PCAP replay) can inject a parsed CoT
+      // event directly into the host's pipeline. The event flows
+      // through the same `cot-event` channel the host's protected
+      // listeners use, so all the existing track / chat / annotation
+      // stores pick it up unchanged.
+      cot: {
+        emit(event) {
+          if (!event || typeof event !== 'object') {
+            throw new Error('cot.emit: event is required')
+          }
+          if (typeof event.uid !== 'string' || !event.uid) {
+            throw new Error('cot.emit: event.uid is required')
+          }
+          if (typeof event.cot_type !== 'string' || !event.cot_type) {
+            // Tolerate `cotType` (camelCase) too — the rest of the host
+            // exposes camelCase JS, but the on-wire field is `cot_type`.
+            if (typeof event.cotType === 'string' && event.cotType) {
+              event.cot_type = event.cotType
+            } else {
+              throw new Error('cot.emit: event.cot_type is required')
+            }
+          }
+          if (!Number.isFinite(event.lat) || !Number.isFinite(event.lon)) {
+            throw new Error('cot.emit: event.lat and event.lon must be finite numbers')
+          }
+          // Sane defaults for fields the parsed-CoT shape expects.
+          const out = {
+            uid:      event.uid,
+            cot_type: event.cot_type,
+            lat:      event.lat,
+            lon:      event.lon,
+            hae:      Number.isFinite(event.hae) ? event.hae : 0,
+            speed:    Number.isFinite(event.speed) ? event.speed : 0,
+            course:   Number.isFinite(event.course) ? event.course : 0,
+            callsign: event.callsign ?? event.uid,
+            time:     event.time  ?? new Date().toISOString(),
+            stale:    event.stale ?? new Date(Date.now() + 60_000).toISOString(),
+            ...event
+          }
+          return emit('cot-event', out)
+        }
+      },
+
       // ---- Assistant tools ----
       // Plugins can register tools the embedded AI assistant can call.
       // Names are auto-prefixed with a slug derived from the plugin id
@@ -450,6 +595,37 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
 
   // ---- Internal helpers ----
 
+  /**
+   * Install the global `connection-packet` Tauri-event listener that
+   * fans inbound bytes out to whichever plugin owns the matching
+   * `kind`. Lazy: only attaches on first plugin registration so we
+   * don't open a channel listener on a host with zero plugins.
+   */
+  async function _ensureConnectionPacketDispatcher() {
+    if (_connPacketUnsubscribe) return
+    try {
+      _connPacketUnsubscribe = await listen('connection-packet', (event) => {
+        const p = event.payload
+        if (!p || typeof p.kind !== 'string') return
+        const reg = _connKinds.get(p.kind)
+        if (!reg) return  // no plugin owns this kind right now
+        try {
+          reg.onPacket(
+            // Tauri serialises Vec<u8> as Array<number>. Hand plugins a
+            // Uint8Array — typed access, .length works the same, and
+            // it's the natural shape for protobuf decoders.
+            new Uint8Array(p.bytes ?? []),
+            { sourceIp: p.source_ip, sourcePort: p.source_port }
+          )
+        } catch (err) {
+          console.error(`[connections] onPacket for "${p.kind}" threw:`, err)
+        }
+      })
+    } catch (err) {
+      console.error('[connections] failed to install dispatcher:', err)
+    }
+  }
+
   function _patch(id, patch) {
     discoveredPlugins.value = discoveredPlugins.value.map(p =>
       p.id === id ? { ...p, ...patch } : p
@@ -498,9 +674,22 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         console.warn(`[plugin-registry] Failed to unregister tool token for "${id}":`, e)
       }
     }
+    // Connection kinds: stop sockets and detach the onPacket
+    // dispatcher entry. The persisted row stays in
+    // settingsStore.connections so the user's address / port edits
+    // survive plugin reloads.
+    for (const kind of _conns.get(id) ?? []) {
+      const row = settingsStore.connections.find(c => c.kind === kind)
+      if (row?.enabled) {
+        invoke('stop_listener', { address: row.address, port: row.port })
+          .catch(() => {})
+      }
+      _connKinds.delete(kind)
+    }
     _layers.delete(id)
     _images.delete(id)
     _tools.delete(id)
+    _conns.delete(id)
     _events.delete(id)
 
     // Remove any orphan panels owned by this plugin and drop them from the

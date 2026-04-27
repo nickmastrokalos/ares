@@ -246,7 +246,7 @@ watch(selfLocationPicking, (picking, prev) => {
 })
 
 const chatMessagesEndpoint = computed(() => {
-  const l = settingsStore.cotListeners.find(x => x.kind === 'tak-chat-messages')
+  const l = settingsStore.connections.find(x => x.kind === 'tak-chat-messages')
   if (!l) return '— not configured —'
   return `${(l.protocol || 'udp').toUpperCase()} ${l.address}:${l.port}`
 })
