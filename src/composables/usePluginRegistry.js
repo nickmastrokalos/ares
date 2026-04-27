@@ -88,6 +88,29 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     if (!_tools.has(manifest.id))  _tools.set(manifest.id,  new Map())
     if (!_events.has(manifest.id)) _events.set(manifest.id, [])
 
+    function _resolveBeforeId(beforeId) {
+      // Default / '@top' → append on top of everything (current
+      // behavior). Specific id → pass through. '@bottom' → walk the
+      // current style and return the id of the first non-basemap
+      // layer, so the new layer ends up just above the basemap and
+      // below every other host or plugin layer.
+      if (!beforeId || beforeId === '@top') return undefined
+      if (beforeId !== '@bottom') return beforeId
+      const map = getMap()
+      if (!map) return undefined
+      const layers = map.getStyle()?.layers ?? []
+      let pastBasemap = false
+      for (const l of layers) {
+        if (l.id === 'basemap-tiles') { pastBasemap = true; continue }
+        if (pastBasemap) return l.id
+      }
+      // If we never crossed the basemap (e.g. style has no
+      // `basemap-tiles` because the operator picked a different
+      // basemap) just return the first layer id, which is still the
+      // bottom of the stack.
+      return layers[0]?.id
+    }
+
     function _captureMapState() {
       const map = getMap()
       if (!map) return null
@@ -151,7 +174,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       // subscribe to viewport-change events. Layer ids must be unique across
       // the whole map; the registry rejects collisions before touching state.
       map: {
-        addLayer({ id, source, layer, onClick, onHover, onHoverEnd }) {
+        addLayer({ id, source, layer, onClick, onHover, onHoverEnd, beforeId }) {
           const map = getMap()
           if (!map) throw new Error('Map not ready yet. Plugins normally activate after the map loads; if you see this from a long-lived watcher, defer the call.')
           if (!id || typeof id !== 'string') throw new Error('addLayer: id is required')
@@ -159,7 +182,17 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
             throw new Error(`addLayer: id "${id}" already in use`)
           }
           map.addSource(id, source)
-          map.addLayer({ ...layer, id, source: id })
+          // `beforeId` controls where the layer is inserted in the
+          // map's layer stack:
+          //   undefined / '@top' → append (default, on top of everything)
+          //   '@bottom'          → just above the basemap, below all
+          //                        host operator layers (tracks, features,
+          //                        annotations, etc.) — useful for
+          //                        encompassing background overlays like
+          //                        a heatmap that should sit under tracks
+          //   any other string   → passed straight through to MapLibre
+          //                        as a specific anchor layer id
+          map.addLayer({ ...layer, id, source: id }, _resolveBeforeId(beforeId))
           _layers.get(manifest.id).add(id)
 
           // Optional click + hover callbacks. Cursor turns to a pointer
