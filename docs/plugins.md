@@ -12,6 +12,14 @@
 
 A toolbar button or other registered UI appears immediately on enable, and is torn down cleanly on disable — no restart needed for toggles.
 
+### Installing a packaged plugin
+
+If you received a plugin as a `.zip` (the format `pnpm package` produces), you don't have to extract it yourself.
+
+**Easiest path** — drag the `.zip` from Finder / Explorer onto the Ares map window. The host shows a "Drop to install plugin" overlay; release to install. The zip is copied into the plugins folder, extracted in place, and the plugin appears in Settings → Plugins immediately (toggled off — turn it on to activate). A snackbar reports success or any errors.
+
+**Equivalent manual path** — drop the `.zip` directly into the Ares plugins folder and restart. Either way, the host extracts it into a folder of the same name and renames the source to `*.zip.installed` so it isn't re-extracted on every startup. To update later, drop in the new `.zip` (drag-drop or manual); files inside the archive overwrite the previously-extracted files.
+
 > **Single-file plugins** (a bare `.js` file directly in the plugins folder, no directory) are also supported as a convenience for simple scripts.
 
 ---
@@ -147,7 +155,15 @@ const layer = api.map.addLayer({
   onHoverEnd() {
     // Optional. Fires when the cursor leaves the layer. Use to hide
     // your tooltip element.
-  }
+  },
+  beforeId: '@bottom'                     // Optional layer-stack placement.
+                                           // '@top' (default) → on top of everything.
+                                           // '@bottom'         → just above the basemap,
+                                           //                     below all host content.
+                                           // any other string  → MapLibre layer id to
+                                           //                     anchor against (the new
+                                           //                     layer is inserted before
+                                           //                     it).
 })
 
 // Cursor automatically turns to a pointer on hover whenever any
@@ -168,6 +184,21 @@ const state = api.map.getState()
 api.map.onMove((state) => { /* fired on moveend */ })
 api.map.onZoom((state) => { /* fired on zoomend */ })
 // Both return unregister functions; auto-cleaned on deactivation.
+
+// Register a sprite image with the map's style so it can be referenced
+// from `icon-image` in symbol layers. Useful when you want to avoid
+// `text-field` entirely — `text-field` triggers fetches against the
+// host's glyph server for codepoints not handled by the local-emoji
+// fallback, which may not be available in offline / air-gapped
+// deployments. With `addImage` you can bake every glyph into a
+// canvas-rendered PNG and reference it as an icon, keeping your
+// plugin fully self-contained.
+const removeImage = api.map.addImage('my-icon', canvasOrImage, {
+  pixelRatio: 2          // optional; same options as MapLibre's addImage
+})
+removeImage()            // unregister; image is also auto-removed on disable
+
+api.map.removeImage('my-icon')   // imperative form
 ```
 
 ### UI registration — toolbar buttons
@@ -235,6 +266,73 @@ api.map.addLayer({
 
 Both calls return promises. The dataset is cached after the first load,
 so subsequent calls are fast.
+
+### Assistant tools
+
+Plugins can register tools the embedded AI assistant can call, so
+operators can reach plugin functionality through the chat panel
+("what's the weather over Delaware Bay tomorrow afternoon", "set
+units to imperial", etc.) without the host needing to know the
+plugin exists.
+
+```js
+const unregister = api.tools.register({
+  name:        'get_forecast',
+  description: 'Return the latest cached hourly forecast for the station nearest to the given lat/lon, up to 48 h from now.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      lat:         { type: 'number' },
+      lon:         { type: 'number' },
+      hours_ahead: { type: 'integer', minimum: 0, maximum: 48, default: 0 }
+    },
+    required: ['lat', 'lon']
+  },
+  readonly: true,                                  // runs without confirmation
+  execute: async ({ lat, lon, hours_ahead = 0 }) => {
+    return findNearestSample(lat, lon)?.hourly?.[hours_ahead] ?? null
+  }
+})
+
+unregister()                                       // imperative removal
+api.tools.unregister('get_forecast')               // alternate by name
+```
+
+Tool names are auto-prefixed with a slug derived from the plugin id
+(reverse-domain trailing segment, sanitized to `[a-z0-9_]`). For
+`com.ares.weather`, the example above ends up registered as
+`weather_get_forecast`. If your supplied name already starts with
+the slug + `_`, it's left alone — so writing it manually also works.
+Names that collide with another tool throw immediately at
+registration time.
+
+`readonly: false` tools route through the assistant's confirmation
+flow: the chat panel renders a confirm card with a `previewRender(args)
+→ string` summary you can supply, and the handler only runs after the
+user clicks Execute.
+
+```js
+api.tools.register({
+  name:        'set_unit',
+  description: 'Change the temperature unit shown on the map.',
+  inputSchema: {
+    type: 'object',
+    properties: { unit: { type: 'string', enum: ['c', 'f'] } },
+    required: ['unit']
+  },
+  readonly: false,
+  previewRender: ({ unit }) => `Switch temperature unit to °${unit.toUpperCase()}.`,
+  execute: async ({ unit }) => {
+    setUnit(unit)
+    return { unit }
+  }
+})
+```
+
+Returned values are JSON-stringified into the assistant's
+`tool_result` block. Errors thrown from `execute` are caught and
+returned as `{ error: <message> }` so the model can react. All
+registrations are auto-removed on plugin disable.
 
 ### Plugin-scoped persistent settings
 

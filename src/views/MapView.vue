@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useMapStore } from '@/stores/map'
 import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
@@ -293,6 +294,14 @@ provide('annotationsApi', annotationsApi)
 provide('interceptApi', interceptApi)
 
 provide('pluginRegistry', pluginRegistry)
+
+// Drag-drop plugin install: visual cue while a `.zip` is being dragged
+// over the window, plus a snackbar with the install result.
+const pluginDropOver     = ref(false)
+const pluginInstallToast = ref(null)   // { kind: 'success'|'error', message }
+function basenameOf(path) {
+  return String(path).split(/[\\/]/).pop() ?? path
+}
 
 function resolveBasemapTiles(id) {
   if (id?.startsWith('offline:')) {
@@ -639,6 +648,44 @@ onMounted(async () => {
     // "map not ready" race.
     loadPlugins(pluginRegistry)
 
+    // Drag-drop install: when the user drags a `.zip` from outside the
+    // app onto the window, copy it into the plugins folder, extract,
+    // and re-run the plugin loader so the new plugin appears in
+    // Settings → Plugins immediately (toggled off, since
+    // `enabledPlugins` is session-only). Updates to an already-active
+    // plugin still need a restart — we just refresh the registry.
+    const webview = getCurrentWebviewWindow()
+    const stopDragDrop = await webview.onDragDropEvent(async (event) => {
+      const payload = event.payload
+      if (payload.type === 'enter' || payload.type === 'over') {
+        pluginDropOver.value = payload.paths?.some(p => p.toLowerCase().endsWith('.zip')) ?? false
+      } else if (payload.type === 'leave') {
+        pluginDropOver.value = false
+      } else if (payload.type === 'drop') {
+        pluginDropOver.value = false
+        const zips = (payload.paths ?? []).filter(p => p.toLowerCase().endsWith('.zip'))
+        if (!zips.length) return
+        for (const source of zips) {
+          try {
+            await invoke('install_plugin_zip', { source })
+            pluginInstallToast.value = {
+              kind:    'success',
+              message: `Installed ${basenameOf(source)}. Enable it in Settings → Plugins.`
+            }
+          } catch (err) {
+            pluginInstallToast.value = {
+              kind:    'error',
+              message: `Failed to install ${basenameOf(source)}: ${err}`
+            }
+          }
+        }
+        // Refresh the registry so newly-installed plugins appear in
+        // the Plugins settings tab without a restart.
+        try { await loadPlugins(pluginRegistry) } catch { /* logged in loader */ }
+      }
+    })
+    onUnmounted(() => stopDragDrop?.())
+
     // Apply basemap opacity live when the setting changes.
     watch(
       () => settingsStore.basemapOpacity,
@@ -822,8 +869,29 @@ onUnmounted(async () => {
           @close="dispatcher.dismiss()"
         />
         <MapAlertChip :alerts="mapAlerts.alerts.value" />
+
+        <!-- Drag-drop plugin install overlay. Visible only while a
+             `.zip` is being dragged over the window — `pointer-events:
+             none` so the underlying map drag still works for any other
+             dragged content. -->
+        <div v-if="pluginDropOver" class="plugin-drop-overlay">
+          <div class="plugin-drop-card">
+            <v-icon size="48" color="primary">mdi-package-variant-plus</v-icon>
+            <div class="plugin-drop-title">Drop to install plugin</div>
+            <div class="plugin-drop-sub">Ares extracts the .zip into the plugins folder and refreshes Settings → Plugins.</div>
+          </div>
+        </div>
       </div>
     </div>
+    <v-snackbar
+      :model-value="!!pluginInstallToast"
+      :color="pluginInstallToast?.kind === 'error' ? 'error' : 'success'"
+      :timeout="pluginInstallToast?.kind === 'error' ? 8000 : 4000"
+      location="bottom"
+      @update:model-value="(v) => { if (!v) pluginInstallToast = null }"
+    >
+      {{ pluginInstallToast?.message }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -844,5 +912,40 @@ onUnmounted(async () => {
   flex: 1;
   min-width: 0;
   position: relative;
+}
+
+.plugin-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 22, 36, 0.55);
+  backdrop-filter: blur(2px);
+}
+.plugin-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 32px;
+  border-radius: 8px;
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  background: rgba(20, 30, 48, 0.85);
+  color: #fff;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+.plugin-drop-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.plugin-drop-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 320px;
+  text-align: center;
 }
 </style>

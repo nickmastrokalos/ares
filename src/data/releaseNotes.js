@@ -22,6 +22,26 @@ export const RELEASES = [
     version: 'unreleased'
   },
   {
+    version: '1.1.4',
+    date: '2026-04-26',
+    added: [
+      'Plugins can place layers in the map stack via `api.map.addLayer({ ..., beforeId })`; `\'@bottom\'` is a sentinel for "just above the basemap, below all host content".',
+      'Plugin install: drop a packaged `.zip` directly into the plugins folder. The host extracts it on next launch and renames the source to `*.zip.installed`. Updating is one drop-in too.',
+      'Plugin install (drag-drop): drag a packaged `.zip` from Finder / Explorer onto the Ares map window. A "Drop to install plugin" overlay appears; release to install — the zip is copied, extracted, and the new plugin shows up in Settings → Plugins without a restart.'
+    ],
+    fixed: [
+      'Assistant: `map_find_entity` now matches manual-track names whether the user-typed identifier lives in `props.name` or `props.callsign` (previously only the first field was searched, so renamed manual tracks could appear "missing" to the assistant).'
+    ]
+  },
+  {
+    version: '1.1.3',
+    date: '2026-04-26',
+    added: [
+      'Plugins can register custom sprite icons (`api.map.addImage`) for fully offline-friendly map symbology.',
+      'Plugins can expose tools to the AI assistant (`api.tools.register`); auto-prefixed names, same confirm-card flow as built-in tools.'
+    ]
+  },
+  {
     version: '1.1.2',
     date: '2026-04-26',
     added: [
