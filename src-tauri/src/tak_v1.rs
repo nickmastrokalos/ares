@@ -114,17 +114,19 @@ fn decode_takmessage(body: &[u8]) -> Result<CotEvent, String> {
 /// so the frontend can keep composing XML while peers — including
 /// strict WinTAK builds — receive the binary format they expect.
 ///
-/// Strategy: parse the XML once with `parse_cot_xml` to pull out the
-/// fields we structure (uid, type, point, contact, track, chat),
-/// then capture the inner XML of `<detail>...</detail>` verbatim and
-/// place it on `Detail.xml_detail` so any extension fields the
-/// frontend put there (`<__chat>`, `<chatgrp>`, `<remarks>`,
-/// `<takv>`, plugin custom blocks…) round-trip through to the peer.
+/// We extract every field WinTAK validates (uid, type, time/start/stale,
+/// how, point, contact, takv, __group, status, track) into the
+/// structured protobuf fields, AND keep the verbatim inner XML of
+/// `<detail>...</detail>` on `Detail.xml_detail` so any extension
+/// blocks (`<__chat>`, `<chatgrp>`, `<remarks>`, plugin custom
+/// fragments) round-trip through to the peer.
 pub fn encode_xml_to_v1(xml: &str) -> Result<Vec<u8>, String> {
     let event = parse_cot_xml(xml.as_bytes())?;
+    let extras = extract_xml_extras(xml.as_bytes());
     let xml_detail = extract_detail_inner(xml.as_bytes());
 
     let send_ms  = iso_to_epoch_ms(&event.time).unwrap_or(0);
+    let start_ms = iso_to_epoch_ms(&extras.start).unwrap_or(send_ms);
     let stale_ms = iso_to_epoch_ms(&event.stale).unwrap_or(0);
 
     let track = if event.speed != 0.0 || event.course != 0.0 {
@@ -132,6 +134,12 @@ pub fn encode_xml_to_v1(xml: &str) -> Result<Vec<u8>, String> {
     } else {
         None
     };
+
+    let takv = extras.takv.map(|(platform, version, device, os)| proto::Takv {
+        device, platform, os, version,
+    });
+    let group = extras.group.map(|(name, role)| proto::Group { name, role });
+    let status = extras.battery.map(|battery| proto::Status { battery });
 
     let msg = proto::TakMessage {
         tak_control: Some(proto::TakControl {
@@ -141,84 +149,175 @@ pub fn encode_xml_to_v1(xml: &str) -> Result<Vec<u8>, String> {
         }),
         cot_event: Some(proto::CotEvent {
             r#type:     event.cot_type,
-            access:     String::new(),
-            qos:        String::new(),
-            opex:       String::new(),
+            access:     extras.access,
+            qos:        extras.qos,
+            opex:       extras.opex,
             uid:        event.uid,
             send_time:  send_ms,
-            start_time: send_ms,
+            start_time: start_ms,
             stale_time: stale_ms,
-            how:        String::new(),
+            // `how` ("m-g", "h-e", etc.) is a required-feeling field
+            // for strict TAK clients; default to "m-g" (manual / GPS)
+            // when the source XML didn't include one rather than
+            // emitting the empty string.
+            how:        if extras.how.is_empty() { "m-g".into() } else { extras.how },
             lat:        event.lat,
             lon:        event.lon,
             hae:        event.hae,
-            // Sentinel values matching the standard CoT XML
-            // representation when the producer doesn't compute them.
-            ce:         9_999_999.0,
-            le:         9_999_999.0,
+            ce:         extras.ce.unwrap_or(9_999_999.0),
+            le:         extras.le.unwrap_or(9_999_999.0),
             detail: Some(proto::Detail {
                 xml_detail,
                 contact: Some(proto::Contact {
-                    endpoint: String::new(),
+                    // Default endpoint mirrors what ATAK / WinTAK use
+                    // for "no streaming endpoint, contact via the same
+                    // mesh group you saw me on."
+                    endpoint: if extras.endpoint.is_empty() {
+                        "*:-1:stcp".into()
+                    } else {
+                        extras.endpoint
+                    },
                     callsign: event.callsign,
                 }),
-                group:              None,
+                group,
                 precision_location: None,
-                status:             None,
-                takv:               None,
+                status,
+                takv,
                 track,
             }),
         }),
     };
 
-    let mut out = Vec::with_capacity(MAGIC.len() + 64);
+    let mut out = Vec::with_capacity(MAGIC.len() + 128);
     out.extend_from_slice(&MAGIC);
     msg.encode(&mut out).map_err(|e| format!("proto encode: {e}"))?;
     Ok(out)
 }
 
-/// Pull the inner content of the first `<detail>...</detail>` element
-/// out of a CoT XML document, verbatim. Returns an empty string when
-/// the element is missing or self-closing — caller treats that as
-/// "no detail."
-fn extract_detail_inner(xml: &[u8]) -> String {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(false);
-    let mut buf = Vec::new();
-    let mut depth: i32 = 0;
-    let mut start_pos: Option<usize> = None;
+/// Sidecar fields not captured by `parse_cot_xml` — pulled out with
+/// a separate XML walk so we can populate the rest of the protobuf
+/// `Detail` and `CotEvent` shape WinTAK / strict TAK clients expect.
+#[derive(Default)]
+struct XmlExtras {
+    start:    String,         // ISO start time (often equals time)
+    how:      String,
+    access:   String,
+    qos:      String,
+    opex:     String,
+    ce:       Option<f64>,
+    le:       Option<f64>,
+    endpoint: String,
+    takv:     Option<(String, String, String, String)>, // platform, version, device, os
+    group:    Option<(String, String)>,                  // name, role
+    battery:  Option<u32>,
+}
 
+fn extract_xml_extras(xml: &[u8]) -> XmlExtras {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = XmlExtras::default();
     loop {
-        let pos_before = reader.buffer_position() as usize;
-        let evt = reader.read_event_into(&mut buf);
-        let pos_after = reader.buffer_position() as usize;
-        match evt {
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"detail" => {
-                start_pos = Some(pos_after);
-                depth = 1;
-            }
-            Ok(Event::Start(ref _e)) if depth >= 1 => {
-                depth += 1;
-            }
-            Ok(Event::End(ref e)) if e.name().as_ref() == b"detail" && depth == 1 => {
-                if let Some(s) = start_pos {
-                    let slice = &xml[s..pos_before];
-                    return String::from_utf8_lossy(slice).into_owned();
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                let name = e.name();
+                let name = name.as_ref();
+                match name {
+                    b"event" => {
+                        for attr in e.attributes().flatten() {
+                            let val = attr.unescape_value().unwrap_or_default().into_owned();
+                            match attr.key.as_ref() {
+                                b"how"    => out.how    = val,
+                                b"start"  => out.start  = val,
+                                b"access" => out.access = val,
+                                b"qos"    => out.qos    = val,
+                                b"opex"   => out.opex   = val,
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"point" => {
+                        for attr in e.attributes().flatten() {
+                            let val = attr.unescape_value().unwrap_or_default().into_owned();
+                            match attr.key.as_ref() {
+                                b"ce" => out.ce = val.parse().ok(),
+                                b"le" => out.le = val.parse().ok(),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"contact" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"endpoint" {
+                                out.endpoint = attr.unescape_value().unwrap_or_default().into_owned();
+                            }
+                        }
+                    }
+                    b"takv" => {
+                        let mut platform = String::new();
+                        let mut version  = String::new();
+                        let mut device   = String::new();
+                        let mut os       = String::new();
+                        for attr in e.attributes().flatten() {
+                            let val = attr.unescape_value().unwrap_or_default().into_owned();
+                            match attr.key.as_ref() {
+                                b"platform" => platform = val,
+                                b"version"  => version  = val,
+                                b"device"   => device   = val,
+                                b"os"       => os       = val,
+                                _ => {}
+                            }
+                        }
+                        out.takv = Some((platform, version, device, os));
+                    }
+                    b"__group" => {
+                        let mut g_name = String::new();
+                        let mut g_role = String::new();
+                        for attr in e.attributes().flatten() {
+                            let val = attr.unescape_value().unwrap_or_default().into_owned();
+                            match attr.key.as_ref() {
+                                b"name" => g_name = val,
+                                b"role" => g_role = val,
+                                _ => {}
+                            }
+                        }
+                        out.group = Some((g_name, g_role));
+                    }
+                    b"status" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"battery" {
+                                let val = attr.unescape_value().unwrap_or_default().into_owned();
+                                if let Ok(n) = val.parse::<u32>() {
+                                    out.battery = Some(n);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
-                return String::new();
             }
-            Ok(Event::End(ref _e)) if depth >= 1 => {
-                depth -= 1;
-            }
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"detail" => {
-                return String::new();
-            }
-            Ok(Event::Eof) => return String::new(),
-            Err(_) => return String::new(),
+            Ok(Event::Eof) => break,
+            Err(_) => break,
             _ => {}
         }
         buf.clear();
     }
+    out
+}
+
+/// Pull the inner content of the first `<detail>...</detail>` element
+/// out of a CoT XML document, verbatim. Simple substring search —
+/// our composers always emit the unattributed `<detail>...</detail>`
+/// form, never `<detail attr=...>` or `<detail/>`. Returns an empty
+/// string if neither marker is found, which the caller treats as
+/// "no detail."
+fn extract_detail_inner(xml: &[u8]) -> String {
+    let open  = b"<detail>";
+    let close = b"</detail>";
+    let Some(open_pos)  = xml.windows(open.len()).position(|w| w == open)  else { return String::new(); };
+    let body_start = open_pos + open.len();
+    let Some(close_off) = xml[body_start..].windows(close.len()).position(|w| w == close) else { return String::new(); };
+    String::from_utf8_lossy(&xml[body_start..body_start + close_off]).into_owned()
 }
 
 /// Parse `YYYY-MM-DDTHH:MM:SS.mmmZ` (with millisecond precision optional)
@@ -404,6 +503,42 @@ mod tests {
         assert!((event.course - 90.0).abs() < 1e-9);
         // Round-tripped time should match (ms precision preserved).
         assert!(event.time.starts_with("2026-04-27T12:00:00.000"));
+    }
+
+    #[test]
+    fn announce_xml_populates_structured_fields() {
+        // Same shape composeAnnounceXml emits — verify the encoder
+        // translates `how`, `<contact endpoint>`, `<takv>`, `<__group>`
+        // into structured protobuf fields rather than dropping them.
+        let xml = r#"<?xml version="1.0"?>
+<event version="2.0" uid="DRAGON-1" type="a-f-G-U-C" how="m-g" time="2026-04-27T12:00:00.000Z" start="2026-04-27T12:00:00.000Z" stale="2026-04-27T12:05:00.000Z">
+  <point lat="38.78" lon="-75.10" hae="50.0" ce="9999999" le="9999999"/>
+  <detail>
+    <contact callsign="Dragon" endpoint="*:-1:stcp"/>
+    <takv platform="Ares" version="1.1.4" device="Ares" os="Tauri"/>
+    <__group name="Cyan" role="Team Member"/>
+    <status battery="87"/>
+  </detail>
+</event>"#;
+        let bytes = encode_xml_to_v1(xml).expect("encode");
+        // Decode the body (skip magic) and inspect the protobuf shape.
+        let msg = proto::TakMessage::decode(&bytes[MAGIC.len()..]).expect("decode");
+        let evt = msg.cot_event.expect("cot_event");
+        assert_eq!(evt.how, "m-g");
+        let det = evt.detail.expect("detail");
+        let contact = det.contact.expect("contact");
+        assert_eq!(contact.callsign, "Dragon");
+        assert_eq!(contact.endpoint, "*:-1:stcp");
+        let takv = det.takv.expect("takv");
+        assert_eq!(takv.platform, "Ares");
+        assert_eq!(takv.version,  "1.1.4");
+        assert_eq!(takv.device,   "Ares");
+        assert_eq!(takv.os,       "Tauri");
+        let group = det.group.expect("group");
+        assert_eq!(group.name, "Cyan");
+        assert_eq!(group.role, "Team Member");
+        let status = det.status.expect("status");
+        assert_eq!(status.battery, 87);
     }
 
     #[test]
