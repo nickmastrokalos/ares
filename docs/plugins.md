@@ -251,6 +251,73 @@ api.map.addLayer({
 Both calls return promises. The dataset is cached after the first load,
 so subsequent calls are fast.
 
+### Assistant tools
+
+Plugins can register tools the embedded AI assistant can call, so
+operators can reach plugin functionality through the chat panel
+("what's the weather over Delaware Bay tomorrow afternoon", "set
+units to imperial", etc.) without the host needing to know the
+plugin exists.
+
+```js
+const unregister = api.tools.register({
+  name:        'get_forecast',
+  description: 'Return the latest cached hourly forecast for the station nearest to the given lat/lon, up to 48 h from now.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      lat:         { type: 'number' },
+      lon:         { type: 'number' },
+      hours_ahead: { type: 'integer', minimum: 0, maximum: 48, default: 0 }
+    },
+    required: ['lat', 'lon']
+  },
+  readonly: true,                                  // runs without confirmation
+  execute: async ({ lat, lon, hours_ahead = 0 }) => {
+    return findNearestSample(lat, lon)?.hourly?.[hours_ahead] ?? null
+  }
+})
+
+unregister()                                       // imperative removal
+api.tools.unregister('get_forecast')               // alternate by name
+```
+
+Tool names are auto-prefixed with a slug derived from the plugin id
+(reverse-domain trailing segment, sanitized to `[a-z0-9_]`). For
+`com.ares.weather`, the example above ends up registered as
+`weather_get_forecast`. If your supplied name already starts with
+the slug + `_`, it's left alone — so writing it manually also works.
+Names that collide with another tool throw immediately at
+registration time.
+
+`readonly: false` tools route through the assistant's confirmation
+flow: the chat panel renders a confirm card with a `previewRender(args)
+→ string` summary you can supply, and the handler only runs after the
+user clicks Execute.
+
+```js
+api.tools.register({
+  name:        'set_unit',
+  description: 'Change the temperature unit shown on the map.',
+  inputSchema: {
+    type: 'object',
+    properties: { unit: { type: 'string', enum: ['c', 'f'] } },
+    required: ['unit']
+  },
+  readonly: false,
+  previewRender: ({ unit }) => `Switch temperature unit to °${unit.toUpperCase()}.`,
+  execute: async ({ unit }) => {
+    setUnit(unit)
+    return { unit }
+  }
+})
+```
+
+Returned values are JSON-stringified into the assistant's
+`tool_result` block. Errors thrown from `execute` are caught and
+returned as `{ error: <message> }` so the model can react. All
+registrations are auto-removed on plugin disable.
+
 ### Plugin-scoped persistent settings
 
 ```js

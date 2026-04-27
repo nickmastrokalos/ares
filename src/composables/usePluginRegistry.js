@@ -5,6 +5,21 @@ import { useSettingsStore } from '@/stores/settings'
 import { getStore } from '@/plugins/store'
 import { isOverWater, getLandPolygons } from '@/services/coastlines'
 import { version as HOST_VERSION } from '../../package.json'
+import {
+  register as registerAssistantTools,
+  unregister as unregisterAssistantTools,
+  getByName as getAssistantToolByName
+} from '@/services/assistant/toolRegistry'
+
+// Derive a short slug from a reverse-domain plugin id for use as a
+// tool-name prefix. We take the trailing segment ("com.ares.weather"
+// → "weather") and lowercase + sanitize to `[a-z0-9_]`. Falls back to
+// `plugin` for ids that don't fit the reverse-domain shape.
+function _toolSlug(pluginId) {
+  const trail = String(pluginId ?? '').split('.').pop() ?? ''
+  const slug  = trail.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
+  return slug || 'plugin'
+}
 
 // Compare two `MAJOR.MINOR.PATCH` strings. Returns -1, 0, +1. Anything
 // non-numeric in a slot is treated as 0; trailing slots default to 0 so
@@ -43,6 +58,10 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   const _layers   = new Map()
   // Map<pluginId, Set<imageId>> — sprites registered via api.map.addImage
   const _images   = new Map()
+  // Map<pluginId, Map<toolName, registryToken>> — assistant tools
+  // registered via api.tools.register. One token per tool so we can
+  // unregister individually.
+  const _tools    = new Map()
   // Map<pluginId, Array<{ event, handler, mapHandler }>>
   const _events   = new Map()
   // Map<panelId, panelDef> — global, but each entry carries its owner pluginId.
@@ -66,6 +85,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     _cleanups.set(manifest.id, cleanups)
     if (!_layers.has(manifest.id)) _layers.set(manifest.id, new Set())
     if (!_images.has(manifest.id)) _images.set(manifest.id, new Set())
+    if (!_tools.has(manifest.id))  _tools.set(manifest.id,  new Map())
     if (!_events.has(manifest.id)) _events.set(manifest.id, [])
 
     function _captureMapState() {
@@ -315,6 +335,64 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         getLandPolygons(bbox)      { return getLandPolygons(bbox) }
       },
 
+      // ---- Assistant tools ----
+      // Plugins can register tools the embedded AI assistant can call.
+      // Names are auto-prefixed with a slug derived from the plugin id
+      // (e.g. com.ares.weather → "weather_") so plugins don't collide
+      // with each other or with the host's built-in tool families
+      // (cot_*, ais_*, adsb_*, route_*, …). If the plugin author
+      // already supplied the prefix, we leave the name alone.
+      //
+      // Tool defs flow through the same registry (and the same
+      // confirmation flow for `readonly: false` tools) the host uses
+      // internally — see src/services/assistant/turnRunner.js.
+      tools: {
+        register({ name, description, inputSchema, readonly = false, execute, previewRender }) {
+          if (typeof name !== 'string' || !name) {
+            throw new Error('tools.register: `name` is required')
+          }
+          if (typeof execute !== 'function') {
+            throw new Error('tools.register: `execute(args)` is required')
+          }
+          const slug = _toolSlug(manifest.id)
+          const fullName = name.startsWith(`${slug}_`) ? name : `${slug}_${name}`
+          if (_tools.get(manifest.id).has(fullName)) {
+            throw new Error(`tools.register: "${fullName}" already registered by this plugin`)
+          }
+          if (getAssistantToolByName(fullName)) {
+            throw new Error(`tools.register: "${fullName}" collides with an existing tool`)
+          }
+          const def = {
+            name:        fullName,
+            description: description ?? '',
+            inputSchema: inputSchema ?? { type: 'object', properties: {} },
+            handler:     async (args) => execute(args),
+            readonly,
+            ...(typeof previewRender === 'function' ? { previewRender } : {})
+          }
+          const token = registerAssistantTools([def])
+          _tools.get(manifest.id).set(fullName, token)
+          const unregister = () => {
+            const t = _tools.get(manifest.id)?.get(fullName)
+            if (t) {
+              unregisterAssistantTools(t)
+              _tools.get(manifest.id).delete(fullName)
+            }
+          }
+          cleanups.push(unregister)
+          return unregister
+        },
+
+        unregister(name) {
+          const slug = _toolSlug(manifest.id)
+          const fullName = name.startsWith(`${slug}_`) ? name : `${slug}_${name}`
+          const token = _tools.get(manifest.id)?.get(fullName)
+          if (!token) return
+          unregisterAssistantTools(token)
+          _tools.get(manifest.id).delete(fullName)
+        }
+      },
+
       // ---- Plugin-scoped persistent settings ----
       // All keys are namespaced under `plugin:<pluginId>:<key>` in the same
       // tauri-plugin-store the rest of the app uses, so plugins can't collide
@@ -380,8 +458,16 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         try { map.off(event, mapHandler) } catch { /* ignore */ }
       }
     }
+    // Tool tokens live in the assistant registry, not on the map —
+    // unregister regardless of whether the map exists.
+    for (const token of (_tools.get(id)?.values() ?? [])) {
+      try { unregisterAssistantTools(token) } catch (e) {
+        console.warn(`[plugin-registry] Failed to unregister tool token for "${id}":`, e)
+      }
+    }
     _layers.delete(id)
     _images.delete(id)
+    _tools.delete(id)
     _events.delete(id)
 
     // Remove any orphan panels owned by this plugin and drop them from the
