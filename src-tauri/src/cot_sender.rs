@@ -107,10 +107,7 @@ pub async fn send_udp(address: &str, port: u16, xml: &str) -> Result<(), String>
         for iface in &interfaces {
             match send_via(Some(*iface), &target, &payload, true).await {
                 Ok(()) => sent_any = true,
-                Err(e) => {
-                    eprintln!("[cot] → {target} via {iface} FAILED: {e}");
-                    last_err = Some(e);
-                }
+                Err(e) => last_err = Some(e),
             }
         }
         if !sent_any {
@@ -154,16 +151,10 @@ async fn send_via(
             .map_err(|e| format!("multicast ttl: {e}"))?;
     }
     let where_ = iface.map(|i| i.to_string()).unwrap_or_else(|| "0.0.0.0".into());
-    eprintln!(
-        "[cot] → {target} via {where_} ({} B, head: {})",
-        payload.len(),
-        payload.iter().take(16).map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(" ")
-    );
-    let bytes_sent = socket
+    socket
         .send_to(payload, target)
         .await
         .map_err(|e| format!("send via {where_}: {e}"))?;
-    eprintln!("[cot] → {target} via {where_} sent {bytes_sent} B");
     Ok(())
 }
 

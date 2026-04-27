@@ -337,20 +337,15 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     try {
-      console.log('[chat] sendMessage invoking send_cot', {
-        address: dest.address, port: dest.port, protocol: dest.protocol, xmlBytes: xml.length, msgUid
-      })
       await invoke('send_cot', {
         address:  dest.address,
         port:     Number(dest.port),
         protocol: dest.protocol || 'udp',
         xml
       })
-      console.log('[chat] sendMessage send_cot returned ok')
       return { ok: true, uid: msgUid }
     } catch (err) {
       const msg = typeof err === 'string' ? err : (err?.message ?? 'Send failed')
-      console.error('[chat] sendMessage send_cot threw:', msg)
       sendErrors.value.set(msgUid, msg)
       sendErrors.value = new Map(sendErrors.value)
       return { ok: false, error: msg, uid: msgUid }
