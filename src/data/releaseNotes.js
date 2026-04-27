@@ -19,7 +19,10 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased'
+    version: 'unreleased',
+    added: [
+      'Plugin host gains `api.map.addImage(id, image, options?)` and `api.map.removeImage(id)` so plugins can register their own sprite icons and reference them from `icon-image` in symbol layers. Useful for offline-friendly plugins that want to skip `text-field` (which fetches glyph PBFs on demand) and bake their glyphs into self-contained PNGs.'
+    ]
   },
   {
     version: '1.1.2',
