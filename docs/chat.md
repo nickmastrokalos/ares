@@ -119,12 +119,11 @@ otherwise →  cot::parse_cot_xml      (XML)
 
 Both paths return the same `CotEvent` shape, so the listener pipeline (UDP + TCP) and the frontend `cot-event` channel are agnostic to the format the peer used. Chat detail blocks are extracted via the shared `extract_chat_detail_fragment` helper — WinTAK puts them inside `Detail.xml_detail` (an XML fragment string) rather than structured protobuf fields, so the same XML rules apply once the wrapping protobuf is decoded.
 
-Outbound is still XML in v1 of the chat subsystem — current ATAK / WinTAK builds accept XML inbound on the standard mesh groups, so XML is sufficient until proven otherwise. A v1 outbound encoder is a clean follow-up if a peer turns out strict.
+**Outbound is also v1.** The frontend keeps composing XML (it's easier to reason about and the existing chat / announce code works unchanged), but `cot_sender::send_udp` transcodes the XML into a v1 binary `TakMessage` before putting bytes on the wire — the structured fields (point, contact, track, chat) are mapped onto the protobuf schema, and the original `<detail>...</detail>` content rides through verbatim on `Detail.xml_detail`. If the transcode fails for any reason, we fall back to sending the raw XML and log a warning to stderr.
 
 ## Out of scope (v1)
 
 - **TAK Server / SSL streaming** — the Rust `send_tcp` stub returns "not supported yet". Adding this means a persistent connection manager and (eventually) PEM/PKCS12 cert handling. Inbound TAK Protocol v1's TCP streaming framing (varint-length + protobuf) lives here too.
-- **Outbound TAK Protocol v1** — we accept v1 inbound but still write XML outbound. Add an encoder in `cot_sender.rs` if a strict peer drops our XML announces.
 - **Attachments / file transfer** — TAK uses MissionPackage downloads with a `<hierarchy>` element; not implemented.
 - **Read receipts** (`b-t-f-d` / `b-t-f-r`).
 - **Persistence** — chat history is in-memory; restart loses threads. Migrating to SQLite is a follow-up.

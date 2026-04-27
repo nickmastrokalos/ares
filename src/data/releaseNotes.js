@@ -21,7 +21,10 @@ export const RELEASES = [
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
     added: [
-      'TAK Protocol v1 (binary protobuf) inbound on UDP mesh — WinTAK presence + GeoChat now appear in Ares alongside XML peers, no listener config change needed.'
+      'TAK Protocol v1 (binary protobuf) on UDP mesh — bidirectional. Inbound: WinTAK presence + GeoChat now appear in Ares alongside XML peers. Outbound: Ares transcodes its own announces and chat to v1 binary so strict WinTAK builds (which silently drop XML inbound) finally see us.'
+    ],
+    fixed: [
+      'Track list no longer ingests chat events as Null-Island ghosts. The store now requires `cot_type` to start with `a-` (atom / unit), filtering out `b-t-f` chat and other non-track CoT kinds that previously slipped through on TAK Protocol v1 packets.'
     ]
   },
   {

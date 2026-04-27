@@ -1,4 +1,4 @@
-//! TAK Protocol v1 binary CoT decoder.
+//! TAK Protocol v1 binary CoT decoder + encoder.
 //!
 //! Wire format (UDP mesh):
 //!
@@ -17,7 +17,10 @@
 //! downstream code (listeners, frontend chat / track stores) doesn't
 //! care which format the peer used.
 
-use crate::cot::{extract_chat_detail_fragment, CotEvent};
+use crate::cot::{extract_chat_detail_fragment, parse_cot_xml, CotEvent};
+use prost::Message;
+use quick_xml::events::Event;
+use quick_xml::Reader;
 
 /// Generated prost types from `proto/takmessage.proto`. The package
 /// path comes from the proto's `package atakmap.commoncommo.protobuf.v1`
@@ -43,7 +46,6 @@ pub fn try_parse_v1(data: &[u8]) -> Option<Result<CotEvent, String>> {
 }
 
 fn decode_takmessage(body: &[u8]) -> Result<CotEvent, String> {
-    use prost::Message;
     let msg = proto::TakMessage::decode(body)
         .map_err(|e| format!("proto decode: {e}"))?;
     let evt = msg
@@ -105,6 +107,156 @@ fn decode_takmessage(body: &[u8]) -> Result<CotEvent, String> {
         chat_recipient_uid:   chat.chat_recipient_uid,
         chat_text:            chat.chat_text,
     })
+}
+
+/// Transcode an XML CoT document into a TAK Protocol v1 mesh datagram
+/// (magic prefix + protobuf-encoded TakMessage). Used by `cot_sender::send_udp`
+/// so the frontend can keep composing XML while peers — including
+/// strict WinTAK builds — receive the binary format they expect.
+///
+/// Strategy: parse the XML once with `parse_cot_xml` to pull out the
+/// fields we structure (uid, type, point, contact, track, chat),
+/// then capture the inner XML of `<detail>...</detail>` verbatim and
+/// place it on `Detail.xml_detail` so any extension fields the
+/// frontend put there (`<__chat>`, `<chatgrp>`, `<remarks>`,
+/// `<takv>`, plugin custom blocks…) round-trip through to the peer.
+pub fn encode_xml_to_v1(xml: &str) -> Result<Vec<u8>, String> {
+    let event = parse_cot_xml(xml.as_bytes())?;
+    let xml_detail = extract_detail_inner(xml.as_bytes());
+
+    let send_ms  = iso_to_epoch_ms(&event.time).unwrap_or(0);
+    let stale_ms = iso_to_epoch_ms(&event.stale).unwrap_or(0);
+
+    let track = if event.speed != 0.0 || event.course != 0.0 {
+        Some(proto::Track { speed: event.speed, course: event.course })
+    } else {
+        None
+    };
+
+    let msg = proto::TakMessage {
+        tak_control: Some(proto::TakControl {
+            min_proto_version: 1,
+            max_proto_version: 1,
+            contact_uid: event.uid.clone(),
+        }),
+        cot_event: Some(proto::CotEvent {
+            r#type:     event.cot_type,
+            access:     String::new(),
+            qos:        String::new(),
+            opex:       String::new(),
+            uid:        event.uid,
+            send_time:  send_ms,
+            start_time: send_ms,
+            stale_time: stale_ms,
+            how:        String::new(),
+            lat:        event.lat,
+            lon:        event.lon,
+            hae:        event.hae,
+            // Sentinel values matching the standard CoT XML
+            // representation when the producer doesn't compute them.
+            ce:         9_999_999.0,
+            le:         9_999_999.0,
+            detail: Some(proto::Detail {
+                xml_detail,
+                contact: Some(proto::Contact {
+                    endpoint: String::new(),
+                    callsign: event.callsign,
+                }),
+                group:              None,
+                precision_location: None,
+                status:             None,
+                takv:               None,
+                track,
+            }),
+        }),
+    };
+
+    let mut out = Vec::with_capacity(MAGIC.len() + 64);
+    out.extend_from_slice(&MAGIC);
+    msg.encode(&mut out).map_err(|e| format!("proto encode: {e}"))?;
+    Ok(out)
+}
+
+/// Pull the inner content of the first `<detail>...</detail>` element
+/// out of a CoT XML document, verbatim. Returns an empty string when
+/// the element is missing or self-closing — caller treats that as
+/// "no detail."
+fn extract_detail_inner(xml: &[u8]) -> String {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut depth: i32 = 0;
+    let mut start_pos: Option<usize> = None;
+
+    loop {
+        let pos_before = reader.buffer_position() as usize;
+        let evt = reader.read_event_into(&mut buf);
+        let pos_after = reader.buffer_position() as usize;
+        match evt {
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"detail" => {
+                start_pos = Some(pos_after);
+                depth = 1;
+            }
+            Ok(Event::Start(ref _e)) if depth >= 1 => {
+                depth += 1;
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"detail" && depth == 1 => {
+                if let Some(s) = start_pos {
+                    let slice = &xml[s..pos_before];
+                    return String::from_utf8_lossy(slice).into_owned();
+                }
+                return String::new();
+            }
+            Ok(Event::End(ref _e)) if depth >= 1 => {
+                depth -= 1;
+            }
+            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"detail" => {
+                return String::new();
+            }
+            Ok(Event::Eof) => return String::new(),
+            Err(_) => return String::new(),
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+/// Parse `YYYY-MM-DDTHH:MM:SS.mmmZ` (with millisecond precision optional)
+/// to epoch milliseconds. Returns `None` for unparseable / empty
+/// input — caller substitutes 0 for "no timestamp".
+fn iso_to_epoch_ms(iso: &str) -> Option<u64> {
+    if iso.is_empty() { return None; }
+    // Expected shape: 1234-56-78T12:34:56[.789]Z   (Z optional but
+    // recommended). Anything else → None.
+    let bytes = iso.as_bytes();
+    if bytes.len() < 19 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T'
+       || bytes[13] != b':' || bytes[16] != b':' {
+        return None;
+    }
+    let year:  i64 = std::str::from_utf8(&bytes[0..4]).ok()?.parse().ok()?;
+    let month: u64 = std::str::from_utf8(&bytes[5..7]).ok()?.parse().ok()?;
+    let day:   u64 = std::str::from_utf8(&bytes[8..10]).ok()?.parse().ok()?;
+    let hour:  u64 = std::str::from_utf8(&bytes[11..13]).ok()?.parse().ok()?;
+    let mins:  u64 = std::str::from_utf8(&bytes[14..16]).ok()?.parse().ok()?;
+    let secs:  u64 = std::str::from_utf8(&bytes[17..19]).ok()?.parse().ok()?;
+    let mut millis: u64 = 0;
+    if bytes.len() >= 23 && bytes[19] == b'.' {
+        millis = std::str::from_utf8(&bytes[20..23]).ok()?.parse().ok()?;
+    }
+
+    // Days since 1970-01-01 via the same algorithm `ms_to_iso` uses
+    // in reverse (Howard Hinnant's civil-from / days-from formulae).
+    let y = year - if month <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y / 400 } else { (y - 399) / 400 };
+    let yoe = (y - era * 400) as u64;
+    let m  = month;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe as i64 - 719_468;
+    let secs_total = (days as i128) * 86_400 + (hour * 3_600 + mins * 60 + secs) as i128;
+    let ms_total   = secs_total * 1_000 + millis as i128;
+    if ms_total < 0 { None } else { Some(ms_total as u64) }
 }
 
 /// Format epoch-milliseconds as the ISO-8601 string the XML path emits
@@ -221,6 +373,57 @@ mod tests {
         packet.extend_from_slice(b"not protobuf bytes");
         let result = try_parse_v1(&packet).expect("magic detected");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn xml_round_trip_through_v1() {
+        // Compose an XML CoT that mirrors what `composeChatXml` /
+        // `composeAnnounceXml` produce on the frontend, run it through
+        // encode_xml_to_v1, then through try_parse_v1, and confirm the
+        // CotEvent we get back matches the inputs.
+        let xml = r#"<?xml version="1.0"?>
+<event uid="DRAGON-1" type="a-f-G-U-C" time="2026-04-27T12:00:00.000Z" start="2026-04-27T12:00:00.000Z" stale="2026-04-27T12:05:00.000Z">
+  <point lat="38.78" lon="-75.10" hae="50.0" ce="9999999" le="9999999"/>
+  <detail>
+    <contact callsign="Dragon"/>
+    <track speed="12.5" course="90.0"/>
+    <takv platform="Ares" version="1.x"/>
+  </detail>
+</event>"#;
+        let bytes = encode_xml_to_v1(xml).expect("encode");
+        assert_eq!(&bytes[..MAGIC.len()], &MAGIC);
+
+        let event = try_parse_v1(&bytes).unwrap().unwrap();
+        assert_eq!(event.uid, "DRAGON-1");
+        assert_eq!(event.cot_type, "a-f-G-U-C");
+        assert_eq!(event.callsign, "Dragon");
+        assert!((event.lat - 38.78).abs() < 1e-9);
+        assert!((event.lon - (-75.10)).abs() < 1e-9);
+        assert!((event.hae - 50.0).abs() < 1e-9);
+        assert!((event.speed - 12.5).abs() < 1e-9);
+        assert!((event.course - 90.0).abs() < 1e-9);
+        // Round-tripped time should match (ms precision preserved).
+        assert!(event.time.starts_with("2026-04-27T12:00:00.000"));
+    }
+
+    #[test]
+    fn xml_chat_round_trip_preserves_detail_fragment() {
+        let xml = r#"<event uid="MSG-7" type="b-t-f" time="2026-04-27T12:00:00.000Z" start="2026-04-27T12:00:00.000Z" stale="2026-04-27T12:05:00.000Z">
+  <point lat="0" lon="0" hae="0" ce="9999999" le="9999999"/>
+  <detail>
+    <__chat chatroom="All Chat Rooms" id="all" senderCallsign="Dragon"/>
+    <link uid="DRAGON-1" relation="p-p"/>
+    <chatgrp uid0="All Chat Rooms"/>
+    <remarks>hello world</remarks>
+  </detail>
+</event>"#;
+        let bytes = encode_xml_to_v1(xml).expect("encode");
+        let event = try_parse_v1(&bytes).unwrap().unwrap();
+        assert_eq!(event.cot_type, "b-t-f");
+        assert_eq!(event.chat_room.as_deref(),         Some("All Chat Rooms"));
+        assert_eq!(event.chat_sender_callsign.as_deref(), Some("Dragon"));
+        assert_eq!(event.chat_sender_uid.as_deref(),   Some("DRAGON-1"));
+        assert_eq!(event.chat_text.as_deref(),         Some("hello world"));
     }
 
     #[test]
