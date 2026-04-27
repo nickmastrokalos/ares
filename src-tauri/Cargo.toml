@@ -11,6 +11,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+prost-build = "0.13"
+# protox is a pure-Rust replacement for `protoc` so plugin-host builds
+# don't depend on a system protoc install. Compiles our vendored .proto
+# files at build time and feeds the FileDescriptorSet to prost-build.
+protox = "0.7"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -29,3 +34,4 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 if-addrs = "0.13"
 socket2 = { version = "0.5", features = ["all"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+prost = "0.13"

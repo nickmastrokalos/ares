@@ -19,7 +19,10 @@ export const RELEASES = [
     // WIP entry — accumulates user-visible changes between version bumps and
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
-    version: 'unreleased'
+    version: 'unreleased',
+    added: [
+      'TAK Protocol v1 (binary protobuf) inbound on UDP mesh — WinTAK presence + GeoChat now appear in Ares alongside XML peers, no listener config change needed.'
+    ]
   },
   {
     version: '1.1.4',

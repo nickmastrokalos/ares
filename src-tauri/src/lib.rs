@@ -8,6 +8,7 @@ mod listeners;
 mod migrations;
 mod plugins;
 mod scenes;
+mod tak_v1;
 mod tileserver;
 
 use listeners::ListenerManager;
