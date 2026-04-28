@@ -342,15 +342,14 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   async function upsertPluginConnection({
     kind, name, ownerPluginId,
-    defaultAddress, defaultPort, defaultProtocol = 'udp',
-    parser = 'plugin'
+    defaultAddress, defaultPort, defaultProtocol = 'udp'
   }) {
     const existing = connections.value.find(c => c.kind === kind)
     if (existing) {
       existing.name          = name
       existing.ownerKind     = 'plugin'
       existing.ownerPluginId = ownerPluginId
-      existing.parser        = parser
+      existing.parser        = 'plugin'
       existing.protected     = true
       await saveConnections()
       return existing
@@ -365,7 +364,7 @@ export const useSettingsStore = defineStore('settings', () => {
       protected:     true,
       ownerKind:     'plugin',
       ownerPluginId,
-      parser
+      parser:        'plugin'
     }
     connections.value.push(fresh)
     await saveConnections()
@@ -384,6 +383,21 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function toggleConnection(index) {
     connections.value[index].enabled = !connections.value[index].enabled
+    await saveConnections()
+  }
+
+  /**
+   * Set the `enabled` flag on a connection by `kind`. Used by the
+   * plugin host to mirror plugin lifecycle into its connection rows
+   * — when a plugin activates it flips its kinds on, and when it
+   * deactivates it flips them off. No-op if the kind doesn't exist
+   * yet (the plugin may register lazily after settings load).
+   */
+  async function setConnectionEnabledByKind(kind, enabled) {
+    const row = connections.value.find(c => c.kind === kind)
+    if (!row) return
+    if (row.enabled === enabled) return
+    row.enabled = enabled
     await saveConnections()
   }
 
@@ -414,6 +428,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setSetting,
     addAdhocCotConnection,
     upsertPluginConnection,
+    setConnectionEnabledByKind,
     updateConnection,
     removeConnection,
     toggleConnection

@@ -20,7 +20,16 @@ export const RELEASES = [
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
-    added: []
+    added: [
+      'Plugin panels: `registerPanel({ width })` pins panel width across collapse/expand; `registerPanel({ iconSvg })` and `registerToolbarButton({ iconSvg })` accept inline SVG so plugins aren\'t locked to MDI icons. Panel headers now carry a chevron toggle that hides the body without unmounting plugin DOM.',
+      'Plugin host: `api.units` + `api.format` mirror the host\'s display preferences (distance units, coordinate format). `api.format.distance / speed / coordinate` reuse the same services the host uses internally; `api.units.onChange(handler)` fires immediately on a settings flip.',
+      'Plugin loader: enabling a plugin now re-reads its bundle from disk. Devs can `pnpm build` then toggle the plugin off → on to pick up changes without a full Ares restart.'
+    ],
+    fixed: [
+      'CoT tracks from peers with skewed clocks (radios without GPS lock, PCAP replays) used to disappear within 30 s of arriving because their `stale` field was already in the past. Stale handling now anchors the peer\'s intended freshness window (`stale − time`) to local receive time when skew exceeds 5 minutes.',
+      'Plugin panels are now capped to the viewport height with a scrollable body — a panel that lists many items no longer runs off the bottom of the screen.',
+      'Plugin connections honour their lifecycle correctly — registering a kind sets the row enabled and starts the socket; disabling the plugin flips the row off and stops the socket. Address / port / protocol edits still persist across reloads.'
+    ]
   },
   {
     version: '1.1.6',
@@ -28,7 +37,7 @@ export const RELEASES = [
     added: [
       'Plugin host: `api.connections.registerKind` lets plugins declare their own UDP connections. Rows show up in Settings → Connections owned by the plugin; the host runs the socket and forwards bytes to the plugin\'s `onPacket`.',
       'Plugin host: `api.cot.emit(event)` injects a parsed CoT event into the host\'s `cot-event` pipeline, so plugins ingesting CoT from non-host sources (TAK Server, gateways, replays) reach all the existing track / chat stores.',
-      '`registerKind` accepts `parser: \'cot\'` for plugins contributing a CoT-parsed source — bytes flow through the shared `cot-event` channel without the plugin parsing them. Paired with `api.cot.onEvent(handler)` so plugins can react to incoming CoT events.'
+      'Plugin host: `api.cot.parse(bytes)` runs the host\'s CoT parser (XML + TAK Protocol v1) on raw bytes, returning a `null` result when the bytes aren\'t CoT. Plugins owning a raw CoT socket pair this with `cot.emit` to forward only their own socket\'s traffic into the host pipeline.'
     ],
     changed: [
       'Connections panel reworked: rows now show an Owner badge (Ares / Plugin name / User), edit affordances respect ownership (only ad-hoc rows are renamable / deletable), and the "Add" button is now "Add CoT Listener" with a clarifying note. Underlying store renamed from `cotListeners` to `connections` with one-shot migration on first launch.'

@@ -330,7 +330,6 @@ function formatConnection(c) {
             <!-- Display mode -->
             <v-list-item
               v-if="editingIndex !== index"
-              :title="c.name || formatConnection(c)"
               :class="{ 'text-medium-emphasis': !c.enabled || !isOwnerActive(c) }"
               class="px-0"
             >
@@ -344,10 +343,15 @@ function formatConnection(c) {
                   />
                 </v-list-item-action>
               </template>
+              <template #title>
+                <span class="d-flex align-center ga-2 flex-wrap">
+                  <span>{{ c.name || formatConnection(c) }}</span>
+                  <span class="owner-badge" :data-owner="c.ownerKind">{{ ownerLabel(c) }}</span>
+                </span>
+              </template>
               <template #subtitle>
                 <span class="d-flex align-center ga-2 flex-wrap">
                   <span>{{ formatConnection(c) }}</span>
-                  <span class="owner-badge" :data-owner="c.ownerKind">{{ ownerLabel(c) }}</span>
                   <span
                     v-if="c.ownerKind === 'plugin' && !isOwnerActive(c)"
                     class="text-caption text-warning"

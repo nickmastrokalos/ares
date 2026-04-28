@@ -346,10 +346,17 @@ const feedsActive      = () => props.aisPanelOpen || props.adsbPanelOpen || prop
             <v-list-item
               v-for="btn in pluginButtons"
               :key="btn.id"
-              :prepend-icon="btn.icon"
+              :prepend-icon="btn.iconSvg ? undefined : btn.icon"
               :title="btn.tooltip || btn.id"
               @click="btn.onClick"
-            />
+            >
+              <!-- Inline-SVG path: bypasses Vuetify's prepend-icon
+                   slot when the plugin supplied raw SVG. Wrapped
+                   to match the 24×24 prepend-icon footprint. -->
+              <template v-if="btn.iconSvg" #prepend>
+                <span class="plugin-svg-icon" v-html="btn.iconSvg" />
+              </template>
+            </v-list-item>
           </v-list>
         </v-menu>
       </template>
@@ -457,5 +464,26 @@ const feedsActive      = () => props.aisPanelOpen || props.adsbPanelOpen || prop
   background: rgb(var(--v-theme-surface)) !important;
   border: 1px solid rgb(var(--v-theme-surface-variant));
   border-radius: 4px;
+}
+
+/* Plugin-supplied inline SVG icons. Sized to match the default
+   v-icon prepend slot (~24px square) and inherit the surrounding
+   text colour via `currentColor` if the plugin's SVG opts in.
+   The right margin reproduces the spacer Vuetify normally inserts
+   when you use `prepend-icon=...` instead of the `#prepend` slot —
+   without it, plugin-icon rows sit closer to their title than the
+   MDI rows. */
+.plugin-svg-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-inline-end: 32px;
+  color: inherit;
+}
+.plugin-svg-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
 }
 </style>

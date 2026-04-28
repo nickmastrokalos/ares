@@ -102,6 +102,16 @@ fn stop_all_listeners(state: tauri::State<ListenerState>) {
     state.0.lock().unwrap().stop_all();
 }
 
+/// Parse a CoT message (XML or TAK Protocol v1) and return the host's
+/// `CotEvent` shape. Used by plugins that own a raw socket
+/// (`parser: 'plugin'`) and want to feed received bytes back into the
+/// host's CoT pipeline via `api.cot.emit`. Errors come back as a
+/// human-readable string so the plugin can log and skip bad packets.
+#[tauri::command]
+fn parse_cot_bytes(bytes: Vec<u8>) -> Result<cot::CotEvent, String> {
+    cot::parse_cot(&bytes)
+}
+
 /// Send a single CoT XML payload to a destination.
 ///
 /// `protocol` is "udp" (functional in v1) or "tcp" (returns an error from
@@ -243,6 +253,7 @@ pub fn run() {
             start_listener,
             stop_listener,
             stop_all_listeners,
+            parse_cot_bytes,
             send_cot,
             cot_sender::get_lan_ipv4,
             fetch_ais_vessels,
