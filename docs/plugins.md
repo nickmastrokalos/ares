@@ -439,6 +439,141 @@ api.connections.registerKind({
 bytes weren't valid CoT (the failure is logged once at warn level
 so noisy multicast groups don't flood the console).
 
+### Route planning contributions
+
+Plugins can teach the route planner about new avoidance
+constraints (areas a route should not enter) and evaluators
+(point-sampled values the assistant can walk along an existing
+route). Both register through `api.routing.*`; the assistant
+discovers them via the `routing_list_avoidances` and
+`routing_list_evaluators` tools.
+
+```js
+// Avoidance: returns obstacle polygons for a route corridor
+api.routing.registerAvoidance({
+  id:           'cloud-cover',           // unique across all plugins
+  label:        'Cloud cover',
+  description:  'Forecasted cloud cover ≥ threshold at the supplied hours_ahead.',
+  paramsSchema: {
+    type: 'object',
+    properties: {
+      threshold_pct: { type: 'number',  minimum: 0, maximum: 100, default: 60 },
+      hours_ahead:   { type: 'integer', minimum: 0, maximum: 48,  default: 0 }
+    }
+  },
+  async getObstacles({ bbox, params }) {
+    // bbox = [west, south, east, north]; the planner has already
+    // padded ~5 % around the start/end/via corridor.
+    // Sample the bbox, threshold by params.threshold_pct at
+    // params.hours_ahead, return GeoJSON Polygons.
+    return [{ type: 'Polygon', coordinates: [[…]] }]
+  }
+})
+
+// Evaluator: point-sample at a route waypoint's ETA
+api.routing.registerEvaluator({
+  id:           'cloud-cover',
+  label:        'Cloud cover %',
+  description:  'Single-point cloud cover percent at lat/lon, evaluated at the route waypoint\'s ETA.',
+  paramsSchema: { type: 'object', properties: {} },
+  async sampleAt({ lat, lon, atIso, params }) {
+    // atIso is the ISO 8601 timestamp the route assigns to the
+    // waypoint based on its depart_at_iso + speed_kts.
+    return { value: 75, unit: '%' }
+  }
+})
+```
+
+Behavior:
+
+- `id` is unique across all plugins. Re-registering the same id
+  (or colliding with a host-built-in like `tracks`) throws at
+  registration time.
+- Both `getObstacles` and `sampleAt` are async; the planner
+  awaits them serially per route plan, so cache aggressively if
+  the underlying source is slow.
+- Plugin-contributed obstacle polygons are capped per plan at
+  200 polygons per contributor — overflow is silently dropped
+  and the count surfaces back to the assistant in the
+  `applied_avoidances` block of the route response. Use
+  marching-squares-style grouping or a coarser grid if you find
+  yourself routinely hitting the cap.
+- Both registrations auto-clean on plugin disable.
+- The `paramsSchema` is JSON Schema. Validation is currently
+  permissive (the planner passes whatever the assistant supplied);
+  apply your own defaults inside `getObstacles` /  `sampleAt`.
+  When a plugin registers BOTH an avoidance and an evaluator under
+  the same `id`, keep the schemas consistent — the assistant treats
+  them as the same conceptual quantity.
+- Built-in host avoidances (e.g. `tracks` for surface CoT tracks
+  from `tracksStore`) appear in `routing_list_avoidances` with a
+  null `ownerPluginId`. They behave identically to plugin entries.
+
+### Declaring capabilities for disabled-state discovery (`provides`)
+
+Plugins are invisible to the AI assistant when they're disabled —
+their tools, avoidances, and evaluators all disappear from the
+host's registries. Without help, the assistant can't tell the user
+"to do X you need to enable plugin Y". Plugin authors close that
+gap by adding an optional **`provides`** block to the manifest:
+
+```js
+export default {
+  id:    'com.ares.illumination',
+  name:  'Illumination',
+  ...
+  provides: {
+    tools: [
+      { name: 'illumination_get',
+        description: 'Sun + moon conditions and effective illumination at a point.' },
+      { name: 'illumination_get_events',
+        description: 'Astronomical event timeline at a point.' }
+    ],
+    avoidances: [
+      { id: 'cloud-cover', label: 'Cloud cover',
+        description: 'Forecasted cloud cover ≥ threshold.' }
+    ],
+    evaluators: [
+      { id: 'cloud-cover', label: 'Cloud cover %',
+        description: 'Single-point cloud cover at lat/lon at the route waypoint\'s ETA.' }
+    ]
+  }
+}
+```
+
+What `provides` does:
+
+- The host **indexes it at plugin discovery** (the moment the
+  manifest is loaded), regardless of whether the plugin is
+  enabled. The assistant can then list every plugin-contributed
+  capability — both currently-live and currently-disabled — via
+  the `plugin_capabilities_list` tool, plus see disabled
+  contributors in the `disabled` arrays of
+  `routing_list_avoidances` / `routing_list_evaluators`.
+- When a user asks for something a disabled plugin would
+  provide, the assistant tells them which plugin to enable in
+  Settings → Plugins instead of failing silently.
+- `provides` is **fully optional**. Plugins without it work
+  exactly as before — their disabled state just isn't
+  advertised. Recommended for any plugin that registers
+  assistant tools or routing contributors.
+
+Constraints:
+
+- The runtime registry is **ground truth**. If `provides`
+  declares an id that `activate()` never registers, the entry
+  appears in `disabled` even when the plugin is active — easy to
+  spot in dev. Plugin authors are responsible for keeping
+  `provides` in sync with their actual `register*` calls.
+- The host validates `provides` permissively: missing fields
+  default to empty arrays, malformed entries are dropped. Plugins
+  that ship a wrong shape don't crash the host.
+- Tool names in `provides.tools` must be the **fully prefixed**
+  names the assistant sees (e.g. `armada_sa_list`, not just
+  `list`). The plugin slug prefix (`com.ares.armada-sa` →
+  `armada_sa_`) is what `api.tools.register({ name: 'list' })`
+  actually publishes; mirror that in `provides`.
+
 ### Display preferences (units + coordinate format)
 
 Plugin panels should render distances, speeds, and coordinates the

@@ -42,6 +42,33 @@ function compareSemver(a, b) {
   return 0
 }
 
+/**
+ * Sanitise a plugin's `manifest.provides` block into a predictable
+ * shape: three arrays of plain `{ name|id, label, description }`
+ * entries. Returns empty arrays for any field the plugin omitted or
+ * mistyped. Defensive — manifest content comes from the plugin
+ * loader (an arbitrary JS file on disk), so we don't trust the
+ * shape blindly.
+ */
+function normaliseProvides(raw) {
+  const block = raw && typeof raw === 'object' ? raw : {}
+  const safeStr = (v) => typeof v === 'string' ? v : ''
+  const tools = Array.isArray(block.tools) ? block.tools.map(t => ({
+    name:        safeStr(t?.name),
+    description: safeStr(t?.description)
+  })).filter(t => t.name) : []
+  const mapIded = (arr) => Array.isArray(arr) ? arr.map(e => ({
+    id:          safeStr(e?.id),
+    label:       safeStr(e?.label) || safeStr(e?.id),
+    description: safeStr(e?.description)
+  })).filter(e => e.id) : []
+  return {
+    tools,
+    avoidances: mapIded(block.avoidances),
+    evaluators: mapIded(block.evaluators)
+  }
+}
+
 export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   const featuresStore = useFeaturesStore()
   const tracksStore   = useTracksStore()
@@ -73,6 +100,37 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   // connection-packet dispatcher. Faster than walking every plugin's
   // set on each inbound packet.
   const _connKinds = new Map()
+  // Routing contribution registries — populated via
+  // `api.routing.registerAvoidance` / `registerEvaluator` (plugins) and
+  // `_hostRegisterAvoidance` / `_hostRegisterEvaluator` (built-ins like
+  // the surface-track avoidance the host owns directly). Flat maps for
+  // O(1) lookup by id; per-plugin sets so we can clean up everything
+  // a plugin contributed when it's disabled.
+  //
+  // Avoidance entries:  Map<id, { ownerPluginId|null, label, description, paramsSchema, getObstacles }>
+  // Evaluator entries:  Map<id, { ownerPluginId|null, label, description, paramsSchema, sampleAt }>
+  const _avoidances        = new Map()
+  const _evaluators        = new Map()
+  const _avoidancesByPlugin = new Map()
+  const _evaluatorsByPlugin = new Map()
+
+  // Manifest-declared capabilities, indexed at plugin discovery
+  // (`registerPlugin`) regardless of whether the plugin is later
+  // activated. Lets the assistant surface what a *disabled* plugin
+  // *would* contribute, so it can tell the operator "enable plugin X
+  // to use Y" instead of just shrugging.
+  //
+  // Each plugin's manifest can carry an optional `provides` block:
+  //   provides: {
+  //     tools:      [{ name, description }],
+  //     avoidances: [{ id, label, description }],
+  //     evaluators: [{ id, label, description }]
+  //   }
+  // Plugins without `provides` work exactly as before — their
+  // disabled state simply isn't advertised.
+  //
+  // Map<pluginId, { tools, avoidances, evaluators }>
+  const _provides = new Map()
   // Set once we've installed the global `connection-packet` listener
   // so we don't double-subscribe.
   let _connPacketUnsubscribe = null
@@ -102,6 +160,8 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     if (!_tools.has(manifest.id))  _tools.set(manifest.id,  new Map())
     if (!_conns.has(manifest.id))  _conns.set(manifest.id,  new Set())
     if (!_events.has(manifest.id)) _events.set(manifest.id, [])
+    if (!_avoidancesByPlugin.has(manifest.id)) _avoidancesByPlugin.set(manifest.id, new Set())
+    if (!_evaluatorsByPlugin.has(manifest.id)) _evaluatorsByPlugin.set(manifest.id, new Set())
 
     _ensureConnectionPacketDispatcher()
 
@@ -485,6 +545,20 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         }
       },
 
+      // ---- Route planning contributions ----
+      // Plugins can teach the host's route planner about new
+      // avoidance constraints (areas a route should not enter)
+      // and evaluators (point-sampled values the assistant can
+      // walk along an existing route). Both registries are
+      // keyed by `id`; the assistant discovers them via the
+      // `routing_list_avoidances` / `routing_list_evaluators`
+      // tools. Clean-up on plugin disable removes the plugin's
+      // entries from both registries.
+      routing: {
+        registerAvoidance(spec)  { return _registerRouting('avoidance', manifest.id, cleanups, spec) },
+        registerEvaluator(spec)  { return _registerRouting('evaluator', manifest.id, cleanups, spec) }
+      },
+
       // ---- Host display preferences ----
       // Mirror the user's distance-unit and coordinate-format
       // settings so plugin panels render consistently with the
@@ -667,6 +741,66 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     }
   }
 
+  /**
+   * Shared registration path for both `registerAvoidance` and
+   * `registerEvaluator`. `kind` is `'avoidance'` or `'evaluator'`;
+   * the rest of the validation rules are identical so it lives in
+   * one place. `cleanups` is the per-activation cleanup list — we
+   * push an unregister fn there so the plugin's contributions are
+   * removed atomically when it disables.
+   *
+   * Host-internal callers (`_hostRegisterAvoidance` etc.) bypass
+   * this helper and write to the registries directly; they have no
+   * pluginId to track and no cleanup list to push into.
+   */
+  function _registerRouting(kind, ownerPluginId, cleanups, spec) {
+    const isEval = kind === 'evaluator'
+    const noun   = isEval ? 'registerEvaluator' : 'registerAvoidance'
+    if (!spec || typeof spec.id !== 'string' || !spec.id) {
+      throw new Error(`routing.${noun}: \`id\` is required`)
+    }
+    if (typeof spec.label !== 'string' || !spec.label) {
+      throw new Error(`routing.${noun}: \`label\` is required`)
+    }
+    const callback = isEval ? spec.sampleAt : spec.getObstacles
+    if (typeof callback !== 'function') {
+      throw new Error(`routing.${noun}: \`${isEval ? 'sampleAt' : 'getObstacles'}\` is required`)
+    }
+    const registry  = isEval ? _evaluators        : _avoidances
+    const ownerSets = isEval ? _evaluatorsByPlugin : _avoidancesByPlugin
+    if (registry.has(spec.id)) {
+      const existing = registry.get(spec.id)
+      throw new Error(`routing.${noun}: id "${spec.id}" already registered by ${existing.ownerPluginId ?? '@host'}`)
+    }
+    registry.set(spec.id, {
+      ownerPluginId,
+      label:        spec.label,
+      description:  spec.description ?? '',
+      paramsSchema: spec.paramsSchema ?? { type: 'object', properties: {} },
+      ...(isEval ? { sampleAt: spec.sampleAt } : { getObstacles: spec.getObstacles })
+    })
+    if (ownerPluginId) ownerSets.get(ownerPluginId)?.add(spec.id)
+    const unregister = () => {
+      registry.delete(spec.id)
+      if (ownerPluginId) ownerSets.get(ownerPluginId)?.delete(spec.id)
+    }
+    if (cleanups) cleanups.push(unregister)
+    return unregister
+  }
+
+  /**
+   * Built-in avoidances / evaluators owned by the host (e.g. the
+   * surface-track avoidance whose data lives in tracksStore). Same
+   * shape as the plugin API but with no owner / cleanup wiring —
+   * host registrations live for the app's lifetime.
+   */
+  function _hostRegisterAvoidance(spec) {
+    return _registerRouting('avoidance', null, null, spec)
+  }
+  function _hostRegisterEvaluator(spec) {
+    return _registerRouting('evaluator', null, null, spec)
+  }
+
   // ---- Internal helpers ----
 
   /**
@@ -761,6 +895,16 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       }
       _connKinds.delete(kind)
     }
+    // Routing contributions: remove every avoidance / evaluator
+    // this plugin registered. The cleanup fns pushed by
+    // `_registerRouting` already do this on plugin reload, but the
+    // defensive sweep here covers the case where a plugin throws
+    // mid-activate before its unregister was tracked.
+    for (const aid of _avoidancesByPlugin.get(id) ?? []) _avoidances.delete(aid)
+    for (const eid of _evaluatorsByPlugin.get(id) ?? []) _evaluators.delete(eid)
+    _avoidancesByPlugin.delete(id)
+    _evaluatorsByPlugin.delete(id)
+
     _layers.delete(id)
     _images.delete(id)
     _tools.delete(id)
@@ -811,6 +955,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       return
     }
     _manifests.set(manifest.id, manifest)
+    _provides.set(manifest.id, normaliseProvides(manifest.provides))
 
     // Host-version gate. Plugins may declare `minHostVersion: 'X.Y.Z'` to
     // refuse loading on hosts that don't expose enough of the API surface.
@@ -868,6 +1013,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         const manifest = module.default
         if (manifest?.id && typeof manifest.activate === 'function') {
           _manifests.set(id, manifest)
+          _provides.set(id, normaliseProvides(manifest.provides))
           // Refresh the surface fields so the Plugins settings row
           // reflects e.g. an updated version string.
           _patch(id, {
@@ -929,6 +1075,170 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     _openPanelIds.value = next
   }
 
+  // Read-side surface for the routing tool / assistant tools.
+  // Avoidance and evaluator entries are mutated by plugin
+  // enable/disable, so callers should re-read at use time rather
+  // than caching the iterators.
+  // Compute per-plugin status for the disabled-capability listers.
+  // Active = plugin manifest is in `_manifests` AND its row in
+  // `discoveredPlugins` is `active: true`. Loaded = manifest is in
+  // `_manifests` (regardless of activation). Incompatible = the
+  // host-version gate flagged it at registerPlugin time.
+  function _pluginStatus(id) {
+    const row = discoveredPlugins.value.find(p => p.id === id)
+    return {
+      id,
+      name:         row?.name ?? id,
+      loaded:       _manifests.has(id),
+      active:       row?.active === true,
+      incompatible: row?.incompatible === true
+    }
+  }
+  function _disabledReason(status) {
+    if (status.incompatible) return 'plugin_incompatible'
+    if (!status.active)      return 'plugin_disabled'
+    return 'plugin_not_registered'  // active but didn't register
+  }
+  function _walkDeclared(kind, registry) {
+    // `kind` = 'avoidances' | 'evaluators'. Returns each declared
+    // entry (across every loaded plugin) that ISN'T currently in
+    // the live registry. Skips plugins whose declaration is empty.
+    const out = []
+    for (const [pluginId, declared] of _provides.entries()) {
+      const list = declared?.[kind] ?? []
+      if (!list.length) continue
+      const status = _pluginStatus(pluginId)
+      for (const d of list) {
+        if (registry.has(d.id)) continue   // already live, don't double-list
+        out.push({
+          id:                   d.id,
+          label:                d.label,
+          description:          d.description,
+          requires_plugin_id:   pluginId,
+          requires_plugin_name: status.name,
+          plugin_loaded:        status.loaded,
+          plugin_active:        status.active,
+          plugin_incompatible:  status.incompatible,
+          reason:               _disabledReason(status)
+        })
+      }
+    }
+    return out
+  }
+
+  const routing = {
+    listAvoidances() {
+      const enabled = [..._avoidances.entries()].map(([id, e]) => ({
+        id,
+        ownerPluginId: e.ownerPluginId,
+        label:         e.label,
+        description:   e.description,
+        paramsSchema:  e.paramsSchema
+      }))
+      return { enabled, disabled: _walkDeclared('avoidances', _avoidances) }
+    },
+    listEvaluators() {
+      const enabled = [..._evaluators.entries()].map(([id, e]) => ({
+        id,
+        ownerPluginId: e.ownerPluginId,
+        label:         e.label,
+        description:   e.description,
+        paramsSchema:  e.paramsSchema
+      }))
+      return { enabled, disabled: _walkDeclared('evaluators', _evaluators) }
+    },
+    getAvoidance(id) { return _avoidances.get(id) ?? null },
+    getEvaluator(id) { return _evaluators.get(id) ?? null },
+    // Lookup helpers for the route tool's error path: when an
+    // avoid_extras id isn't live, find which plugin declared it
+    // (if any) so the error can name the plugin to enable.
+    findDeclaredAvoidance(id) {
+      for (const entry of _walkDeclared('avoidances', _avoidances)) {
+        if (entry.id === id) return entry
+      }
+      return null
+    },
+    findDeclaredEvaluator(id) {
+      for (const entry of _walkDeclared('evaluators', _evaluators)) {
+        if (entry.id === id) return entry
+      }
+      return null
+    },
+    // Host-side built-in registration. Used by MapView to wire
+    // the surface-track avoidance once tracksStore is available.
+    hostRegisterAvoidance: _hostRegisterAvoidance,
+    hostRegisterEvaluator: _hostRegisterEvaluator
+  }
+
+  // Plugin-capability discovery. Lets the assistant answer "what
+  // can I do, and what would enabling another plugin unlock?". The
+  // returned `disabled` array enumerates each loaded but inactive
+  // (or incompatible) plugin's declared `provides` block; the
+  // assistant uses this to suggest enabling specific plugins
+  // instead of failing silently.
+  const capabilities = {
+    list() {
+      // Enabled tools: walk `_tools` for active plugins. Each tool
+      // name is the assistant-facing prefixed name (e.g.
+      // `armada_sa_list`). Manifests' `provides.tools` carries the
+      // same names so the disabled side stays consistent.
+      const enabledTools = []
+      for (const [pluginId, byName] of _tools.entries()) {
+        const status = _pluginStatus(pluginId)
+        if (!status.active) continue
+        for (const [toolName] of byName.entries()) {
+          enabledTools.push({
+            name:                 toolName,
+            owner_plugin_id:      pluginId,
+            owner_plugin_name:    status.name
+          })
+        }
+      }
+      const enabledAvoidances = routing.listAvoidances().enabled
+      const enabledEvaluators = routing.listEvaluators().enabled
+
+      // Disabled — one block per plugin that's loaded-but-inactive
+      // (or incompatible) and declared something. We aggregate by
+      // plugin so the assistant has a clear "enable plugin X to
+      // unlock all of these" presentation.
+      const disabled = []
+      for (const [pluginId, declared] of _provides.entries()) {
+        const status = _pluginStatus(pluginId)
+        if (status.active && !status.incompatible) continue
+        const dt = declared.tools.filter(t => !_isToolNameLive(t.name))
+        const da = declared.avoidances.filter(a => !_avoidances.has(a.id))
+        const de = declared.evaluators.filter(e => !_evaluators.has(e.id))
+        if (!dt.length && !da.length && !de.length) continue
+        disabled.push({
+          plugin: {
+            id:           pluginId,
+            name:         status.name,
+            loaded:       status.loaded,
+            active:       status.active,
+            incompatible: status.incompatible,
+            reason:       _disabledReason(status)
+          },
+          tools:      dt,
+          avoidances: da,
+          evaluators: de
+        })
+      }
+
+      return {
+        enabled:  { tools: enabledTools, avoidances: enabledAvoidances, evaluators: enabledEvaluators },
+        disabled
+      }
+    }
+  }
+
+  // Helper used by capabilities.list to skip declared tool names
+  // that are also live (handles a plugin declaring AND registering).
+  function _isToolNameLive(name) {
+    if (!name) return false
+    for (const byName of _tools.values()) if (byName.has(name)) return true
+    return false
+  }
+
   return {
     allToolbarButtons,
     allPanels,
@@ -937,6 +1247,8 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     closePanel,
     registerPlugin,
     enablePlugin,
-    disablePlugin
+    disablePlugin,
+    routing,
+    capabilities
   }
 }
