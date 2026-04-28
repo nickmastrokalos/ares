@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "ares"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "axum",
  "if-addrs",

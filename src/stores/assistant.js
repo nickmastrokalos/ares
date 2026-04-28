@@ -103,7 +103,10 @@ export const useAssistantStore = defineStore('assistant', () => {
       const system =
         `You are a helpful assistant embedded in Ares, a Tauri desktop application for mission planning and situational awareness. ` +
         `The current context is: ${contextLabel.value}. ` +
-        `Use the provided tools to read data and take actions. Always confirm your understanding before making irreversible changes when possible.`
+        `Use the provided tools to read data and take actions. Always confirm your understanding before making irreversible changes when possible. ` +
+        `Some capabilities (specialised data lookups, environmental routing constraints, vehicle telemetry, etc.) are provided by plugins that the operator individually enables or disables in Settings → Plugins. ` +
+        `BEFORE telling the user you can't do something — especially when the request mentions weather, sea state, illumination, terrain, telemetry, specific vehicles, or any other domain-specific data — call \`plugin_capabilities_list\` to see if a disabled plugin would unlock it. ` +
+        `If a relevant capability appears under \`disabled\`, tell the user which plugin to enable (by \`plugin.name\`) and ask them to re-prompt; do not refuse.`
 
       await runTurnLoop({
         provider: assistantProvider,

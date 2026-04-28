@@ -69,6 +69,7 @@ import ImportExportDialog from '@/components/ImportExportDialog.vue'
 import OverlaysDialog from '@/components/OverlaysDialog.vue'
 import { useAssistantTools } from '@/composables/useAssistantTools'
 import { buildMapToolBundles } from '@/services/assistant/toolBundles'
+import { registerHostAvoidances } from '@/services/routing/hostAvoidances'
 
 const props = defineProps({
   missionId: { type: Number, required: true }
@@ -249,6 +250,7 @@ const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: ope
 // `placing.value`, which only exists past that destructure.
 watch(suppressEntityClicks, (val) => { entitySuppressRef.value = val }, { immediate: true })
 const pluginRegistry = usePluginRegistry({ flyToGeometry, getMap: () => map })
+registerHostAvoidances(pluginRegistry, { tracksStore })
 const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
 const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppressEntityClicks)
@@ -262,7 +264,9 @@ useAssistantTools(
     flyToGeometry, flyTo, switchBasemap,
     bloodhoundApi, perimeterApi, annotationsApi, bullseyeApi,
     captureSnapshotToDesktop,
-    captureVideoToDesktop
+    captureVideoToDesktop,
+    routingRegistry:     pluginRegistry.routing,
+    pluginCapabilities:  pluginRegistry.capabilities
   }),
   'Map assistant'
 )

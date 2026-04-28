@@ -11,6 +11,7 @@ import { annotationTools }   from './tools/annotations'
 import { bullseyeTools }     from './tools/bullseye'
 import { snapshotTools }     from './tools/snapshot'
 import { videoTools }        from './tools/video'
+import { pluginMetaTools }   from './tools/pluginMeta'
 
 // One place to aggregate every tool bundle that ships with MapView. Adding
 // a new bundle = import + spread here; MapView no longer churns when we
@@ -30,6 +31,7 @@ export function buildMapToolBundles(deps) {
     ...annotationTools(deps),
     ...bullseyeTools(deps),
     ...snapshotTools(deps),
-    ...videoTools(deps)
+    ...videoTools(deps),
+    ...pluginMetaTools(deps)
   ]
 }

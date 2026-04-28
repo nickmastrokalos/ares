@@ -76,8 +76,15 @@ export function nameOrDefault(name, type, featuresStore) {
 //   - Decimal coord with degree symbol + N/S/E/W — `36.918° N`
 //   - Decimal coord pair with comma — `36.918, -76.112`
 const CONTEXT_DERIVED_PATTERNS = [
+  // Full MGRS — "40R EP 13166 05853"
   /\b\d{1,2}[A-Z]\s+[A-Z]{2}\s+\d{4,5}\s+\d{4,5}\b/i,
+  // MGRS prefix shorthand — "40R BN" or "40R BN to 40R DQ" (zone +
+  // 100 km square id without digits). The model often shortens
+  // coordinate-derived names this way; same red flag as the full form.
+  /\b\d{1,2}[A-Z]\s+[A-Z]{2}\b/i,
+  // Decimal-degrees with explicit hemisphere — "36.918° N"
   /-?\d{1,3}\.\d+\s*°\s*[NSEW]/i,
+  // Decimal coord pair separated by comma — "36.918, -76.112"
   /-?\d{1,3}\.\d{2,}\s*,\s*-?\d{1,3}\.\d{2,}/
 ]
 

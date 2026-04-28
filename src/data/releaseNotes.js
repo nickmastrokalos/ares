@@ -20,10 +20,19 @@ export const RELEASES = [
     // is hidden from the UI by ReleaseNotesList.vue. At bump time, rename
     // `version` to the new semver and add a `date`. See docs/release-notes.md.
     version: 'unreleased',
+    added: []
+  },
+  {
+    version: '1.1.7',
+    date: '2026-04-28',
     added: [
       'Plugin panels: `registerPanel({ width })` pins panel width across collapse/expand; `registerPanel({ iconSvg })` and `registerToolbarButton({ iconSvg })` accept inline SVG so plugins aren\'t locked to MDI icons. Panel headers now carry a chevron toggle that hides the body without unmounting plugin DOM.',
       'Plugin host: `api.units` + `api.format` mirror the host\'s display preferences (distance units, coordinate format). `api.format.distance / speed / coordinate` reuse the same services the host uses internally; `api.units.onChange(handler)` fires immediately on a settings flip.',
-      'Plugin loader: enabling a plugin now re-reads its bundle from disk. Devs can `pnpm build` then toggle the plugin off → on to pick up changes without a full Ares restart.'
+      'Plugin loader: enabling a plugin now re-reads its bundle from disk. Devs can `pnpm build` then toggle the plugin off → on to pick up changes without a full Ares restart.',
+      'Plugin host: `api.routing.registerAvoidance` and `api.routing.registerEvaluator` let plugins contribute environmental obstacle polygons and point-samplers to the route planner. The illumination plugin registers a `cloud-cover` contributor and the sea-state plugin registers `waves` + `currents`; the host registers a built-in `tracks` avoidance for friendly surface CoT tracks. The assistant discovers them via `routing_list_avoidances` / `routing_list_evaluators`.',
+      'Route tool: `map_draw_route_avoiding_features` now accepts `avoid_extras` (plugin-contributed environmental constraints), `depart_at_iso`, and `speed_kts`. When `speed_kts` is provided the planner attaches per-vertex ETAs; the new `route_evaluate_along` tool walks an existing route\'s waypoints and calls a registered evaluator at each one, anchored to that waypoint\'s ETA.',
+      'Plugin host: optional `provides` field on the plugin manifest declares the tools / avoidances / evaluators a plugin would register when active. New `plugin_capabilities_list` assistant tool surfaces both enabled and disabled capabilities so the model can suggest "enable plugin X to unlock that" instead of refusing silently. `routing_list_avoidances` / `routing_list_evaluators` likewise grow `{ enabled, disabled }` shapes; the route tool\'s unknown-id error names the plugin to enable.',
+      'Assistant system prompt now directs the model to call `plugin_capabilities_list` before refusing any domain-specific request (weather, sea state, illumination, telemetry, etc.) so it can guide the user to enable the relevant plugin instead of saying it has no access.'
     ],
     fixed: [
       'CoT tracks from peers with skewed clocks (radios without GPS lock, PCAP replays) used to disappear within 30 s of arriving because their `stale` field was already in the past. Stale handling now anchors the peer\'s intended freshness window (`stale − time`) to local receive time when skew exceeds 5 minutes.',
