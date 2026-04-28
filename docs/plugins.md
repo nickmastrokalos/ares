@@ -207,6 +207,7 @@ api.map.removeImage('my-icon')   // imperative form
 const unregister = api.registerToolbarButton({
   id:      'my-button',          // unique within the plugin
   icon:    'mdi-icon-name',      // any Material Design icon
+  iconSvg: '<svg ...>...</svg>', // optional inline SVG (overrides icon)
   tooltip: 'Button tooltip',
   onClick() { /* ... */ }
 })
@@ -224,7 +225,9 @@ host, so use vanilla DOM (or whatever framework your bundle includes).
 const panel = api.registerPanel({
   id:    'my-panel',                       // unique map-wide
   title: 'My Panel',                       // shown in the panel header
-  icon:  'mdi-icon-name',                  // optional, shown next to title
+  icon:  'mdi-icon-name',                  // optional MDI class name
+  iconSvg: '<svg ...>...</svg>',           // optional inline SVG (overrides icon)
+  width: 340,                              // optional — pins panel width in px
   initialPosition: { x: 60, y: 80 },        // optional
   mount(containerEl) {
     containerEl.innerHTML = '<div>Hello!</div>'
@@ -244,6 +247,19 @@ the DOM (panel registration), not every time the user opens it. The DOM and
 any internal state persist across close/reopen via `v-show`. The cleanup
 function returned by `mount` runs only when the panel is unregistered
 (plugin disable / app shutdown).
+
+The host caps each panel's height to the viewport (`100vh − pos.y − 24px`)
+and applies `overflow-y: auto` to the body, so a panel that grows large
+gets a vertical scrollbar instead of running off the bottom of the screen.
+Plugins don't need to manage their own scrolling — let the body grow and
+the host will handle overflow. For width, prefer the `width` field on
+`registerPanel` over inline-styling the container element: pinning width
+on the panel container (rather than the body) keeps the panel a consistent
+size when the user collapses the body via the header chevron.
+
+Each panel header carries a chevron toggle that hides the body. The DOM
+is preserved (`v-show`, not unmount), so plugin internal state and any
+in-progress work survive collapse cycles.
 
 ### Coastlines / land mask
 
@@ -333,6 +349,121 @@ Returned values are JSON-stringified into the assistant's
 `tool_result` block. Errors thrown from `execute` are caught and
 returned as `{ error: <message> }` so the model can react. All
 registrations are auto-removed on plugin disable.
+
+### Network connections
+
+Plugins can declare their own UDP connection kinds. The host owns
+the socket lifecycle and the row in **Settings → Connections**;
+inbound bytes are forwarded to the plugin's `onPacket` callback.
+
+```js
+const unregister = api.connections.registerKind({
+  kind:        'armada-sa-telemetry',     // unique across all plugins
+  label:       'Armada SA telemetry',     // shown in Connections panel
+  description: 'DroneState messages from Armada SA drones.',
+  protocol:    'udp',                     // tcp not yet supported
+  defaults:    { address: '239.x.x.x', port: 15550 },
+  onPacket(bytes, { sourceIp, sourcePort }) {
+    const msg = MyProtoSchema.decode(bytes)   // plugin-owned parsing
+    // do plugin things — update store, draw on map, render in panel…
+  }
+})
+```
+
+Plugin connections are scoped: `onPacket` only fires for bytes
+arriving on the socket the host opened for *this* `kind`. If the
+plugin is feeding CoT into the host pipeline, decode with
+`api.cot.parse(bytes)` and forward with `api.cot.emit(event)` —
+see the **CoT bridge** section below.
+
+Behavior:
+
+- The first time `registerKind` runs, a row is seeded in the
+  Connections panel with the supplied defaults and labeled with
+  `label`.
+- Connection lifecycle mirrors plugin lifecycle: registering flips
+  the row on and starts the socket; the plugin's deactivation flips
+  it off and stops the socket. The user toggles the plugin in
+  **Settings → Plugins** to control both — manual toggles in the
+  Connections panel are honoured for the current session but every
+  plugin re-activation re-asserts the on state.
+- On subsequent activations the persisted address / port / protocol
+  survives — plugin authors can change `defaults` without trampling
+  user edits.
+- Plugin-owned rows can't be deleted from the Connections UI; only
+  the plugin's `unregister()` (or its uninstall) removes them.
+- `bytes` is a `Uint8Array`. `sourceIp` is the dotted IPv4 / colon
+  IPv6 string of the sender; `sourcePort` is its UDP source port.
+
+### CoT bridge
+
+Plugins ingesting CoT from a non-host source (TAK Server SSL, custom
+gateway, PCAP replay, …) can inject parsed CoT events into the
+host's pipeline:
+
+```js
+api.cot.emit({
+  uid:      'DRONE-7',
+  cot_type: 'a-f-A-M-F-Q',          // standard CoT type string
+  lat:      38.78, lon: -75.10,
+  hae:      0,
+  callsign: 'Drone 7',
+  speed:    0, course: 0,
+  time:     new Date().toISOString(),
+  stale:    new Date(Date.now() + 60_000).toISOString()
+})
+```
+
+The event flows through the same `cot-event` channel the host's
+protected CoT listeners use, so the existing tracks / chat / alert
+stores pick it up unchanged. Required fields: `uid`, `cot_type`
+(or `cotType`), `lat`, `lon`. Everything else has sane defaults.
+
+When a plugin owns a raw socket whose payloads happen to be CoT
+(XML or TAK Protocol v1), pair `cot.emit` with `cot.parse(bytes)`
+to reuse the host's parser end-to-end:
+
+```js
+api.connections.registerKind({
+  kind:    'persistent-systems-cot',
+  label:   'Persistent Systems CoT',
+  defaults: { address: '239.23.212.230', port: 18999 },
+  async onPacket(bytes) {
+    const event = await api.cot.parse(bytes)
+    if (event) await api.cot.emit(event)
+  }
+})
+```
+
+`cot.parse` returns the parsed event on success or `null` if the
+bytes weren't valid CoT (the failure is logged once at warn level
+so noisy multicast groups don't flood the console).
+
+### Display preferences (units + coordinate format)
+
+Plugin panels should render distances, speeds, and coordinates the
+same way the rest of Ares does — operators set their preferences
+once in **Settings → Display** and expect everything (host panels
+and plugin panels alike) to follow.
+
+```js
+// Live values — read these every render to pick up the latest setting.
+api.units.distance     // 'metric' | 'statute' | 'nautical'
+api.units.coordinate   // 'dd' | 'dms' | 'mgrs'
+
+// Same formatters the host uses internally.
+api.format.distance(meters)         // "1.20 km" / "3937 ft" / "0.65 nm"
+api.format.speed(metersPerSecond)   // "12.5 km/h" / "7.8 mph" / "6.7 kts"
+api.format.coordinate(lng, lat)     // "36.92148, -76.16219" or DMS / MGRS
+
+// Subscribe so a render fires immediately when the user changes
+// either setting (auto-cleaned on plugin disable).
+api.units.onChange(({ distance, coordinate }) => render())
+```
+
+If a plugin renders on a tick (e.g. 1 Hz panel re-render), it'll
+pick up changes automatically on the next tick — `onChange` is for
+plugins that want instant response.
 
 ### Plugin-scoped persistent settings
 

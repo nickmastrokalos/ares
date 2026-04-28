@@ -636,18 +636,24 @@ onMounted(async () => {
     bullseyeApi.init()
     annotationsApi.init()
 
-    // Start any CoT listeners that were enabled at the time the map loaded.
-    for (const listener of settingsStore.cotListeners) {
-      if (listener.enabled) {
-        try {
-          await invoke('start_listener', {
-            address: listener.address,
-            port: listener.port,
-            protocol: listener.protocol ?? 'udp'
-          })
-        } catch (err) {
-          console.error('Failed to start listener:', err)
-        }
+    // Start any connections that are enabled at the time the map loaded.
+    // Plugin-owned connections additionally require their plugin to be
+    // enabled; that gate runs once plugin discovery finishes a few
+    // lines below, so we skip them here. Host + ad-hoc CoT connections
+    // start unconditionally.
+    for (const c of settingsStore.connections) {
+      if (!c.enabled) continue
+      if (c.ownerKind === 'plugin') continue
+      try {
+        await invoke('start_listener', {
+          address: c.address,
+          port:    c.port,
+          protocol: c.protocol ?? 'udp',
+          kind:    c.kind,
+          parser:  c.parser ?? 'cot'
+        })
+      } catch (err) {
+        console.error('Failed to start listener:', err)
       }
     }
     await tracksStore.startListening()

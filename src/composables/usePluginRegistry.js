@@ -1,9 +1,13 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { listen, emit } from '@tauri-apps/api/event'
 import { useFeaturesStore } from '@/stores/features'
 import { useTracksStore } from '@/stores/tracks'
 import { useSettingsStore } from '@/stores/settings'
 import { getStore } from '@/plugins/store'
 import { isOverWater, getLandPolygons } from '@/services/coastlines'
+import { formatDistance, formatSpeed } from '@/services/geometry'
+import { formatCoordinate } from '@/services/coordinates'
 import { version as HOST_VERSION } from '../../package.json'
 import {
   register as registerAssistantTools,
@@ -62,6 +66,16 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   // registered via api.tools.register. One token per tool so we can
   // unregister individually.
   const _tools    = new Map()
+  // Map<pluginId, Set<kind>> — connection kinds the plugin owns via
+  // api.connections.registerKind.
+  const _conns    = new Map()
+  // Flat Map<kind, { ownerPluginId, onPacket }> for the global
+  // connection-packet dispatcher. Faster than walking every plugin's
+  // set on each inbound packet.
+  const _connKinds = new Map()
+  // Set once we've installed the global `connection-packet` listener
+  // so we don't double-subscribe.
+  let _connPacketUnsubscribe = null
   // Map<pluginId, Array<{ event, handler, mapHandler }>>
   const _events   = new Map()
   // Map<panelId, panelDef> — global, but each entry carries its owner pluginId.
@@ -86,7 +100,10 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     if (!_layers.has(manifest.id)) _layers.set(manifest.id, new Set())
     if (!_images.has(manifest.id)) _images.set(manifest.id, new Set())
     if (!_tools.has(manifest.id))  _tools.set(manifest.id,  new Map())
+    if (!_conns.has(manifest.id))  _conns.set(manifest.id,  new Set())
     if (!_events.has(manifest.id)) _events.set(manifest.id, [])
+
+    _ensureConnectionPacketDispatcher()
 
     function _resolveBeforeId(beforeId) {
       // Default / '@top' → append on top of everything (current
@@ -330,6 +347,16 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
           id:              def.id,
           title:           def.title ?? manifest.name,
           icon:            def.icon  ?? null,
+          // Optional inline SVG markup rendered in the header in
+          // place of the MDI icon. Useful when the plugin needs
+          // domain-specific iconography that MDI doesn't carry
+          // (e.g. a jetski silhouette). When both `icon` and
+          // `iconSvg` are present, `iconSvg` wins.
+          iconSvg:         typeof def.iconSvg === 'string' ? def.iconSvg : null,
+          // Optional pinned width in px. Applied to the panel
+          // container so collapsing the body via the chevron
+          // doesn't shrink the panel to header-content width.
+          width:           Number.isFinite(def.width) ? def.width : null,
           initialPosition: def.initialPosition ?? { x: 60, y: 80 },
           mount:           def.mount,
           ownerId:         manifest.id
@@ -366,6 +393,198 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       land: {
         isOverWater(coord)         { return isOverWater(coord) },
         getLandPolygons(bbox)      { return getLandPolygons(bbox) }
+      },
+
+      // ---- Network connections ----
+      // Plugins can declare their own UDP / TCP connection kinds. The
+      // host materializes each as a row in Settings → Connections,
+      // owns the socket lifecycle, and forwards inbound bytes to the
+      // plugin's `onPacket` callback. The user controls address /
+      // port / enabled in the Connections UI; the plugin name is
+      // fixed by `label`. Plugin-owned rows can't be deleted from
+      // the UI — only the plugin can unregister them.
+      //
+      // The socket runs only when BOTH the plugin is enabled (via
+      // Settings → Plugins) AND the connection's `enabled` toggle in
+      // the Connections panel is on. Disabling either drops the
+      // socket; enabling both resumes it.
+      connections: {
+        registerKind({ kind, label, description, protocol = 'udp', defaults, onPacket }) {
+          if (typeof kind !== 'string' || !kind) {
+            throw new Error('connections.registerKind: `kind` is required')
+          }
+          if (typeof label !== 'string' || !label) {
+            throw new Error('connections.registerKind: `label` is required')
+          }
+          if (typeof onPacket !== 'function') {
+            throw new Error('connections.registerKind: `onPacket(bytes, src)` is required')
+          }
+          const d = defaults ?? {}
+          if (typeof d.address !== 'string' || !d.address) {
+            throw new Error('connections.registerKind: `defaults.address` is required')
+          }
+          if (!Number.isInteger(d.port) || d.port < 1 || d.port > 65535) {
+            throw new Error('connections.registerKind: `defaults.port` must be 1–65535')
+          }
+          // Collision check: only this plugin can register/replace its
+          // own kinds; another plugin trying to grab the same `kind`
+          // throws so the second plugin can pick a different name.
+          const existing = _connKinds.get(kind)
+          if (existing && existing.ownerPluginId !== manifest.id) {
+            throw new Error(
+              `connections.registerKind: kind "${kind}" already registered by ${existing.ownerPluginId}`
+            )
+          }
+          _connKinds.set(kind, { ownerPluginId: manifest.id, onPacket })
+          _conns.get(manifest.id).add(kind)
+
+          // Seed / refresh the row in the connections store and flip
+          // it on. Connection lifecycle mirrors plugin lifecycle:
+          // registering = the plugin is active = the socket runs. The
+          // user toggles the plugin (Settings → Plugins) to control
+          // both. Address / port / protocol edits made via the
+          // Connections panel still persist across reloads.
+          settingsStore.upsertPluginConnection({
+            kind,
+            name:           label,
+            ownerPluginId:  manifest.id,
+            defaultAddress: d.address,
+            defaultPort:    d.port,
+            defaultProtocol: protocol
+          }).then(async (row) => {
+            await settingsStore.setConnectionEnabledByKind(kind, true)
+            invoke('start_listener', {
+              address:  row.address,
+              port:     row.port,
+              protocol: row.protocol ?? 'udp',
+              kind:     row.kind,
+              parser:   'raw'
+            }).catch(err => {
+              console.error(`[connections] failed to start ${kind}:`, err)
+            })
+          })
+
+          const unregister = () => {
+            // Stop the socket and flip the row off so the disabled
+            // state is reflected in Settings → Connections (and so a
+            // host restart while the plugin is disabled doesn't
+            // resurrect the socket).
+            const row = settingsStore.connections.find(c => c.kind === kind)
+            if (row) {
+              invoke('stop_listener', { address: row.address, port: row.port })
+                .catch(() => {})
+              settingsStore.setConnectionEnabledByKind(kind, false).catch(() => {})
+            }
+            _connKinds.delete(kind)
+            _conns.get(manifest.id)?.delete(kind)
+            // The row itself stays — address / port / protocol edits
+            // survive plugin disable/enable cycles.
+          }
+          cleanups.push(unregister)
+          return unregister
+        }
+      },
+
+      // ---- Host display preferences ----
+      // Mirror the user's distance-unit and coordinate-format
+      // settings so plugin panels render consistently with the
+      // rest of the app. Getters return the live value (a setting
+      // change between calls is reflected immediately); the
+      // `format.*` helpers wrap the same `services/{geometry,
+      // coordinates}.js` functions the host itself uses.
+      //
+      // For reactive re-render on a setting change, plugins can
+      // subscribe via `api.units.onChange(handler)` — auto-cleaned
+      // on plugin disable.
+      units: {
+        get distance()   { return settingsStore.distanceUnits },
+        get coordinate() { return settingsStore.coordinateFormat },
+        onChange(handler) {
+          if (typeof handler !== 'function') {
+            throw new Error('units.onChange: handler is required')
+          }
+          const stop = watch(
+            () => [settingsStore.distanceUnits, settingsStore.coordinateFormat],
+            () => {
+              try { handler({
+                distance:   settingsStore.distanceUnits,
+                coordinate: settingsStore.coordinateFormat
+              }) }
+              catch (err) {
+                console.error(`[plugin:${manifest.id}] units.onChange handler threw:`, err)
+              }
+            }
+          )
+          cleanups.push(stop)
+          return stop
+        }
+      },
+      format: {
+        distance(meters)  { return formatDistance(meters, settingsStore.distanceUnits) },
+        speed(mps)        { return formatSpeed(mps, settingsStore.distanceUnits) },
+        coordinate(lng, lat) { return formatCoordinate(lng, lat, settingsStore.coordinateFormat) }
+      },
+
+      // ---- CoT bridge ----
+      // Plugins ingesting CoT from a non-host source (TAK Server SSL,
+      // a custom gateway, a PCAP replay) can inject a parsed CoT
+      // event directly into the host's pipeline. The event flows
+      // through the same `cot-event` channel the host's protected
+      // listeners use, so all the existing track / chat / annotation
+      // stores pick it up unchanged.
+      cot: {
+        // Parse raw CoT bytes (XML or TAK Protocol v1) into the host's
+        // event shape. Returns the parsed event on success, or `null`
+        // if the bytes weren't a valid CoT message — plugins owning a
+        // raw socket use this to decode their own packets before
+        // calling `cot.emit`. The error is swallowed (and logged once
+        // per call) because plugin sockets routinely receive
+        // non-CoT noise on shared multicast groups.
+        async parse(bytes) {
+          const buf = bytes instanceof Uint8Array ? Array.from(bytes) : bytes
+          try {
+            return await invoke('parse_cot_bytes', { bytes: buf })
+          } catch (err) {
+            console.warn(`[plugin:${manifest.id}] cot.parse failed:`, err)
+            return null
+          }
+        },
+
+        emit(event) {
+          if (!event || typeof event !== 'object') {
+            throw new Error('cot.emit: event is required')
+          }
+          if (typeof event.uid !== 'string' || !event.uid) {
+            throw new Error('cot.emit: event.uid is required')
+          }
+          if (typeof event.cot_type !== 'string' || !event.cot_type) {
+            // Tolerate `cotType` (camelCase) too — the rest of the host
+            // exposes camelCase JS, but the on-wire field is `cot_type`.
+            if (typeof event.cotType === 'string' && event.cotType) {
+              event.cot_type = event.cotType
+            } else {
+              throw new Error('cot.emit: event.cot_type is required')
+            }
+          }
+          if (!Number.isFinite(event.lat) || !Number.isFinite(event.lon)) {
+            throw new Error('cot.emit: event.lat and event.lon must be finite numbers')
+          }
+          // Sane defaults for fields the parsed-CoT shape expects.
+          const out = {
+            uid:      event.uid,
+            cot_type: event.cot_type,
+            lat:      event.lat,
+            lon:      event.lon,
+            hae:      Number.isFinite(event.hae) ? event.hae : 0,
+            speed:    Number.isFinite(event.speed) ? event.speed : 0,
+            course:   Number.isFinite(event.course) ? event.course : 0,
+            callsign: event.callsign ?? event.uid,
+            time:     event.time  ?? new Date().toISOString(),
+            stale:    event.stale ?? new Date(Date.now() + 60_000).toISOString(),
+            ...event
+          }
+          return emit('cot-event', out)
+        }
       },
 
       // ---- Assistant tools ----
@@ -450,6 +669,37 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
 
   // ---- Internal helpers ----
 
+  /**
+   * Install the global `connection-packet` Tauri-event listener that
+   * fans inbound bytes out to whichever plugin owns the matching
+   * `kind`. Lazy: only attaches on first plugin registration so we
+   * don't open a channel listener on a host with zero plugins.
+   */
+  async function _ensureConnectionPacketDispatcher() {
+    if (_connPacketUnsubscribe) return
+    try {
+      _connPacketUnsubscribe = await listen('connection-packet', (event) => {
+        const p = event.payload
+        if (!p || typeof p.kind !== 'string') return
+        const reg = _connKinds.get(p.kind)
+        if (!reg) return  // no plugin owns this kind right now
+        try {
+          reg.onPacket(
+            // Tauri serialises Vec<u8> as Array<number>. Hand plugins a
+            // Uint8Array — typed access, .length works the same, and
+            // it's the natural shape for protobuf decoders.
+            new Uint8Array(p.bytes ?? []),
+            { sourceIp: p.source_ip, sourcePort: p.source_port }
+          )
+        } catch (err) {
+          console.error(`[connections] onPacket for "${p.kind}" threw:`, err)
+        }
+      })
+    } catch (err) {
+      console.error('[connections] failed to install dispatcher:', err)
+    }
+  }
+
   function _patch(id, patch) {
     discoveredPlugins.value = discoveredPlugins.value.map(p =>
       p.id === id ? { ...p, ...patch } : p
@@ -498,9 +748,23 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         console.warn(`[plugin-registry] Failed to unregister tool token for "${id}":`, e)
       }
     }
+    // Connection kinds: stop sockets and detach the onPacket
+    // dispatcher entry. The persisted row stays in
+    // settingsStore.connections so the user's address / port edits
+    // survive plugin reloads.
+    for (const kind of _conns.get(id) ?? []) {
+      const row = settingsStore.connections.find(c => c.kind === kind)
+      if (row) {
+        invoke('stop_listener', { address: row.address, port: row.port })
+          .catch(() => {})
+        settingsStore.setConnectionEnabledByKind(kind, false).catch(() => {})
+      }
+      _connKinds.delete(kind)
+    }
     _layers.delete(id)
     _images.delete(id)
     _tools.delete(id)
+    _conns.delete(id)
     _events.delete(id)
 
     // Remove any orphan panels owned by this plugin and drop them from the
@@ -583,6 +847,42 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     }
   }
 
+  /**
+   * Re-read the plugin file from disk and replace the cached
+   * manifest. Used by `enablePlugin` so a developer iterating on a
+   * plugin can rebuild dist/index.js, toggle the plugin off → on,
+   * and see the new code without restarting Ares. Each call gets a
+   * fresh Blob URL so JS module caching doesn't return the old
+   * import. Failures fall through silently — the previously cached
+   * manifest is left in place and `_activate` will use it.
+   */
+  async function _reloadFromDisk(id) {
+    const row = discoveredPlugins.value.find(p => p.id === id)
+    if (!row?.filePath) return
+    try {
+      const source = await invoke('read_plugin_file', { path: row.filePath })
+      const blob = new Blob([source], { type: 'text/javascript' })
+      const url  = URL.createObjectURL(blob)
+      try {
+        const module = await import(/* @vite-ignore */ url)
+        const manifest = module.default
+        if (manifest?.id && typeof manifest.activate === 'function') {
+          _manifests.set(id, manifest)
+          // Refresh the surface fields so the Plugins settings row
+          // reflects e.g. an updated version string.
+          _patch(id, {
+            name:    manifest.name    ?? manifest.id,
+            version: manifest.version ?? '?'
+          })
+        }
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      console.warn(`[plugin-registry] Reload from disk failed for "${id}":`, err)
+    }
+  }
+
   // Called from SettingsDialog when the user enables a plugin.
   async function enablePlugin(id) {
     const row = discoveredPlugins.value.find(p => p.id === id)
@@ -590,6 +890,10 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     if (!settingsStore.enabledPlugins.includes(id)) {
       await settingsStore.setSetting('enabledPlugins', [...settingsStore.enabledPlugins, id])
     }
+    // Pick up any on-disk edits made since the host loaded. This is
+    // what lets `pnpm build` + plugin off/on iterate without an Ares
+    // restart.
+    await _reloadFromDisk(id)
     _activate(id)
   }
 

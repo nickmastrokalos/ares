@@ -17,6 +17,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const positioned = ref(false)
+const minimized   = ref(false)
 const containerEl = ref(null)
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
@@ -61,20 +62,44 @@ function handleClose() {
     :style="{
       left: pos.x + 'px',
       top:  pos.y + 'px',
+      // Width pinned on the container so collapsing the body
+      // doesn't shrink the panel to the header's natural width.
+      // Plugins opt in via `registerPanel({ width: 340, ... })`;
+      // omitting it falls back to the host's default min-width.
+      width: panel.width ? `${panel.width}px` : undefined,
+      // Cap the panel so it never extends below the viewport — body
+      // scrolls when content exceeds the available height. The 24 px
+      // gives a little breathing room above the OS taskbar / bottom
+      // edge. Recomputes whenever the user drags the panel.
+      maxHeight: `calc(100vh - ${Math.max(0, pos.y) + 24}px)`,
       zIndex,
       visibility: positioned ? 'visible' : 'hidden'
     }"
     @pointerdown="bringToFront"
   >
     <div class="panel-header" @pointerdown="onPointerDown">
+      <span
+        v-if="panel.iconSvg"
+        class="panel-svg-icon text-medium-emphasis"
+        v-html="panel.iconSvg"
+      />
       <v-icon
-        v-if="panel.icon"
+        v-else-if="panel.icon"
         size="14"
         class="text-medium-emphasis"
         style="flex-shrink:0"
       >{{ panel.icon }}</v-icon>
       <span class="panel-title">{{ panel.title }}</span>
       <v-spacer />
+      <v-btn
+        :icon="minimized ? 'mdi-chevron-down' : 'mdi-chevron-up'"
+        size="x-small"
+        variant="text"
+        class="text-medium-emphasis header-btn"
+        :title="minimized ? 'Expand' : 'Collapse'"
+        @pointerdown.stop
+        @click.stop="minimized = !minimized"
+      />
       <v-btn
         icon="mdi-close"
         size="x-small"
@@ -84,7 +109,7 @@ function handleClose() {
         @click.stop="handleClose"
       />
     </div>
-    <div ref="containerEl" class="panel-body" @pointerdown.stop />
+    <div v-show="!minimized" ref="containerEl" class="panel-body" @pointerdown.stop />
   </div>
 </template>
 
@@ -97,6 +122,8 @@ function handleClose() {
   border-radius: 4px;
   overflow: hidden;
   user-select: none;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-header {
@@ -106,6 +133,7 @@ function handleClose() {
   padding: 4px 2px 4px 8px;
   cursor: grab;
   border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
+  flex-shrink: 0;
 }
 
 .panel-header:active { cursor: grabbing; }
@@ -122,5 +150,24 @@ function handleClose() {
   padding: 8px;
   color: rgb(var(--v-theme-on-surface));
   font-size: 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Plugin-supplied inline SVG icon in the header. Same 14 px
+   footprint as the MDI v-icon it replaces. The plugin's SVG can
+   reference `currentColor` to inherit the header's text colour. */
+.panel-svg-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: inherit;
+}
+.panel-svg-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
 }
 </style>

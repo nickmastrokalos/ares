@@ -50,20 +50,42 @@ fn get_database_url(state: tauri::State<DatabaseUrl>) -> String {
     state.0.clone()
 }
 
-/// Start a CoT listener on the given address, port, and protocol ("udp" or "tcp").
-/// If a listener already exists for this address:port it is replaced.
+/// Start a listener on the given address, port, and protocol ("udp" or "tcp").
+/// `parser` selects how received bytes are routed:
+///   - `"cot"` (or omitted) → parsed as CoT and emitted on the
+///     `cot-event` channel — the legacy behavior used by the protected
+///     core listeners and any user-added ad-hoc CoT listener.
+///   - `"raw"` → emitted as-is on the `connection-packet` channel,
+///     tagged with `kind` so the frontend dispatcher can route the
+///     bytes to the right plugin's `onPacket` callback.
+///
+/// `kind` is required when `parser == "raw"` and ignored otherwise. If a
+/// listener already exists for this address:port it is replaced.
 #[tauri::command]
 fn start_listener(
     address: String,
     port: u16,
     protocol: String,
+    kind: Option<String>,
+    parser: Option<String>,
     state: tauri::State<ListenerState>,
     app: tauri::AppHandle,
 ) {
+    let parser_kind = match parser.as_deref().unwrap_or("cot") {
+        "raw" => match kind {
+            Some(k) => listeners::Parser::Raw { kind: k },
+            None => {
+                eprintln!("[connection] start_listener: parser=raw requires kind; falling back to cot");
+                listeners::Parser::Cot
+            }
+        },
+        _ => listeners::Parser::Cot,
+    };
+
     let mut mgr = state.0.lock().unwrap();
     match protocol.to_lowercase().as_str() {
-        "tcp" => mgr.start_tcp(address, port, app),
-        _ => mgr.start_udp(address, port, app),
+        "tcp" => mgr.start_tcp(address, port, parser_kind, app),
+        _ => mgr.start_udp(address, port, parser_kind, app),
     }
 }
 
@@ -78,6 +100,16 @@ fn stop_listener(address: String, port: u16, state: tauri::State<ListenerState>)
 #[tauri::command]
 fn stop_all_listeners(state: tauri::State<ListenerState>) {
     state.0.lock().unwrap().stop_all();
+}
+
+/// Parse a CoT message (XML or TAK Protocol v1) and return the host's
+/// `CotEvent` shape. Used by plugins that own a raw socket
+/// (`parser: 'plugin'`) and want to feed received bytes back into the
+/// host's CoT pipeline via `api.cot.emit`. Errors come back as a
+/// human-readable string so the plugin can log and skip bad packets.
+#[tauri::command]
+fn parse_cot_bytes(bytes: Vec<u8>) -> Result<cot::CotEvent, String> {
+    cot::parse_cot(&bytes)
 }
 
 /// Send a single CoT XML payload to a destination.
@@ -221,6 +253,7 @@ pub fn run() {
             start_listener,
             stop_listener,
             stop_all_listeners,
+            parse_cot_bytes,
             send_cot,
             cot_sender::get_lan_ipv4,
             fetch_ais_vessels,

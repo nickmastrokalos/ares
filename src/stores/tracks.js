@@ -59,6 +59,17 @@ export const useTracksStore = defineStore('tracks', () => {
   // extend the window without losing data.
   const MAX_HISTORY_MS = 30 * 60 * 1000  // 30 minutes
 
+  // CoT peers without a synced clock (radios with no GPS lock, PCAP
+  // replays, badly-configured TAK servers) send `time` and `stale`
+  // referenced to their own clock — sometimes hours or months off
+  // ours. When the skew exceeds STALE_SKEW_THRESHOLD_MS we honour
+  // the peer's intended freshness window (`stale − time`) but
+  // anchor it to local receive time so the prune sweeper stops
+  // killing the track on the next tick. DEFAULT_STALE_MS is the
+  // fallback when the peer's window is invalid (`stale ≤ time`).
+  const STALE_SKEW_THRESHOLD_MS = 5 * 60 * 1000
+  const DEFAULT_STALE_MS        = 90 * 1000
+
   let unlistenFn = null
   let pruneInterval = null
 
@@ -101,6 +112,17 @@ export const useTracksStore = defineStore('tracks', () => {
       // Prune in-place from the front to avoid allocating a new array each tick.
       while (history.length > 0 && history[0].t < cutoff) history.shift()
 
+      // Clock-skew correction. See STALE_SKEW_THRESHOLD_MS comment above.
+      let effectiveStale = e.stale
+      const msgTime  = e.time  ? Date.parse(e.time)  : NaN
+      const msgStale = e.stale ? Date.parse(e.stale) : NaN
+      if (Number.isFinite(msgTime) && Math.abs(now - msgTime) > STALE_SKEW_THRESHOLD_MS) {
+        const window = Number.isFinite(msgStale) && msgStale > msgTime
+          ? msgStale - msgTime
+          : DEFAULT_STALE_MS
+        effectiveStale = new Date(now + window).toISOString()
+      }
+
       tracks.value.set(e.uid, {
         uid: e.uid,
         cotType: e.cot_type,
@@ -111,7 +133,7 @@ export const useTracksStore = defineStore('tracks', () => {
         course: e.course,
         callsign: e.callsign,
         time: e.time,
-        stale: e.stale,
+        stale: effectiveStale,
         updatedAt: now,
         history
       })

@@ -313,6 +313,9 @@ function collectCoords(geometry) {
 }
 
 export function formatSpeed(metersPerSec, units = 'metric') {
+  // Allow callers (especially plugins) to pass undefined / NaN
+  // for missing readings without producing "NaN km/h".
+  if (!Number.isFinite(metersPerSec)) return '—'
   if (units === 'nautical') return `${(metersPerSec * 1.94384).toFixed(1)} kts`
   if (units === 'statute') return `${(metersPerSec * 2.23694).toFixed(1)} mph`
   return `${(metersPerSec * 3.6).toFixed(1)} km/h`
