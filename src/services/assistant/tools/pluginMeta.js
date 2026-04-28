@@ -17,16 +17,20 @@ export function pluginMetaTools({ pluginCapabilities }) {
     {
       name: 'plugin_capabilities_list',
       description:
-        'List every plugin-contributed capability the host knows about, split into ' +
-        '`enabled` (currently registered with the host — assistant tools, route-planner ' +
-        'avoidances, and route-planner evaluators) and `disabled` (plugins that are ' +
-        'loaded on disk but currently inactive or incompatible — they have declared ' +
-        'capabilities in their manifest `provides` block but those capabilities are not ' +
-        'live right now). Use this when the user asks for something you can\'t do — if ' +
-        'the relevant capability appears under `disabled`, tell them which plugin to ' +
-        'enable in Settings → Plugins (using the `plugin.name` field) instead of refusing. ' +
-        'Each disabled block carries a `reason` (`plugin_disabled` for a plugin the user ' +
-        'can simply turn on, `plugin_incompatible` for one that needs a host upgrade, ' +
+        'FIRST tool to call whenever the user asks for any domain-specific data or action ' +
+        'you don\'t have a tool for — weather, sea state, illumination, vehicle telemetry, ' +
+        'custom routing avoidances, anything plugin-shaped. The host\'s plugin set is ' +
+        'dynamic; what\'s not in your tool list right now might be a single Settings → ' +
+        'Plugins toggle away. Do NOT refuse a domain-specific request before calling this. ' +
+        'Returns `enabled` (currently registered with the host — assistant tools, ' +
+        'route-planner avoidances, and route-planner evaluators) and `disabled` (plugins ' +
+        'loaded on disk but currently inactive or incompatible — they declared capabilities ' +
+        'in their manifest `provides` block but the capabilities are not live right now). ' +
+        'If the relevant capability appears under `disabled`, tell the user which plugin to ' +
+        'enable in Settings → Plugins (using the `plugin.name` field) and ask them to ' +
+        're-prompt; do not refuse. Each disabled block carries a `reason` ' +
+        '(`plugin_disabled` for a plugin the user can simply turn on, ' +
+        '`plugin_incompatible` for one that needs a host upgrade, ' +
         '`plugin_not_registered` for a plugin that\'s active but didn\'t register the ' +
         'declared capability — typically a plugin bug worth surfacing). Read-only.',
       readonly: true,
