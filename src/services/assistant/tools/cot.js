@@ -50,7 +50,30 @@ function affiliationOf(cotType) {
   return AFFIL_WORD[cotType?.[2]] ?? 'unknown'
 }
 
-function summariseTrack(t) {
+function summariseTrack(t, tracksStore = null) {
+  // History summary helps diagnose breadcrumb issues — a track with
+  // many history points but ~0 displacement is stationary (no trail
+  // by design); a track with 0 points has never been emitted (bug or
+  // not-yet-received). `displacementMeters` measures the geodesic
+  // distance from oldest → newest; `pathLengthMeters` integrates
+  // segment-by-segment so a craft that loops back to its start still
+  // shows nonzero motion. `isHidden` reflects the track-list panel
+  // toggle — the host track / breadcrumb / perimeter / bloodhound
+  // layers all skip hidden uids.
+  const history = t.history ?? []
+  let displacementMeters = 0
+  let pathLengthMeters   = 0
+  if (history.length >= 2) {
+    const first = history[0]
+    const last  = history[history.length - 1]
+    displacementMeters = haversineMeters(first.lon, first.lat, last.lon, last.lat)
+    for (let i = 1; i < history.length; i++) {
+      pathLengthMeters += haversineMeters(
+        history[i - 1].lon, history[i - 1].lat,
+        history[i].lon,     history[i].lat
+      )
+    }
+  }
   return {
     uid:         t.uid,
     callsign:    t.callsign ?? t.uid,
@@ -61,8 +84,25 @@ function summariseTrack(t) {
     courseDeg:   t.course ?? 0,
     haeMeters:   t.hae    ?? 0,
     stale:       t.stale  ?? null,
-    updatedAt:   t.updatedAt ?? null
+    updatedAt:   t.updatedAt ?? null,
+    historyPoints:      history.length,
+    displacementMeters: Math.round(displacementMeters),
+    pathLengthMeters:   Math.round(pathLengthMeters),
+    isHidden:           tracksStore?.hiddenIds?.has?.(t.uid) ?? null
   }
+}
+
+// Inline haversine to keep this tool standalone from geometry.js.
+// Earth radius in meters; result is the great-circle distance between
+// two (lon, lat) points in WGS-84.
+function haversineMeters(lon1, lat1, lon2, lat2) {
+  const R   = 6_371_000
+  const rad = Math.PI / 180
+  const dLat = (lat2 - lat1) * rad
+  const dLon = (lon2 - lon1) * rad
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)))
 }
 
 function resolveCenter(featuresStore, tracksStore, featureId, trackUid, coordinate) {
@@ -109,7 +149,7 @@ export function cotTools({ tracksStore, featuresStore, settingsStore }) {
       },
       async handler({ affiliation, name, limit = 200 }) {
         const needle = name?.trim().toLowerCase() ?? ''
-        const all = Array.from(tracksStore.tracks.values()).map(summariseTrack)
+        const all = Array.from(tracksStore.tracks.values()).map(t => summariseTrack(t, tracksStore))
         const filtered = all.filter(t => {
           if (affiliation && t.affiliation !== affiliation) return false
           if (needle) {
@@ -141,7 +181,7 @@ export function cotTools({ tracksStore, featuresStore, settingsStore }) {
       async handler({ uid }) {
         const t = tracksStore.tracks.get(uid)
         if (!t) return { error: `CoT track ${uid} not found.` }
-        return summariseTrack(t)
+        return summariseTrack(t, tracksStore)
       }
     },
 
@@ -177,7 +217,7 @@ export function cotTools({ tracksStore, featuresStore, settingsStore }) {
           const affil = affiliationOf(t.cotType)
           if (affiliation && affil !== affiliation) continue
           const d = distanceBetween(center.point, [t.lon, t.lat])
-          if (d <= radiusMeters) matches.push({ ...summariseTrack(t), distanceMeters: d })
+          if (d <= radiusMeters) matches.push({ ...summariseTrack(t, tracksStore), distanceMeters: d })
         }
         matches.sort((a, b) => a.distanceMeters - b.distanceMeters)
         return {

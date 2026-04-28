@@ -23,6 +23,20 @@ export const RELEASES = [
     added: []
   },
   {
+    version: '1.1.8',
+    date: '2026-04-28',
+    added: [
+      'Plugin host: `api.map.addLayer({ snapResolver })` lets a plugin\'s custom map layer participate in host selection composables (perimeter, bloodhound). The resolver maps a clicked feature to a host owner ref (`{ kind: \'cot\', uid }`, etc.) so the ring or line snaps to the bridged host entity even when the plugin\'s sprite is larger than the underlying host marker.'
+    ],
+    changed: [
+      'Map snapshot now includes every floating panel open over the map (host + plugin) alongside the basemap, layers, and HTML markers — no more silently omitted Armada / AIS / Track List / Bloodhound / Perimeter panels in saved PNGs.'
+    ],
+    fixed: [
+      'Perimeter and bloodhound click-to-attach now snap to plugin-rendered tracks (e.g. Armada SA boats). Previously the plugin\'s custom sprite covered the host\'s smaller CoT dot and clicks missed the snap target entirely.',
+      'Breadcrumb trails on plugin-emitted CoT tracks now stay visible. Trails are dashed (2/2 cadence) and the breadcrumb layer is automatically lifted above plugin map content so a short trail under a plugin sprite no longer disappears.'
+    ]
+  },
+  {
     version: '1.1.7',
     date: '2026-04-28',
     added: [

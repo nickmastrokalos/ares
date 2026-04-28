@@ -34,7 +34,7 @@ const SNAP_LAYERS = [
   'manual-tracks-symbols'
 ]
 
-export function useMapPerimeters(getMap) {
+export function useMapPerimeters(getMap, pluginSnap = null) {
   const tracksStore   = useTracksStore()
   const aisStore      = useAisStore()
   const featuresStore = useFeaturesStore()
@@ -124,6 +124,20 @@ export function useMapPerimeters(getMap) {
       return featureCentroid(owner.featureId)
     }
     return null
+  }
+
+  // True when the perimeter's owner has been hidden via the host's
+  // hide gate (CoT track-list eye toggle, manual-track hide, or a
+  // plugin write-through via `api.trackVisibility.setHidden`). When
+  // hidden, we skip drawing the ring and skip breach computation
+  // entirely — the operator has said "stop showing me this entity",
+  // so a flashing red ring + breach toast on it would be noise.
+  // The perimeter object stays in the in-memory map so unhiding
+  // brings it back unchanged.
+  function isOwnerHidden(owner) {
+    if (owner.kind === 'cot') return tracksStore.hiddenIds.has(owner.uid)
+    if (owner.kind === 'feature') return featuresStore.hiddenManualIds?.has(owner.featureId) ?? false
+    return false   // AIS has no per-vessel hide today
   }
 
   function featureCentroid(featureId) {
@@ -273,6 +287,12 @@ export function useMapPerimeters(getMap) {
     const haloFeatures = []
 
     for (const [ownerKey, p] of perimeters) {
+      // Hidden owners suppress both the ring and any breach halos —
+      // the perimeter object stays in memory but goes silent until
+      // the owner is shown again. Avoids the operator getting
+      // "Perimeter breach: X in Y" toasts for a Y they explicitly
+      // hid from view.
+      if (isOwnerHidden(p.owner)) continue
       ringFeatures.push({
         type: 'Feature',
         properties: { ownerKey, breached: p.breached.size > 0 },
@@ -316,9 +336,16 @@ export function useMapPerimeters(getMap) {
       if (c) p.owner.coord = c
     }
 
-    // 3. Recompute breaches for perimeters with alert on.
+    // 3. Recompute breaches for perimeters with alert on. Hidden
+    // owners get an empty breach set so the alert chip / toast
+    // pipeline (computed off `perimeters[].breached`) goes quiet
+    // for them too — not just the on-map ring.
     for (const [ownerKey, p] of perimeters) {
-      p.breached = p.alert ? computeBreaches(p, ownerKey) : new Set()
+      if (!p.alert || isOwnerHidden(p.owner)) {
+        p.breached = new Set()
+      } else {
+        p.breached = computeBreaches(p, ownerKey)
+      }
     }
 
     perimeterCount.value = perimeters.size
@@ -374,7 +401,15 @@ export function useMapPerimeters(getMap) {
   // ---- Selection (click-to-attach) ----
 
   function resolveOwnerAtClick(map, e) {
-    const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
+    // Plugin layers that opted in via `api.map.addLayer({ snapResolver })`
+    // join the snap query alongside the host layers. Without this,
+    // clicks on a plugin's custom sprite (e.g. Armada's boat) miss the
+    // host CoT dot underneath when the sprite is larger than the dot.
+    const pluginLayerIds = pluginSnap?.layerIds() ?? []
+    const queryLayers = pluginLayerIds.length
+      ? [...SNAP_LAYERS, ...pluginLayerIds]
+      : SNAP_LAYERS
+    const hits = map.queryRenderedFeatures(e.point, { layers: queryLayers })
     if (!hits.length) return null
 
     const hit = hits[0]
@@ -400,6 +435,17 @@ export function useMapPerimeters(getMap) {
       if (featureId != null) {
         const coord = featureCentroid(featureId)
         if (coord) return { kind: 'feature', featureId, coord }
+      }
+    }
+
+    // Plugin-registered snap layer. The resolver returns a host owner
+    // ref; we re-resolve coord through the matching store so the ring
+    // tracks live position even if the plugin's feature geometry lags.
+    if (pluginSnap && pluginLayerIds.includes(layer)) {
+      const ref = pluginSnap.resolve(layer, hit)
+      if (ref) {
+        const coord = resolveCoord(ref) ?? ref.coord ?? hit.geometry.coordinates
+        if (coord) return { ...ref, coord }
       }
     }
 

@@ -30,7 +30,7 @@ const BH_LAYER  = 'bloodhound-line-layer'
 //     Escape or click "+ Add"  → exit selecting; committed lines stay.
 //   Remove individual line from panel list, or "Clear all".
 
-export function useMapBloodhound(getMap) {
+export function useMapBloodhound(getMap, pluginSnap = null) {
   const settingsStore = useSettingsStore()
   const tracksStore   = useTracksStore()
   const aisStore      = useAisStore()
@@ -341,7 +341,15 @@ export function useMapBloodhound(getMap) {
   // Empty-space clicks fall through to a `point` endpoint anchored at the click
   // coord so the operator can measure to/from arbitrary locations.
   function resolveEndpointAtClick(map, e) {
-    const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
+    // Plugin layers that opted in via `api.map.addLayer({ snapResolver })`
+    // join the snap query alongside the host layers. Lets clicks on a
+    // plugin's custom sprite anchor to the bridged host entity (e.g.
+    // Armada boat → corresponding CoT track).
+    const pluginLayerIds = pluginSnap?.layerIds() ?? []
+    const queryLayers = pluginLayerIds.length
+      ? [...SNAP_LAYERS, ...pluginLayerIds]
+      : SNAP_LAYERS
+    const hits = map.queryRenderedFeatures(e.point, { layers: queryLayers })
     if (!hits.length) return { kind: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
 
     const hit = hits[0]
@@ -362,6 +370,17 @@ export function useMapBloodhound(getMap) {
       // render). Anchor to the clicked coord; the watcher will snap back to
       // live position on the next poll if the mmsi reappears.
       return { kind: 'ais', mmsi, coord: [hit.geometry.coordinates[0], hit.geometry.coordinates[1]] }
+    }
+
+    // Plugin-registered snap layer. Resolver returns a host endpoint
+    // ref; coord is re-resolved through the matching store so the
+    // line tracks live position.
+    if (pluginSnap && pluginLayerIds.includes(layer)) {
+      const ref = pluginSnap.resolve(layer, hit)
+      if (ref) {
+        const coord = resolveCoord(ref) ?? ref.coord ?? hit.geometry.coordinates
+        if (coord) return { ...ref, coord }
+      }
     }
 
     // All feature-backed layers (draw shapes, manual tracks, route dots)

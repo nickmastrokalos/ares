@@ -89,6 +89,25 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
   const _layers   = new Map()
   // Map<pluginId, Set<imageId>> — sprites registered via api.map.addImage
   const _images   = new Map()
+  // Map<layerId, resolveOwner(feature) → OwnerRef|null> — opt-in
+  // selection bridge for plugin-rendered map layers. Populated by
+  // `api.map.addLayer({ ..., snapResolver })`. The host's selection
+  // composables (perimeter, bloodhound) consult this to treat plugin
+  // layers as snap targets and map their features back to a host
+  // owner ref ({kind:'cot', uid}, etc.) — without this, clicks on a
+  // plugin's custom sprite never reach the selection logic.
+  const _snapResolvers = new Map()
+  // Subscribers notified whenever a plugin adds or removes a map layer.
+  // Lets host composables (e.g. useMapTracks lifting breadcrumbs above
+  // plugin sprites) re-assert their preferred z-order without polling.
+  const _layerChangeHandlers = new Set()
+  function _notifyLayerChange() {
+    for (const fn of _layerChangeHandlers) {
+      try { fn() } catch (err) {
+        console.warn('[plugin-registry] layer-change handler threw:', err)
+      }
+    }
+  }
   // Map<pluginId, Map<toolName, registryToken>> — assistant tools
   // registered via api.tools.register. One token per tool so we can
   // unregister individually.
@@ -237,6 +256,53 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       features: computed(() => featuresStore.features),
       tracks:   computed(() => [...tracksStore.tracks.values()]),
 
+      // Track visibility — the host's track-list panel lets the
+      // operator hide individual CoT tracks. Host layers (track
+      // dots, breadcrumbs, perimeter, bloodhound) all skip hidden
+      // uids; plugin-rendered sprites should respect the same
+      // toggle so the sprite, host marker, and breadcrumb stay
+      // consistent. `isHidden(uid)` is a synchronous check;
+      // `onHiddenChange(handler)` fires whenever the hidden set
+      // changes, with the new set as a fresh `Set<string>`. The
+      // returned unregister fn is also auto-cleaned on plugin
+      // deactivation.
+      trackVisibility: {
+        isHidden(uid) {
+          return tracksStore.hiddenIds.has(uid)
+        },
+        // Write-through so a plugin's own visibility toggle (e.g.
+        // Armada SA's eye button on each craft card) flips the host
+        // hidden gate too. Without this, host-side consumers of
+        // `hiddenIds` (perimeter breach detection, breadcrumb,
+        // bloodhound) keep treating the track as live and pick it
+        // up — even though the plugin sprite is hidden. Idempotent;
+        // only mutates when the state actually changes.
+        setHidden(uid, hidden) {
+          if (typeof uid !== 'string' || !uid) return
+          const want = !!hidden
+          const has  = tracksStore.hiddenIds.has(uid)
+          if (want === has) return
+          const next = new Set(tracksStore.hiddenIds)
+          if (want) next.add(uid)
+          else      next.delete(uid)
+          tracksStore.hiddenIds = next
+        },
+        onHiddenChange(handler) {
+          if (typeof handler !== 'function') return () => {}
+          const stop = watch(
+            () => tracksStore.hiddenIds,
+            (next) => {
+              try { handler(new Set(next)) }
+              catch (err) {
+                console.warn(`[plugin:${manifest.id}] trackVisibility.onHiddenChange threw:`, err)
+              }
+            }
+          )
+          cleanups.push(stop)
+          return stop
+        }
+      },
+
       updateFeature: (id, geometry, properties) =>
         featuresStore.updateFeature(id, geometry, properties),
       addFeature: (type, geometry, properties) =>
@@ -251,7 +317,7 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
       // subscribe to viewport-change events. Layer ids must be unique across
       // the whole map; the registry rejects collisions before touching state.
       map: {
-        addLayer({ id, source, layer, onClick, onHover, onHoverEnd, beforeId }) {
+        addLayer({ id, source, layer, onClick, onHover, onHoverEnd, beforeId, snapResolver }) {
           const map = getMap()
           if (!map) throw new Error('Map not ready yet. Plugins normally activate after the map loads; if you see this from a long-lived watcher, defer the call.')
           if (!id || typeof id !== 'string') throw new Error('addLayer: id is required')
@@ -271,6 +337,10 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
           //                        as a specific anchor layer id
           map.addLayer({ ...layer, id, source: id }, _resolveBeforeId(beforeId))
           _layers.get(manifest.id).add(id)
+          if (typeof snapResolver === 'function') {
+            _snapResolvers.set(id, snapResolver)
+          }
+          _notifyLayerChange()
 
           // Optional click + hover callbacks. Cursor turns to a pointer
           // on hover whenever any interaction handler is registered, so
@@ -327,6 +397,8 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
             if (m.getLayer(id))  m.removeLayer(id)
             if (m.getSource(id)) m.removeSource(id)
             _layers.get(manifest.id)?.delete(id)
+            _snapResolvers.delete(id)
+            _notifyLayerChange()
           }
           cleanups.push(unregister)
           // Return the unregister fn — historical shape — but also hang
@@ -599,6 +671,35 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         coordinate(lng, lat) { return formatCoordinate(lng, lat, settingsStore.coordinateFormat) }
       },
 
+      // ---- Display toggles ----
+      // Host-wide visual prefs that aren't units. Plugins rendering
+      // their own labels / overlays should respect these so a user
+      // toggling the global "Show feature labels" switch flips
+      // plugin labels too. Currently exposes:
+      //   - showLabels: mirrors `settingsStore.showFeatureLabels`,
+      //     the same setting that drives the host CoT label layer.
+      // Forward-extensible: future host prefs (theme, MIL-STD
+      // symbology, etc.) can land here without breaking plugins.
+      display: {
+        get showLabels() { return settingsStore.showFeatureLabels },
+        onChange(handler) {
+          if (typeof handler !== 'function') {
+            throw new Error('display.onChange: handler is required')
+          }
+          const stop = watch(
+            () => settingsStore.showFeatureLabels,
+            () => {
+              try { handler({ showLabels: settingsStore.showFeatureLabels }) }
+              catch (err) {
+                console.error(`[plugin:${manifest.id}] display.onChange handler threw:`, err)
+              }
+            }
+          )
+          cleanups.push(stop)
+          return stop
+        }
+      },
+
       // ---- CoT bridge ----
       // Plugins ingesting CoT from a non-host source (TAK Server SSL,
       // a custom gateway, a PCAP replay) can inject a parsed CoT
@@ -655,7 +756,27 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
             callsign: event.callsign ?? event.uid,
             time:     event.time  ?? new Date().toISOString(),
             stale:    event.stale ?? new Date(Date.now() + 60_000).toISOString(),
-            ...event
+            ...event,
+            // Opt-in: when true, host suppresses its default marker
+            // (cot-tracks-points / -symbols / -labels) and excludes
+            // the entity from the generic Track-List panel. The
+            // entity still flows through history accumulation,
+            // breadcrumbs, perimeter / bloodhound targetability,
+            // route avoidance, and assistant lookups — only the
+            // generic UI surfaces are skipped. Use when the plugin
+            // renders its own sprite + panel for this entity.
+            // Strict boolean coercion (post-spread) so plugins can't
+            // accidentally enable the gate with a truthy non-bool.
+            pluginManaged: event.pluginManaged === true,
+            // Auto-stamped ownership so `_runCleanup(id)` can sweep
+            // a plugin's bridged tracks the instant it deactivates
+            // (otherwise the track sticks around for up to one
+            // 90 s stale window after disable, leaving an orphan
+            // breadcrumb on the map). Only stamped when the emitter
+            // explicitly opts into pluginManaged — non-managed
+            // bridges (Persistent Systems-style relays) intentionally
+            // outlive the plugin's session.
+            pluginOwner: event.pluginManaged === true ? manifest.id : null
           }
           return emit('cot-event', out)
         }
@@ -856,13 +977,18 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     // unregister was pushed) gets removed here.
     const map = getMap()
     if (map) {
-      for (const layerId of _layers.get(id) ?? []) {
-        try {
-          if (map.getLayer(layerId))  map.removeLayer(layerId)
-          if (map.getSource(layerId)) map.removeSource(layerId)
-        } catch (e) {
-          console.warn(`[plugin-registry] Failed to remove layer "${layerId}":`, e)
+      const layersToSweep = _layers.get(id)
+      if (layersToSweep && layersToSweep.size > 0) {
+        for (const layerId of layersToSweep) {
+          try {
+            if (map.getLayer(layerId))  map.removeLayer(layerId)
+            if (map.getSource(layerId)) map.removeSource(layerId)
+          } catch (e) {
+            console.warn(`[plugin-registry] Failed to remove layer "${layerId}":`, e)
+          }
+          _snapResolvers.delete(layerId)
         }
+        _notifyLayerChange()
       }
       for (const imageId of _images.get(id) ?? []) {
         try {
@@ -910,6 +1036,37 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     _tools.delete(id)
     _conns.delete(id)
     _events.delete(id)
+
+    // Plugin-managed CoT bridges: remove every track this plugin
+    // emitted with `pluginManaged: true`. Without this, a disabled
+    // plugin's last-emitted tracks stay in tracksStore for up to
+    // one stale window (90 s by default), so breadcrumbs / perimeter
+    // rings / bloodhound lines linger on a map where the plugin
+    // sprite has already disappeared. The `pluginOwner` field is
+    // auto-stamped by `api.cot.emit`, so plugins don't need any
+    // bookkeeping. Non-managed bridges (relays of real wire
+    // traffic, e.g. Persistent Systems' radio repeats) keep their
+    // tracks; those are intentionally meant to outlive the plugin
+    // session.
+    if (tracksStore.tracks?.size) {
+      const ownedUids = []
+      for (const [uid, track] of tracksStore.tracks) {
+        if (track.pluginOwner === id) ownedUids.push(uid)
+      }
+      if (ownedUids.length) {
+        const next = new Map(tracksStore.tracks)
+        for (const uid of ownedUids) next.delete(uid)
+        tracksStore.tracks = next
+        if (tracksStore.hiddenIds?.size) {
+          const nextHidden = new Set(tracksStore.hiddenIds)
+          let dirty = false
+          for (const uid of ownedUids) {
+            if (nextHidden.delete(uid)) dirty = true
+          }
+          if (dirty) tracksStore.hiddenIds = nextHidden
+        }
+      }
+    }
 
     // Remove any orphan panels owned by this plugin and drop them from the
     // open-panels set so they don't render after disable.
@@ -1239,6 +1396,37 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     return false
   }
 
+  // Snap target accessors for selection composables (perimeter,
+  // bloodhound). The composables can't reactively re-bind their click
+  // handlers when plugins enable/disable, so they read the live set
+  // each click — `layerIds()` returns the snappable plugin layers
+  // currently on the map, and `resolve(layerId, feature)` maps a hit
+  // back to a host owner ref.
+  const snap = {
+    layerIds() {
+      return [..._snapResolvers.keys()]
+    },
+    resolve(layerId, feature) {
+      const fn = _snapResolvers.get(layerId)
+      if (!fn) return null
+      try { return fn(feature) ?? null }
+      catch (err) {
+        console.warn(`[plugin-registry] snapResolver for "${layerId}" threw:`, err)
+        return null
+      }
+    }
+  }
+
+  // Subscribe to plugin map-layer adds/removes. Returns an
+  // unregister function. Used by host composables that want to
+  // re-assert z-order (e.g. lifting breadcrumbs above plugin
+  // sprites) without polling.
+  function onLayerChange(fn) {
+    if (typeof fn !== 'function') return () => {}
+    _layerChangeHandlers.add(fn)
+    return () => _layerChangeHandlers.delete(fn)
+  }
+
   return {
     allToolbarButtons,
     allPanels,
@@ -1249,6 +1437,8 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     enablePlugin,
     disablePlugin,
     routing,
-    capabilities
+    capabilities,
+    snap,
+    onLayerChange
   }
 }

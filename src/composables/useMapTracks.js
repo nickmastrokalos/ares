@@ -42,10 +42,11 @@ function ensureMilStdIcons(map, features) {
   }
 }
 
-export function useMapTracks(getMap, suppress = { value: false }, dispatcher = null) {
+export function useMapTracks(getMap, suppress = { value: false }, dispatcher = null, pluginRegistry = null) {
   const tracksStore   = useTracksStore()
   const settingsStore = useSettingsStore()
   let initialized = false
+  let stopLayerChange = null
 
   // GeoJSON LineString collection for breadcrumb trails.
   // Tail length is `trackBreadcrumbLength` meters of map distance —
@@ -121,8 +122,12 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
       },
       paint: {
         'line-width': 1.5,
-        'line-opacity': 0.55,
-        'line-color': AFFIL_MATCH
+        'line-opacity': 0.7,
+        'line-color': AFFIL_MATCH,
+        // Tight 2/2 dash so the trail can't be confused with the
+        // perimeter ring (4/3 cadence in useMapPerimeters) or with
+        // the solid bloodhound line.
+        'line-dasharray': [2, 2]
       }
     })
 
@@ -240,6 +245,25 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
     map.on('mouseenter', TRACKS_LAYER_SYMBOLS, onTrackEnter)
     map.on('mouseleave', TRACKS_LAYER_SYMBOLS, onTrackLeave)
 
+    // Plugin overlays (Armada boat sprite, Persistent Systems icons,
+    // future plugin-rendered tracks) are added with the default
+    // `beforeId: '@top'`, which paints them above the breadcrumb
+    // layer. Short trails (e.g. 50–100 m of motion at close zoom)
+    // then live entirely under the plugin sprite and disappear from
+    // view. Lift breadcrumbs to the top whenever a plugin layer
+    // changes so plugin-emitted tracks get the same visible trail
+    // as host listener tracks.
+    if (pluginRegistry?.onLayerChange) {
+      const liftBreadcrumbs = () => {
+        const m = getMap()
+        if (m?.getLayer(BREADCRUMBS_LAYER)) m.moveLayer(BREADCRUMBS_LAYER)
+      }
+      stopLayerChange = pluginRegistry.onLayerChange(liftBreadcrumbs)
+      // Lift once now in case plugins already activated before
+      // tracks initialised (cold start order shouldn't matter).
+      liftBreadcrumbs()
+    }
+
     initialized = true
   }
 
@@ -302,6 +326,7 @@ export function useMapTracks(getMap, suppress = { value: false }, dispatcher = n
     if (dispatcher) dispatcher.unregister('cot-tracks')
     stopDataWatch()
     stopBreadcrumbWatch()
+    if (stopLayerChange) { stopLayerChange(); stopLayerChange = null }
     clearIconCache()
     const map = getMap()
     if (!map) return

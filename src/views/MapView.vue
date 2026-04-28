@@ -114,9 +114,17 @@ const contextMenu = ref(null)  // { x, y, lngLat } | null
 let map = null
 
 const dispatcher = useClickDispatcher()
-const bloodhoundApi = useMapBloodhound(() => map)
+// Lazy bridge to the plugin registry's snap-target accessors. Resolved
+// only at click time (after pluginRegistry is built below) so selection
+// composables can let plugin layers participate as snap targets.
+let pluginRegistry = null
+const pluginSnap = {
+  layerIds: () => pluginRegistry?.snap.layerIds() ?? [],
+  resolve:  (id, f) => pluginRegistry?.snap.resolve(id, f) ?? null
+}
+const bloodhoundApi = useMapBloodhound(() => map, pluginSnap)
 const { bloodhounding } = bloodhoundApi
-const perimeterApi = useMapPerimeters(() => map)
+const perimeterApi = useMapPerimeters(() => map, pluginSnap)
 const { perimeterSelecting } = perimeterApi
 // Proxy ref pattern: bullseye + annotations need `suppressEntityClicks` to
 // guard their drag handlers, but that computed can only be defined after
@@ -249,9 +257,9 @@ const { placing, setPlacing, openPanelList: manualTrackPanelList, openPanel: ope
 // must run after `useMapManualTracks` since `suppressEntityClicks` reads
 // `placing.value`, which only exists past that destructure.
 watch(suppressEntityClicks, (val) => { entitySuppressRef.value = val }, { immediate: true })
-const pluginRegistry = usePluginRegistry({ flyToGeometry, getMap: () => map })
+pluginRegistry = usePluginRegistry({ flyToGeometry, getMap: () => map })
 registerHostAvoidances(pluginRegistry, { tracksStore })
-const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher)
+const { initLayers: initTrackLayers } = useMapTracks(() => map, suppressEntityClicks, dispatcher, pluginRegistry)
 const { initLayers: initGhostLayers } = useMapGhosts(() => map)
 const { initLayers: initAisLayers }   = useMapAis(() => map, dispatcher, suppressEntityClicks)
 const { initLayers: initAdsbLayers }  = useMapAdsb(() => map, dispatcher, suppressEntityClicks)

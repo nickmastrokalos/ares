@@ -28,12 +28,20 @@ export const useTracksStore = defineStore('tracks', () => {
   // Each feature carries all track fields as properties plus a derived
   // `affiliation` for styling and an `updatedAt` timestamp.
   // Hidden uids are dropped here so the map source reflects visibility.
+  // Source for the host's default CoT marker layers
+  // (`cot-tracks-points` / `cot-tracks-symbols` / `cot-tracks-labels`).
+  // Plugin-managed tracks are filtered out here so the host doesn't
+  // draw a redundant affiliation dot underneath a plugin's own
+  // sprite — the bridged track still lives in the store and feeds
+  // breadcrumbs, perimeter, bloodhound, route-avoidance, and the
+  // assistant tools.
   const trackCollection = computed(() => {
     const selfUid = settingsStore.selfUid
     return {
       type: 'FeatureCollection',
       features: Array.from(tracks.value.values())
         .filter(t => !hiddenIds.value.has(t.uid))
+        .filter(t => t.pluginManaged !== true)
         .map(t => ({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
@@ -135,7 +143,19 @@ export const useTracksStore = defineStore('tracks', () => {
         time: e.time,
         stale: effectiveStale,
         updatedAt: now,
-        history
+        history,
+        // Plugin-bridge opt-out for the host's generic UI (default
+        // marker layer + Track-List). True when the emitter passed
+        // `pluginManaged: true` to `api.cot.emit`. Cross-cutting
+        // features (history, breadcrumb, perimeter, bloodhound,
+        // route avoidance, assistant lookup) ignore this flag.
+        pluginManaged: e.pluginManaged === true,
+        // Plugin id stamped automatically by `api.cot.emit` when
+        // `pluginManaged: true`. Lets the registry's deactivation
+        // sweep remove the track immediately on plugin disable so
+        // the breadcrumb / perimeter / etc. don't linger until the
+        // 90 s stale prune kicks in.
+        pluginOwner: typeof e.pluginOwner === 'string' ? e.pluginOwner : null
       })
       // Trigger reactivity — Map mutations don't trigger Vue's reactive system
       // unless we reassign or use a reactive Map wrapper. Reassign the ref value

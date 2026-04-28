@@ -60,6 +60,11 @@ const allTracks = computed(() => {
 
   const selfUid = settingsStore.selfUid
   for (const t of tracksStore.tracks.values()) {
+    // Plugin-managed tracks (e.g. Armada SA boats) are bridged
+    // into tracksStore so they participate in breadcrumbs /
+    // perimeter / bloodhound, but the plugin owns its own list
+    // panel — keep them out of the generic Track-List.
+    if (t.pluginManaged === true) continue
     const char = t.cotType?.[2] ?? 'u'
     const affiliation = ['f', 'h', 'n', 'u'].includes(char) ? char : 'u'
     result.push({

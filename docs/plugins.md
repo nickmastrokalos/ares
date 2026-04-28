@@ -106,6 +106,45 @@ api.tracks     // ComputedRef — array of all live CoT-feed tracks
                // next feed event; there is no mutation API for feed tracks.
 ```
 
+### Track visibility (Ares ≥ 1.1.8)
+
+The host's track-list panel lets the operator hide individual CoT
+tracks. Host-rendered layers (track dots, breadcrumbs, perimeter,
+bloodhound) all skip hidden uids. Plugins that render their own
+sprites for entities they bridge into the CoT pipeline (via
+`api.cot.emit`) should mirror the same gate so the sprite, host
+marker, and breadcrumb all hide together — otherwise the operator
+sees an inconsistent half-hidden track.
+
+```js
+// Synchronous check — true when this uid is currently hidden.
+if (api.trackVisibility.isHidden('armada-1234')) return
+
+// Write-through (Ares ≥ 1.1.9): when your plugin owns the
+// visibility toggle (eye icon on a per-entity card, etc.) flip
+// host-side state too so cross-cutting features (perimeter breach
+// detection, breadcrumbs, bloodhound) stop treating the entity as
+// live. Without this, a hidden craft still counts as an intruder
+// for any perimeter on the map.
+api.trackVisibility.setHidden('armada-1234', true)   // hide
+api.trackVisibility.setHidden('armada-1234', false)  // un-hide
+
+// Subscribe to changes. Handler receives the new hidden Set on
+// every change (renames, unhides, bulk clears). Returned function
+// unregisters the watcher; cleanup also runs on plugin disable.
+const stop = api.trackVisibility.onHiddenChange((hiddenUids) => {
+  // Re-render your custom layer so newly-hidden craft drop out
+  // and unhidden craft come back.
+  render()
+})
+```
+
+Older hosts (≤ 1.1.7) don't expose `api.trackVisibility`. Feature-
+detect (`typeof api.trackVisibility?.isHidden === 'function'`) and
+fall back to always-visible behaviour so your plugin still loads.
+`setHidden` was added in 1.1.9 — earlier 1.1.8 hosts have
+`isHidden` and `onHiddenChange` only.
+
 ### Mutations (features only)
 
 ```js
@@ -156,7 +195,7 @@ const layer = api.map.addLayer({
     // Optional. Fires when the cursor leaves the layer. Use to hide
     // your tooltip element.
   },
-  beforeId: '@bottom'                     // Optional layer-stack placement.
+  beforeId: '@bottom',                    // Optional layer-stack placement.
                                            // '@top' (default) → on top of everything.
                                            // '@bottom'         → just above the basemap,
                                            //                     below all host content.
@@ -164,6 +203,22 @@ const layer = api.map.addLayer({
                                            //                     anchor against (the new
                                            //                     layer is inserted before
                                            //                     it).
+  snapResolver(feature) {
+    // Optional. Makes this layer participate in host selection
+    // composables (perimeter, bloodhound) so clicks on the
+    // plugin's custom sprite snap to a host owner ref. Return a
+    // ref of `{ kind: 'cot', uid }`, `{ kind: 'ais', mmsi }`, or
+    // `{ kind: 'feature', featureId }` — the host re-resolves the
+    // live coord through the matching store. Return null to skip.
+    //
+    // Use when your plugin renders its OWN sprite for an entity
+    // it also bridges to a host store (typically via
+    // `api.cot.emit`) — without this, the plugin sprite covers
+    // the host's smaller dot and clicks miss the snap target.
+    const senderId = feature?.properties?.senderId
+    if (senderId == null) return null
+    return { kind: 'cot', uid: `armada-${senderId}` }
+  }
 })
 
 // Cursor automatically turns to a pointer on hover whenever any
@@ -419,6 +474,39 @@ protected CoT listeners use, so the existing tracks / chat / alert
 stores pick it up unchanged. Required fields: `uid`, `cot_type`
 (or `cotType`), `lat`, `lon`. Everything else has sane defaults.
 
+#### `pluginManaged` (Ares ≥ 1.1.9)
+
+If your plugin renders its own sprite + panel for the entity
+(Armada SA's boat icon + verbose panel is the canonical example),
+add `pluginManaged: true` to opt out of the host's default UI
+surfaces:
+
+```js
+api.cot.emit({
+  uid: 'armada-1234', cot_type: 'a-f-S-X',
+  lat, lon, callsign: 'Armada 144',
+  pluginManaged: true            // suppress host marker + Track-List entry
+})
+```
+
+Effects when set:
+
+- The host's `cot-tracks-points` / `-symbols` / `-labels` map
+  layers skip this uid — no redundant affiliation dot drawn under
+  your sprite.
+- The generic Track-List panel skips this uid — the plugin owns
+  its own list / detail surface.
+- Everything else stays: history accumulation, breadcrumb trail,
+  perimeter / bloodhound targetability (use `snapResolver` on your
+  own layer to make it the snap target), route-avoidance
+  contributors, assistant lookups (`cot_list_tracks`,
+  `cot_get_track`, `map_find_entity`, `cot_tracks_near`).
+
+Older hosts (≤ 1.1.8) ignore the field and draw the default
+marker — feature-detect by Ares version if you care, or just set
+it unconditionally; the worst case on an older host is the
+pre-1.1.9 status quo.
+
 When a plugin owns a raw socket whose payloads happen to be CoT
 (XML or TAK Protocol v1), pair `cot.emit` with `cot.parse(bytes)`
 to reuse the host's parser end-to-end:
@@ -599,6 +687,25 @@ api.units.onChange(({ distance, coordinate }) => render())
 If a plugin renders on a tick (e.g. 1 Hz panel re-render), it'll
 pick up changes automatically on the next tick — `onChange` is for
 plugins that want instant response.
+
+#### Display toggles (Ares ≥ 1.1.9)
+
+Host-wide visual prefs that aren't units. Plugins rendering their
+own labels / overlays should respect these so the operator's one
+toggle controls every label on the map, host or plugin:
+
+```js
+api.display.showLabels    // boolean — mirrors Settings → Display →
+                          // "Show feature labels". Drives the host's
+                          // CoT label layer; plugins should mirror.
+
+api.display.onChange(({ showLabels }) => render())
+```
+
+The Armada SA plugin's callsign label uses this — its label layer
+is populated when `showLabels` is true and emptied when false. On
+older hosts (≤ 1.1.8) without `api.display`, feature-detect and
+default to visible.
 
 ### Plugin-scoped persistent settings
 
