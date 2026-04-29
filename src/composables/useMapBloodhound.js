@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useTracksStore } from '@/stores/tracks'
 import { useAisStore } from '@/stores/ais'
 import { useFeaturesStore } from '@/stores/features'
+import { useBloodhoundsStore } from '@/stores/bloodhounds'
 
 const BH_SOURCE = 'bloodhound-line'
 const BH_LAYER  = 'bloodhound-line-layer'
@@ -30,31 +31,33 @@ const BH_LAYER  = 'bloodhound-line-layer'
 //     Escape or click "+ Add"  → exit selecting; committed lines stay.
 //   Remove individual line from panel list, or "Clear all".
 
-export function useMapBloodhound(getMap) {
-  const settingsStore = useSettingsStore()
-  const tracksStore   = useTracksStore()
-  const aisStore      = useAisStore()
-  const featuresStore = useFeaturesStore()
+export function useMapBloodhound(getMap, pluginSnap = null) {
+  const settingsStore    = useSettingsStore()
+  const tracksStore      = useTracksStore()
+  const aisStore         = useAisStore()
+  const featuresStore    = useFeaturesStore()
+  const bloodhoundsStore = useBloodhoundsStore()
 
   const isSelecting  = ref(false)
-  const bloodhoundCount = ref(0)  // reactive mirror of committed.length
 
   // The toolbar button reflects selection mode only. Committed lines remain
   // visible after selection exits; the button dims so map clicks, draw, and
   // measure are fully restored.
   const bloodhounding = computed(() => isSelecting.value)
 
-  const committed = []   // plain array, mutated directly; bloodhoundCount mirrors length
-  let nextId     = 0
+  // Persisted source-of-truth lives in `bloodhoundsStore.lines`
+  // (Vue ref of `[{ id, epA, epB }]`). The MapLibre markers
+  // themselves are tied to the live map and recreated each time
+  // the composable mounts; we track them locally by id.
+  const markersById = new Map()  // id -> { markerMid, markerA, markerB }
   let pendingEpA = null  // first endpoint in the in-progress pair
 
-  // Reactive summary for the panel + assistant tools. Rebuilds on add/remove/
-  // clear (bloodhoundCount bump) and on endpoint re-resolve (bumpTick).
+  // Reactive summary for the panel + assistant tools. Rebuilds when
+  // store mutates and on endpoint re-resolve (bumpTick).
   const bumpTick = ref(0)
   const bloodhounds = computed(() => {
-    void bloodhoundCount.value
     void bumpTick.value
-    return committed.map(r => ({
+    return bloodhoundsStore.lines.map(r => ({
       id:   r.id,
       epA:  { ...r.epA, label: labelForEndpoint(r.epA) },
       epB:  { ...r.epB, label: labelForEndpoint(r.epB) },
@@ -134,6 +137,13 @@ export function useMapBloodhound(getMap) {
         'line-dasharray': [5, 3]
       }
     })
+    // Bloodhound is added lazily on first use — usually after
+    // plugins have registered their map content. MapLibre would
+    // paint a fresh bloodhound line over plugin sprites + their
+    // LEDs / labels, which buries plugin-managed entities the
+    // user is actively connecting to. Lift plugin layers back on
+    // top so the line passes UNDER the boat / LED.
+    pluginSnap?.liftPluginLayers?.()
   }
 
   // ---- Endpoint resolution ----
@@ -201,7 +211,7 @@ export function useMapBloodhound(getMap) {
   function rebuildSource() {
     const map = getMap()
     if (!map) return
-    const features = committed.map(r => ({
+    const features = bloodhoundsStore.lines.map(r => ({
       type: 'Feature',
       properties: { id: r.id },
       geometry: { type: 'LineString', coordinates: [r.epA.coord, r.epB.coord] }
@@ -209,36 +219,50 @@ export function useMapBloodhound(getMap) {
     map.getSource(BH_SOURCE)?.setData({ type: 'FeatureCollection', features })
   }
 
+  // Sync the line's three MapLibre markers (mid label, two endpoint
+  // dots) with its current endpoint coords. `r` is the persisted
+  // record from the store; markers are looked up / created in the
+  // composable-local `markersById` Map.
   function syncLineMarkers(r) {
     const cA  = r.epA.coord
     const cB  = r.epB.coord
     const mid = [(cA[0] + cB[0]) / 2, (cA[1] + cB[1]) / 2]
     const label = formatDistance(distanceBetween(cA, cB), settingsStore.distanceUnits)
 
-    if (r.markerMid) {
-      r.markerMid.setLngLat(mid)
-      r.markerMid.getElement().textContent = label
+    let m = markersById.get(r.id)
+    if (!m) { m = { markerMid: null, markerA: null, markerB: null }; markersById.set(r.id, m) }
+
+    if (m.markerMid) {
+      m.markerMid.setLngLat(mid)
+      m.markerMid.getElement().textContent = label
     } else {
-      r.markerMid = placeMarker(mid, makeLabelEl(label))
+      m.markerMid = placeMarker(mid, makeLabelEl(label))
     }
 
-    if (r.markerA) r.markerA.setLngLat(cA)
-    else           r.markerA = placeMarker(cA, makeDotEl())
+    if (m.markerA) m.markerA.setLngLat(cA)
+    else           m.markerA = placeMarker(cA, makeDotEl())
 
-    if (r.markerB) r.markerB.setLngLat(cB)
-    else           r.markerB = placeMarker(cB, makeDotEl())
+    if (m.markerB) m.markerB.setLngLat(cB)
+    else           m.markerB = placeMarker(cB, makeDotEl())
   }
 
   function updateAllDisplays() {
     rebuildSource()
-    for (const r of committed) syncLineMarkers(r)
+    for (const r of bloodhoundsStore.lines) syncLineMarkers(r)
     bumpTick.value++
   }
 
-  function removeLineMarkers(r) {
-    if (r.markerMid) { r.markerMid.remove(); r.markerMid = null }
-    if (r.markerA)   { r.markerA.remove();   r.markerA   = null }
-    if (r.markerB)   { r.markerB.remove();   r.markerB   = null }
+  function removeLineMarkersById(id) {
+    const m = markersById.get(id)
+    if (!m) return
+    if (m.markerMid) { m.markerMid.remove(); m.markerMid = null }
+    if (m.markerA)   { m.markerA.remove();   m.markerA   = null }
+    if (m.markerB)   { m.markerB.remove();   m.markerB   = null }
+    markersById.delete(id)
+  }
+
+  function removeLineMarkersAll() {
+    for (const id of [...markersById.keys()]) removeLineMarkersById(id)
   }
 
   // True if an endpoint's anchor entity is no longer present in its store —
@@ -253,30 +277,31 @@ export function useMapBloodhound(getMap) {
     return false
   }
 
-  // Re-resolve every endpoint against the current source stores and update
-  // the map + markers if anything moved. Called from the combined watcher.
+  // Re-resolve every endpoint against the current source stores
+  // and update the map + markers if anything moved. Lines whose
+  // anchors disappeared are removed from the persisted store too.
   function reresolveAll() {
-    if (!committed.length) return
+    if (!bloodhoundsStore.lines.length) return
     let changed = false
-    for (let i = committed.length - 1; i >= 0; i--) {
-      const r = committed[i]
-      // Drop the line if either anchor disappeared — matches user intent
-      // that a deleted track / vessel / feature takes its dependents with it.
+    // Iterate a snapshot so removing through the store mid-loop
+    // doesn't skip entries.
+    for (const r of [...bloodhoundsStore.lines]) {
       if (endpointGone(r.epA) || endpointGone(r.epB)) {
-        removeLineMarkers(r)
-        committed.splice(i, 1)
+        removeLineMarkersById(r.id)
+        bloodhoundsStore.remove(r.id)
         changed = true
         continue
       }
       const cA = resolveCoord(r.epA)
       const cB = resolveCoord(r.epB)
-      if (cA && (cA[0] !== r.epA.coord[0] || cA[1] !== r.epA.coord[1])) { r.epA.coord = cA; changed = true }
-      if (cB && (cB[0] !== r.epB.coord[0] || cB[1] !== r.epB.coord[1])) { r.epB.coord = cB; changed = true }
+      const aMoved = cA && (cA[0] !== r.epA.coord[0] || cA[1] !== r.epA.coord[1])
+      const bMoved = cB && (cB[0] !== r.epB.coord[0] || cB[1] !== r.epB.coord[1])
+      if (aMoved || bMoved) {
+        bloodhoundsStore.updateCoords(r.id, aMoved ? cA : null, bMoved ? cB : null)
+        changed = true
+      }
     }
-    if (changed) {
-      bloodhoundCount.value = committed.length
-      updateAllDisplays()
-    }
+    if (changed) updateAllDisplays()
   }
 
   // ---- Source watchers — keep endpoints live ----
@@ -325,12 +350,12 @@ export function useMapBloodhound(getMap) {
     if (map) map.getCanvasContainer().style.cursor = ''
   }
 
-  // Clears all committed lines and exits selection.
+  // Clears all committed lines and exits selection. Wipes the
+  // persisted store too — the user explicitly asked for "clear".
   function clearAll() {
     exitSelecting()
-    for (const r of committed) removeLineMarkers(r)
-    committed.length = 0
-    bloodhoundCount.value = 0
+    removeLineMarkersAll()
+    bloodhoundsStore.clear()
     stopWatchers()
     removeKeyHandler()
     const map = getMap()
@@ -341,7 +366,15 @@ export function useMapBloodhound(getMap) {
   // Empty-space clicks fall through to a `point` endpoint anchored at the click
   // coord so the operator can measure to/from arbitrary locations.
   function resolveEndpointAtClick(map, e) {
-    const hits = map.queryRenderedFeatures(e.point, { layers: SNAP_LAYERS })
+    // Plugin layers that opted in via `api.map.addLayer({ snapResolver })`
+    // join the snap query alongside the host layers. Lets clicks on a
+    // plugin's custom sprite anchor to the bridged host entity (e.g.
+    // Armada boat → corresponding CoT track).
+    const pluginLayerIds = pluginSnap?.layerIds() ?? []
+    const queryLayers = pluginLayerIds.length
+      ? [...SNAP_LAYERS, ...pluginLayerIds]
+      : SNAP_LAYERS
+    const hits = map.queryRenderedFeatures(e.point, { layers: queryLayers })
     if (!hits.length) return { kind: 'point', coord: [e.lngLat.lng, e.lngLat.lat] }
 
     const hit = hits[0]
@@ -362,6 +395,17 @@ export function useMapBloodhound(getMap) {
       // render). Anchor to the clicked coord; the watcher will snap back to
       // live position on the next poll if the mmsi reappears.
       return { kind: 'ais', mmsi, coord: [hit.geometry.coordinates[0], hit.geometry.coordinates[1]] }
+    }
+
+    // Plugin-registered snap layer. Resolver returns a host endpoint
+    // ref; coord is re-resolved through the matching store so the
+    // line tracks live position.
+    if (pluginSnap && pluginLayerIds.includes(layer)) {
+      const ref = pluginSnap.resolve(layer, hit)
+      if (ref) {
+        const coord = resolveCoord(ref) ?? ref.coord ?? hit.geometry.coordinates
+        if (coord) return { ...ref, coord }
+      }
     }
 
     // All feature-backed layers (draw shapes, manual tracks, route dots)
@@ -415,21 +459,13 @@ export function useMapBloodhound(getMap) {
 
   function commit(epA, epB) {
     ensureSource()
-    const r = {
-      id: nextId++,
-      epA: { ...epA },
-      epB: { ...epB },
-      markerMid: null,
-      markerA:   null,
-      markerB:   null
-    }
-    committed.push(r)
-    bloodhoundCount.value = committed.length
+    const id = bloodhoundsStore.add(epA, epB)
+    const r  = bloodhoundsStore.lines.find(l => l.id === id)
     rebuildSource()
-    syncLineMarkers(r)
+    if (r) syncLineMarkers(r)
     ensureWatchers()
     ensureKeyHandler()
-    return r.id
+    return id
   }
 
   // ---- Public programmatic API (assistant tools) ----
@@ -441,13 +477,11 @@ export function useMapBloodhound(getMap) {
   }
 
   function removeBloodhound(id) {
-    const idx = committed.findIndex(r => r.id === id)
-    if (idx < 0) return false
-    removeLineMarkers(committed[idx])
-    committed.splice(idx, 1)
-    bloodhoundCount.value = committed.length
+    if (!bloodhoundsStore.lines.some(l => l.id === id)) return false
+    removeLineMarkersById(id)
+    bloodhoundsStore.remove(id)
     rebuildSource()
-    if (committed.length === 0) {
+    if (bloodhoundsStore.lines.length === 0) {
       stopWatchers()
       removeKeyHandler()
     }
@@ -478,12 +512,41 @@ export function useMapBloodhound(getMap) {
     }
   }
 
+  // Hydrate from the persisted store. Called by MapView from the
+  // `map.on('load', ...)` callback (the composable's `getMap()` is a
+  // closure over a plain `let`, which Vue's `watch` can't track for
+  // re-fire). When the user navigates back to the map after the
+  // composable was torn down, the lines are still in
+  // `bloodhoundsStore`; we re-attach markers + sources against the
+  // new map.
+  //
+  // CRITICAL: do NOT call `reresolveAll()` here. That function
+  // drops any line whose endpoint uid isn't currently in the
+  // matching store — and on a fresh map mount, neither host
+  // listeners nor plugin tracks have reconnected yet. The line
+  // would get purged before its anchors had a chance to come back.
+  // Instead: draw at the persisted last-known coords, then let the
+  // regular watchers handle subsequent updates.
+  function init() {
+    const map = getMap()
+    if (!map) return
+    if (!bloodhoundsStore.lines.length) return
+    ensureSource()
+    ensureWatchers()
+    ensureKeyHandler()
+    rebuildSource()
+    for (const r of bloodhoundsStore.lines) syncLineMarkers(r)
+    bumpTick.value++
+  }
+
   onUnmounted(() => {
     removeClickHandler()
     removeKeyHandler()
     stopWatchers()
-    for (const r of committed) removeLineMarkers(r)
-    committed.length = 0
+    // Tear down per-map markers + the map source / layer; do NOT
+    // clear `bloodhoundsStore.lines` so the lines come back when
+    // the user navigates back to MapView.
+    removeLineMarkersAll()
     const map = getMap()
     if (!map) return
     if (map.getLayer(BH_LAYER))   map.removeLayer(BH_LAYER)
@@ -491,6 +554,7 @@ export function useMapBloodhound(getMap) {
   })
 
   return {
+    init,
     bloodhounding,
     bloodhounds,
     toggleSelecting,

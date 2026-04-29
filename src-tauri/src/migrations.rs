@@ -127,5 +127,33 @@ pub fn migrations() -> Vec<Migration> {
             ",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "create_ghosts_table",
+            // Persistent ghost tracks. Live position (currentIndex,
+            // currentLon, currentLat, segmentProgress, status) is NOT
+            // saved — on load, every ghost re-anchors to its
+            // start_waypoint_index in the idle state, matching
+            // session-resume semantics. route_id references a row in
+            // `features`; ON DELETE CASCADE drops dangling ghosts when
+            // the route is removed.
+            sql: "
+                CREATE TABLE IF NOT EXISTS ghosts (
+                    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mission_id           INTEGER NOT NULL,
+                    route_id             INTEGER NOT NULL,
+                    name                 TEXT    NOT NULL,
+                    start_waypoint_index INTEGER NOT NULL,
+                    direction            TEXT    NOT NULL,
+                    speed_ms             REAL    NOT NULL,
+                    created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
+                    updated_at           TEXT    NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id)  ON DELETE CASCADE,
+                    FOREIGN KEY (route_id)   REFERENCES features(id)  ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_ghosts_mission ON ghosts(mission_id);
+            ",
+            kind: MigrationKind::Up,
+        },
     ]
 }

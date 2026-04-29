@@ -1,13 +1,16 @@
+import html2canvas from 'html2canvas-pro'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 import { desktopDir, join } from '@tauri-apps/api/path'
 
-// Map snapshot / brief export — composites the current MapLibre canvas
-// with a legend strip (mission, timestamp, overlay counts, view info) and
-// saves the result as PNG via the Tauri file dialog.
+// Map snapshot — captures the entire map container (the WebGL canvas
+// AND every floating panel positioned over it: host panels, plugin
+// panels, HTML markers, MapLibre controls) and appends a legend strip
+// (mission, timestamp, view info) before saving as PNG.
 //
-// Requires `preserveDrawingBuffer: true` on the map constructor; without it
-// the WebGL readback after paint produces a blank image.
+// Requires `preserveDrawingBuffer: true` on the map constructor — without
+// it, html2canvas can't read the WebGL backbuffer and the basemap layer
+// in the captured image is blank.
 
 const LEGEND_HEIGHT = 72     // CSS pixels
 const LEGEND_BG     = '#141820'
@@ -23,64 +26,6 @@ function sanitizeFileName(name) {
 }
 
 export function useMapSnapshot({ getMap, featuresStore }) {
-
-  // HTML text labels (bullseye / bloodhound / perimeter / measure) live
-  // in the DOM overlay, so `map.getCanvas()` alone misses them. Rasterise
-  // each visible text marker at its current screen position. Map-layer
-  // features (tracks, annotations, bullseye handle, etc.) are already in
-  // the canvas readback and need no special handling.
-  function drawHtmlMarkers(ctx, map, dpr) {
-    const container = map.getContainer()
-    const cRect = container.getBoundingClientRect()
-    const markers = container.querySelectorAll('.maplibregl-marker')
-    for (const el of markers) {
-      if (el.style.display === 'none' || el.style.visibility === 'hidden') continue
-
-      const text = (el.textContent ?? '').trim()
-      if (!text) continue  // skip ornamental markers (dots, crosses)
-      drawTextPill(ctx, el, text, cRect, dpr)
-    }
-  }
-
-  function drawTextPill(ctx, el, text, cRect, dpr) {
-    const rect = el.getBoundingClientRect()
-    if (!rect.width || !rect.height) return
-    const style = window.getComputedStyle(el)
-    const bg    = style.backgroundColor || 'rgba(22,22,22,0.75)'
-    const color = style.color           || '#e3e6ee'
-    const fontWeight = style.fontWeight || '400'
-    const fontSize   = parseFloat(style.fontSize) || 11
-    const fontFamily = style.fontFamily || 'sans-serif'
-
-    const x = Math.round((rect.left - cRect.left) * dpr)
-    const y = Math.round((rect.top  - cRect.top)  * dpr)
-    const w = Math.round(rect.width  * dpr)
-    const h = Math.round(rect.height * dpr)
-
-    ctx.fillStyle = bg
-    roundRect(ctx, x, y, w, h, Math.round(2 * dpr))
-    ctx.fill()
-
-    ctx.fillStyle = color
-    ctx.font = `${fontWeight} ${Math.round(fontSize * dpr)}px ${fontFamily}`
-    ctx.textBaseline = 'middle'
-    ctx.textAlign = 'center'
-    ctx.fillText(text, x + w / 2, y + h / 2 + Math.round(dpr))
-  }
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath()
-    ctx.moveTo(x + r, y)
-    ctx.lineTo(x + w - r, y)
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r)
-    ctx.lineTo(x + w, y + h - r)
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-    ctx.lineTo(x + r, y + h)
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r)
-    ctx.lineTo(x, y + r)
-    ctx.quadraticCurveTo(x, y, x + r, y)
-    ctx.closePath()
-  }
 
   // Force a repaint and wait for the next idle so the drawing buffer holds
   // the current state before we read it back.
@@ -113,19 +58,42 @@ export function useMapSnapshot({ getMap, featuresStore }) {
 
     await waitForIdle(map)
 
-    const src = map.getCanvas()
     const dpr = window.devicePixelRatio || 1
+    const container = map.getContainer()
+
+    // html2canvas-pro walks the DOM under `container` and rasterises
+    // it into a canvas, including the MapLibre WebGL canvas (works
+    // because `preserveDrawingBuffer: true`), HTML markers, and every
+    // floating panel that lives inside the container (host + plugin).
+    // `scale: dpr` keeps the readback at native pixel density so the
+    // saved image matches what's on screen at retina resolution.
+    let captured
+    try {
+      captured = await html2canvas(container, {
+        backgroundColor: null,
+        scale:        dpr,
+        useCORS:      true,
+        allowTaint:   true,
+        logging:      false,
+        // Skip the maplibre attribution control to keep the saved image
+        // clean for ops use; everything else inside the map container
+        // is fair game.
+        ignoreElements: (el) => el.classList?.contains('maplibregl-ctrl-attrib')
+      })
+    } catch (err) {
+      return { ok: false, error: `Snapshot render failed: ${err?.message ?? err}` }
+    }
+
+    const width    = captured.width
+    const height   = captured.height
     const legendPx = Math.round(LEGEND_HEIGHT * dpr)
-    const width  = src.width
-    const height = src.height
 
     const composite = document.createElement('canvas')
     composite.width  = width
     composite.height = height + legendPx
     const ctx = composite.getContext('2d')
 
-    ctx.drawImage(src, 0, 0)
-    drawHtmlMarkers(ctx, map, dpr)
+    ctx.drawImage(captured, 0, 0)
 
     // ---- Legend strip ----
     const legendY = height

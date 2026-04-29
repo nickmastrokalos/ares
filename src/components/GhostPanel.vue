@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useGhostsStore } from '@/stores/ghosts'
 import { useFeaturesStore } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
@@ -80,24 +80,49 @@ function speedDisplayValue(ghost) {
 const unitLabel = computed(() => speedUnitLabel(settingsStore.distanceUnits))
 
 // ---- Speed editing ----
+// While a running ghost is being edited, the store ticks every
+// 100 ms and mutates `ghost.speedMs` (well, replaces the ghost
+// object). If we leave `:value` bound directly to the live ghost
+// the rerender overwrites whatever the operator just typed,
+// snapping their keystrokes back. We gate the displayed value on
+// `editingSpeedId`: while focused, the bound value comes from
+// `speedDraft` (changes only on `@input`); otherwise it tracks
+// the ghost. `speedSnapshot` keeps the on-focus value for Esc.
 
-const speedFocusValues = new Map()
+const editingSpeedId = ref(null)
+const speedDraft     = ref('')
+const speedSnapshot  = ref('')
+
+function speedInputValue(ghost) {
+  return editingSpeedId.value === ghost.id
+    ? speedDraft.value
+    : speedDisplayValue(ghost)
+}
 
 function onSpeedFocus(event, ghost) {
-  speedFocusValues.set(ghost.id, event.target.value)
+  const current = speedDisplayValue(ghost)
+  editingSpeedId.value = ghost.id
+  speedDraft.value     = current
+  speedSnapshot.value  = current
+}
+
+function onSpeedInput(event) {
+  speedDraft.value = event.target.value
 }
 
 function onSpeedBlur(event, ghost) {
-  const raw = String(event.target.value).trim()
+  if (editingSpeedId.value !== ghost.id) return
+  const raw = speedDraft.value.trim()
   const ms = parseSpeedToMs(raw, settingsStore.distanceUnits)
   if (ms !== null && ms > 0) {
     ghostsStore.setSpeed(ghost.id, ms)
-  } else {
-    // Restore original value
-    const original = speedFocusValues.get(ghost.id)
-    if (original !== undefined) event.target.value = original
   }
-  speedFocusValues.delete(ghost.id)
+  // Either way, drop edit state — the next render falls back to
+  // the live ghost value (which is now the committed speed, or
+  // unchanged if the input was invalid).
+  editingSpeedId.value = null
+  speedDraft.value     = ''
+  speedSnapshot.value  = ''
 }
 
 function onSpeedEnter(event) {
@@ -105,8 +130,12 @@ function onSpeedEnter(event) {
 }
 
 function onSpeedEscape(event, ghost) {
-  const original = speedFocusValues.get(ghost.id)
-  if (original !== undefined) event.target.value = original
+  // Cancel: restore the on-focus value and exit edit mode without
+  // committing.
+  speedDraft.value     = speedSnapshot.value
+  editingSpeedId.value = null
+  speedDraft.value     = ''
+  speedSnapshot.value  = ''
   event.target.blur()
 }
 
@@ -118,6 +147,67 @@ function toggleGhost(ghost) {
   } else {
     ghostsStore.startGhost(ghost.id)
   }
+}
+
+// ---- Inline rename ----
+// Click the ghost name to enter edit mode; Enter / blur commits,
+// Escape cancels. Edits are kept in a per-row map keyed by id so
+// switching focus between rows doesn't bleed drafts together.
+
+const renamingId = ref(null)
+const renameDraft = ref('')
+
+function beginRename(ghost) {
+  renamingId.value  = ghost.id
+  renameDraft.value = ghost.name
+  // Auto-select on next tick so the operator can immediately
+  // overtype the existing name.
+  nextTick(() => {
+    const el = document.querySelector('.ghost-name-input--editing')
+    if (el) { el.focus(); el.select() }
+  })
+}
+function commitRename(ghost) {
+  if (renamingId.value !== ghost.id) return
+  const next = renameDraft.value.trim()
+  if (next && next !== ghost.name) {
+    ghostsStore.renameGhost(ghost.id, next)
+  }
+  renamingId.value = null
+  renameDraft.value = ''
+}
+function cancelRename() {
+  renamingId.value = null
+  renameDraft.value = ''
+}
+
+// ---- Edit popover (waypoint + direction) ----
+// Click the pencil to open; selectors update the ghost in place
+// via the store. Disabled while the ghost is running.
+
+function ghostRoute(ghost) {
+  return routes.value.find(r => r.id === ghost.routeId) ?? null
+}
+
+function ghostWaypoints(ghost) {
+  return ghostRoute(ghost)?.waypoints ?? []
+}
+
+function isAtStart(ghost) {
+  return ghost.startWaypointIndex === 0
+}
+
+function isAtEnd(ghost) {
+  const wps = ghostWaypoints(ghost)
+  return wps.length > 0 && ghost.startWaypointIndex === wps.length - 1
+}
+
+function setEditWaypoint(ghost, idx) {
+  ghostsStore.setStartWaypoint(ghost.id, Number(idx))
+}
+
+function setEditDirection(ghost, dir) {
+  ghostsStore.setDirection(ghost.id, dir)
 }
 
 // ---- Creation form ----
@@ -248,10 +338,83 @@ onMounted(() => {
         <!-- Item header row -->
         <div class="ghost-item-header">
           <span class="ghost-dot" />
-          <span class="ghost-name" :class="{ 'ghost-name--running': ghost.status === 'running' }">
+          <input
+            v-if="renamingId === ghost.id"
+            v-model="renameDraft"
+            class="ghost-name ghost-name--input ghost-name-input--editing"
+            :class="{ 'ghost-name--running': ghost.status === 'running' }"
+            type="text"
+            @keydown.enter.prevent="commitRename(ghost)"
+            @keydown.escape.prevent="cancelRename"
+            @blur="commitRename(ghost)"
+            @pointerdown.stop
+            @click.stop
+          />
+          <span
+            v-else
+            class="ghost-name"
+            :class="{ 'ghost-name--running': ghost.status === 'running' }"
+            title="Click to rename"
+            @pointerdown.stop
+            @click.stop="beginRename(ghost)"
+          >
             {{ ghost.name }}
           </span>
           <v-spacer />
+
+          <v-menu
+            :close-on-content-click="false"
+            location="bottom"
+            offset="2"
+          >
+            <template #activator="{ props }">
+              <v-btn
+                v-bind="props"
+                icon="mdi-pencil-outline"
+                size="x-small"
+                variant="text"
+                class="text-medium-emphasis"
+                :title="ghost.status === 'running' ? 'Stop the ghost first to edit' : 'Edit waypoint / direction'"
+                :disabled="ghost.status === 'running'"
+                @pointerdown.stop
+                @click.stop
+              />
+            </template>
+            <div class="edit-popover" @pointerdown.stop>
+              <div class="section-label">EDIT GHOST</div>
+              <div class="form-row">
+                <span class="form-label">WP</span>
+                <select
+                  :value="ghost.startWaypointIndex"
+                  class="panel-select"
+                  @change="setEditWaypoint(ghost, $event.target.value)"
+                >
+                  <option
+                    v-for="wp in ghostWaypoints(ghost)"
+                    :key="wp.index"
+                    :value="wp.index"
+                  >{{ wp.label }}</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <span class="form-label">DIR</span>
+                <div class="dir-pills">
+                  <button
+                    class="pill"
+                    :class="{ 'pill--active': ghost.direction === 'backward' }"
+                    :disabled="isAtStart(ghost)"
+                    @click="setEditDirection(ghost, 'backward')"
+                  >← BWD</button>
+                  <button
+                    class="pill"
+                    :class="{ 'pill--active': ghost.direction === 'forward' }"
+                    :disabled="isAtEnd(ghost)"
+                    @click="setEditDirection(ghost, 'forward')"
+                  >FWD →</button>
+                </div>
+              </div>
+            </div>
+          </v-menu>
 
           <v-tooltip :text="ghost.status === 'running' ? 'Stop' : 'Start'" location="top">
             <template #activator="{ props }">
@@ -306,7 +469,8 @@ onMounted(() => {
               class="speed-input"
               type="text"
               inputmode="decimal"
-              :value="speedDisplayValue(ghost)"
+              :value="speedInputValue(ghost)"
+              @input="onSpeedInput($event)"
               @focus="onSpeedFocus($event, ghost)"
               @blur="onSpeedBlur($event, ghost)"
               @keydown.enter="onSpeedEnter($event)"
@@ -489,10 +653,23 @@ onMounted(() => {
   text-overflow: ellipsis;
   min-width: 0;
   flex: 1;
+  cursor: text;
 }
 
 .ghost-name--running {
   color: rgb(var(--v-theme-primary));
+}
+
+/* Inline-rename input: borrows the same metrics as `.ghost-name`
+   so the name doesn't shift when entering / leaving edit mode. */
+.ghost-name--input {
+  background: rgba(var(--v-theme-surface-variant), 0.4);
+  border: 1px solid rgba(var(--v-theme-primary), 0.6);
+  border-radius: 2px;
+  color: rgb(var(--v-theme-on-surface));
+  outline: none;
+  padding: 0 4px;
+  margin: -1px 0;
 }
 
 .ghost-item-detail {
@@ -627,6 +804,23 @@ onMounted(() => {
   background: rgba(var(--v-theme-primary), 0.15);
   border-color: rgba(var(--v-theme-primary), 0.5);
   color: rgb(var(--v-theme-primary));
+}
+
+.pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Edit popover (v-menu content) ---- */
+/* Reuses the same form vocabulary as the create form so the
+   inline edit feels consistent. v-menu renders the content in
+   an overlay layer; we wrap it in a fixed-width card. */
+.edit-popover {
+  width: 220px;
+  background: rgba(var(--v-theme-surface), 0.97);
+  border: 1px solid rgb(var(--v-theme-surface-variant));
+  border-radius: 4px;
+  padding: 6px 8px 8px;
 }
 
 /* ---- Form actions ---- */

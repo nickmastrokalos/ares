@@ -150,6 +150,23 @@ Operator-placed sticky notes pinned to map locations — many per mission. See [
 
 Index `idx_annotations_mission` covers the `mission_id` lookup used on every `init()`.
 
+### `ghosts` (migration v6)
+
+Persistent ghost tracks (simulated movement along a route). Configured state survives app restarts; live position does NOT — every ghost re-anchors to `start_waypoint_index` in the idle state on load.
+
+| Column                  | Type    | Notes |
+|-------------------------|---------|-------|
+| `id`                    | INTEGER PK AUTOINCREMENT | Surrogate key. The store's monotonic counter resets to `max(id) + 1` on each `init()` so reused ids don't collide with persisted rows. |
+| `mission_id`            | INTEGER NOT NULL, FK → missions(id) ON DELETE CASCADE | Mission scope. |
+| `route_id`              | INTEGER NOT NULL, FK → features(id) ON DELETE CASCADE | The route the ghost walks. CASCADE drops the row when the route is deleted at the DB level; the store's `init()` also defensively `DELETE`s any row whose `route_id` is missing in `featuresStore.features` to handle prior-session deletes. |
+| `name`                  | TEXT NOT NULL | Display label (default `ghost-xxxx`, renamable). |
+| `start_waypoint_index`  | INTEGER NOT NULL | Zero-based index along the route's coordinates. `ghost_reset` returns the ghost here. |
+| `direction`             | TEXT NOT NULL | `"forward"` or `"backward"`. Auto-clamped at endpoints. |
+| `speed_ms`              | REAL NOT NULL | Configured speed in m/s. |
+| `created_at`, `updated_at` | TEXT | `datetime('now')` defaults; `updated_at` bumped on every `_dbUpdate`. |
+
+Index `idx_ghosts_mission` covers the `mission_id` lookup used on every `init()`. Live fields (`status`, `currentIndex`, `currentLon`, `currentLat`, `segmentProgress`) are deliberately not persisted — operators restart motion explicitly after a relaunch.
+
 ### Migration v2 — rename to missions
 Dropped the "projects" vocabulary in favor of "missions" to match the
 mission-picker entry flow on the home page. SQLite can rename a parent table

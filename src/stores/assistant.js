@@ -23,6 +23,13 @@ export const useAssistantStore = defineStore('assistant', () => {
   const messages  = ref([])   // { id, role, blocks, ts }
   const contextLabel = ref('Assistant')
 
+  // Session-only prompt history. Most-recent-last. The composer in
+  // AssistantPanel uses Up/Down arrows to walk this list. We dedupe
+  // consecutive identical prompts (terminal convention) and cap the
+  // length so the in-memory list stays trivial.
+  const PROMPT_HISTORY_CAP = 50
+  const promptHistory = ref([])
+
   function toggle() {
     if (open.value) {
       close()
@@ -91,7 +98,19 @@ export const useAssistantStore = defineStore('assistant', () => {
     error.value = null
     busy.value = true
 
-    appendMessage('user', text.trim())
+    const trimmed = text.trim()
+
+    // Push to prompt history (session-only). Skip when the new
+    // entry duplicates the most recent — keeps history clean for
+    // operators who re-send the same prompt to retry.
+    const last = promptHistory.value[promptHistory.value.length - 1]
+    if (trimmed && trimmed !== last) {
+      const next = [...promptHistory.value, trimmed]
+      if (next.length > PROMPT_HISTORY_CAP) next.shift()
+      promptHistory.value = next
+    }
+
+    appendMessage('user', trimmed)
 
     try {
       const { assistantProvider, assistantModel, assistantApiKey } = settingsStore
@@ -131,6 +150,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     error,
     messages,
     contextLabel,
+    promptHistory,
     toggle,
     minimize,
     close,

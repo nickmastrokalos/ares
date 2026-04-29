@@ -15,7 +15,7 @@
 
 import { checkRouteCrossesLand, planWaterRoute, planRouteAvoidingObstacles, planRouteThroughVias } from '@/services/landRouting'
 import { nameOrDefault, rejectIfContextDerived } from '@/services/featureNaming'
-import { geometryBounds, destinationPoint, circlePolygon, corridorPolygon, distanceBetween } from '@/services/geometry'
+import { geometryBounds, destinationPoint, circlePolygon, corridorPolygon, distanceBetween, findLandCrossingIndex } from '@/services/geometry'
 
 // Per-contributor cap for plugin-supplied obstacle polygons. The
 // A* grid rasteriser cost grows linearly with polygon count; 200
@@ -187,6 +187,10 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
             type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2,
             description: 'End [longitude, latitude].'
           },
+          coastline_standoff_meters: {
+            type: 'number',
+            description: 'Optional minimum distance from coastlines in METERS. Default 555 (= 0.005°, conservative for the bundled NE 10m generalisation). Reduce for tighter near-shore routes when the operator says "go close to shore", "tight to the coast", "just east", or otherwise asks for a less-padded route. Increase when the operator asks for "more clearance from land" or similar. Sets the coastline buffer used in the A* bitmap; smaller values let the route hug shorelines more tightly.'
+          },
           name:  { type: 'string', description: 'OPTIONAL display name. Pass ONLY when the user explicitly names the route in their request. Otherwise OMIT — the system auto-generates a default like `route-a3f9`. Do NOT invent descriptive names from context.' },
           color: { type: 'string', description: 'Optional hex color. Defaults to white.' }
         },
@@ -197,9 +201,13 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
         const fmt = ([x, y]) => `${y.toFixed(4)}, ${x.toFixed(4)}`
         return `${label}Water route · ${fmt(start)} → ${fmt(end)}`
       },
-      async handler({ start, end, name, color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ start, end, coastline_standoff_meters, name, color = DEFAULT_FEATURE_COLOR }) {
         const reject = rejectIfContextDerived(name); if (reject) return reject
-        const plan = await planWaterRoute(start, end)
+        const plan = await planWaterRoute(start, end, {
+          ...(Number.isFinite(coastline_standoff_meters)
+            ? { landBufferMeters: coastline_standoff_meters }
+            : {})
+        })
         if (!plan.ok) return { error: plan.reason }
         const coords = plan.coordinates
         const geometry = { type: 'LineString', coordinates: coords }
@@ -220,7 +228,7 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
 
     {
       name: 'map_draw_route_avoiding_features',
-      description: 'Plan AND IMMEDIATELY DRAW a route from `start` to `end` with any combination of constraints stacked: AVOID named features (`avoid_feature_ids`, e.g. keepout boxes), AVOID land (`avoid_land: true`), AVOID AIS vessel paths (`avoid_ais: true` — projects each vessel forward along its current course/speed and treats the swept corridor as an obstacle), AVOID environmental constraints contributed by plugins (`avoid_extras` — see below), and/or PASS THROUGH named features (`via_feature_ids`, e.g. "go through Polygon 1"). On success this tool ADDS THE ROUTE TO THE MAP as a feature in one step — there is NO separate "show / display" step. Narrate the result in past tense ("I drew the route…"); do NOT ask the user "would you like me to display this on the map?" — it is already there. Each via feature contributes one intermediate waypoint at its center; legs are planned independently with the same avoidance constraints. Resolve named features to ids via `map_find_entity` first. Avoid/via features must be polygon-shaped (`polygon`, `box`, `circle`, `ellipse`, `sector`). For `avoid_ais`, you can override the projection horizon (`ais_horizon_minutes`, default 30) and clearance (`ais_standoff_meters`, default 1852 = 1 nm) when the user is explicit ("within 5 nm" → 9260 m, "for the next hour" → 60 min). Otherwise leave the defaults alone. For environmental constraints (cloud cover, sea state, currents, surface tracks, etc.) call `routing_list_avoidances` FIRST to discover the available contributors and their params, then pass them as `avoid_extras` (e.g. `{ "cloud-cover": { "threshold_pct": 60, "hours_ahead": 7 } }`). When `speed_kts` is supplied, the planner returns per-vertex ETAs you can feed into `route_evaluate_along` for forecast questions like "what\'s the cloud cover at each waypoint when I get there?". PREFER THIS TOOL whenever the user names ANY area to avoid, ANY area to pass through, or asks to avoid land / AIS / any environmental constraint; fall back to `map_draw_route_water_only` only when none of those constraints apply.',
+      description: 'Plan AND IMMEDIATELY DRAW a route from `start` to `end` with any combination of constraints stacked: AVOID named features (`avoid_feature_ids`, e.g. keepout boxes), AVOID land (`avoid_land: true`), AVOID AIS vessel paths (`avoid_ais: true` — projects each vessel forward along its current course/speed and treats the swept corridor as an obstacle), AVOID environmental constraints contributed by plugins (`avoid_extras` — see below), and/or PASS THROUGH named features (`via_feature_ids`, e.g. "go through Polygon 1"). On success this tool ADDS THE ROUTE TO THE MAP as a feature in one step — there is NO separate "show / display" step. Narrate the result in past tense ("I drew the route…"); do NOT ask the user "would you like me to display this on the map?" — it is already there. Each via feature contributes one intermediate waypoint at its center; legs are planned independently with the same avoidance constraints. Resolve named features to ids via `map_find_entity` first. Avoid/via features must be polygon-shaped (`polygon`, `box`, `circle`, `ellipse`, `sector`). For `avoid_ais`, you can override the projection horizon (`ais_horizon_minutes`, default 30) and clearance (`ais_standoff_meters`, default 1852 = 1 nm) when the user is explicit ("within 5 nm" → 9260 m, "for the next hour" → 60 min). Otherwise leave the defaults alone. For environmental constraints (cloud cover, sea state, currents, surface tracks, etc.) call `routing_list_avoidances` FIRST to discover the available contributors and their params, then pass them as `avoid_extras` (e.g. `{ "cloud-cover": { "threshold_pct": 60, "hours_ahead": 7 } }`). When `speed_kts` is supplied, the planner returns per-vertex ETAs you can feed into `route_evaluate_along` for forecast questions like "what\'s the cloud cover at each waypoint when I get there?". PREFER THIS TOOL whenever the user names ANY area to avoid, ANY area to pass through, or asks to avoid land / AIS / any environmental constraint; fall back to `map_draw_route_water_only` only when none of those constraints apply.\n\nIMPORTANT — interpreting the AIS audit: when `avoid_ais: true`, the response includes an `ais` block. `ais_vessels_cleared` are vessels whose keepout the route stayed outside of. `ais_vessels_still_crossed` are vessels whose keepout the route ENTERS — usually because the start or end point is inside the keepout. Each entry in `ais_vessels_still_crossed_detail` carries `closest_endpoint` (start/end), `distance_to_start_meters`, `distance_to_end_meters`, `distance_to_route_meters`, and the audit also returns `ais_suggested_standoff_meters` — the largest standoff that would still clear every blocker. If `ais_vessels_still_crossed > 0`, DO NOT report success silently: surface the warning verbatim, then for each blocked vessel STATE WHICH ENDPOINT is inside the keepout (use `closest_endpoint` and the matching distance) AND offer the suggested standoff as a concrete next step (e.g. "Stasinos Boys is 980 m from your start — start sits inside the 1852 m keepout. Retry with `ais_standoff_meters: 930` or move the start point."). Always prefer naming a specific number to a vague "reduce standoff".',
       readonly: false,
       inputSchema: {
         type: 'object',
@@ -263,6 +271,10 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
             type: 'number',
             description: 'Optional standoff distance from each AVOIDED user-feature obstacle in meters. Default 0 (route may hug obstacle edges). Has no effect on via features, land, AIS, or `avoid_extras` contributors — those have their own buffers / params.'
           },
+          coastline_standoff_meters: {
+            type: 'number',
+            description: 'Optional minimum distance from coastlines in METERS, applied only when `avoid_land: true`. Default 555 (= 0.005°, conservative for the bundled NE 10m generalisation). Reduce for tighter near-shore routes when the operator asks to go "tight to the coast", "just east", or "more directly"; increase for "wider berth from land". Smaller values let A* hug shorelines more closely.'
+          },
           avoid_extras: {
             type: 'object',
             additionalProperties: true,
@@ -296,7 +308,7 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
         const what = parts.length ? parts.join(' · ') : 'direct'
         return `${label}Route · ${what} · ${fmt(start)} → ${fmt(end)}`
       },
-      async handler({ start, end, avoid_feature_ids = [], via_feature_ids = [], avoid_land = false, avoid_ais = false, ais_horizon_minutes = 30, ais_standoff_meters = 1852, buffer_meters = 0, avoid_extras = null, depart_at_iso, speed_kts, name, color = DEFAULT_FEATURE_COLOR }) {
+      async handler({ start, end, avoid_feature_ids = [], via_feature_ids = [], avoid_land = false, avoid_ais = false, ais_horizon_minutes = 30, ais_standoff_meters = 1852, buffer_meters = 0, coastline_standoff_meters, avoid_extras = null, depart_at_iso, speed_kts, name, color = DEFAULT_FEATURE_COLOR }) {
         const reject = rejectIfContextDerived(name); if (reject) return reject
         const SUPPORTED = new Set(['polygon', 'box', 'circle', 'ellipse', 'sector'])
 
@@ -333,16 +345,29 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
         // a circular keepout at its current position (radius = standoff);
         // moving vessels additionally get a swept-corridor rectangle
         // extending `horizonSeconds` forward along their COG.
-        let aisVesselCount = 0
-        if (avoid_ais && aisStore?.vessels) {
-          const horizonSeconds = Math.max(0, Number(ais_horizon_minutes) || 0) * 60
-          const standoff = Math.max(0, Number(ais_standoff_meters) || 0)
-          if (horizonSeconds > 0 && standoff > 0) {
-            for (const vessel of aisStore.vessels.values()) {
-              if (vessel.longitude == null || vessel.latitude == null) continue
-              obstacles.push(...vesselObstaclePolygons(vessel, horizonSeconds, standoff))
-              aisVesselCount++
-            }
+        // We keep a per-vessel record of the polygons we built so we
+        // can post-check the planned route against each vessel and
+        // report whether the route ACTUALLY cleared it (the planner
+        // returns a path even when it had to cut through a keepout
+        // — e.g. when both endpoints are inside one).
+        const aisVesselsConsidered = []
+        const horizonSeconds = avoid_ais
+          ? Math.max(0, Number(ais_horizon_minutes) || 0) * 60
+          : 0
+        const aisStandoff = avoid_ais
+          ? Math.max(0, Number(ais_standoff_meters) || 0)
+          : 0
+        if (avoid_ais && aisStore?.vessels && horizonSeconds > 0 && aisStandoff > 0) {
+          for (const vessel of aisStore.vessels.values()) {
+            if (vessel.longitude == null || vessel.latitude == null) continue
+            const polys = vesselObstaclePolygons(vessel, horizonSeconds, aisStandoff)
+            obstacles.push(...polys)
+            aisVesselsConsidered.push({
+              mmsi: String(vessel.mmsi),
+              name: vessel.name ?? null,
+              coord: [vessel.longitude, vessel.latitude],
+              polys
+            })
           }
         }
 
@@ -397,8 +422,8 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
         // buffer_meters → degrees: planar 1° ≈ 111 km.
         const bufferDeg = (Number(buffer_meters) || 0) / 111000
         const plan = vias.length
-          ? await planRouteThroughVias(start, end, vias, obstacles, { bufferDeg, includeLand: avoid_land })
-          : await planRouteAvoidingObstacles(start, end, obstacles, { bufferDeg, includeLand: avoid_land })
+          ? await planRouteThroughVias(start, end, vias, obstacles, { bufferDeg, includeLand: avoid_land, ...(Number.isFinite(coastline_standoff_meters) ? { landBufferMeters: coastline_standoff_meters } : {}) })
+          : await planRouteAvoidingObstacles(start, end, obstacles, { bufferDeg, includeLand: avoid_land, ...(Number.isFinite(coastline_standoff_meters) ? { landBufferMeters: coastline_standoff_meters } : {}) })
         if (!plan.ok) return { error: plan.reason }
         const coords = plan.coordinates
         const geometry = { type: 'LineString', coordinates: coords }
@@ -423,6 +448,97 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
           }
         }
 
+        // Post-plan AIS audit. The previous version reported
+        // `avoidedAisVesselCount` from the build step — i.e. how
+        // many vessels the planner *saw* — which was wildly
+        // misleading when the planner couldn't actually clear one
+        // (e.g. both endpoints inside a single 500 m keepout, where
+        // the planner returns a near-direct line). Walk the
+        // resulting polyline against each vessel's polygons and
+        // partition into "cleared" (route stayed outside) vs
+        // "still crossed" so the response distinguishes "we routed
+        // around 1 vessel" from "we tried but the route still
+        // intersects 1 vessel's keepout".
+        const routeBboxRaw = geometryBounds(geometry)
+        const routeBbox = routeBboxRaw
+          ? [
+              [routeBboxRaw[0][0], routeBboxRaw[0][1]],
+              [routeBboxRaw[1][0], routeBboxRaw[1][1]]
+            ]
+          : null
+        const bboxesOverlap = (a, b) =>
+          a && b &&
+          a[1][0] >= b[0][0] && a[0][0] <= b[1][0] &&
+          a[1][1] >= b[0][1] && a[0][1] <= b[1][1]
+        // Distance helpers for the audit detail. `nearest` walks each
+        // route segment and returns the perpendicular distance from
+        // the vessel coord to the route polyline — that's the
+        // operational "how far inside the keepout is this vessel?"
+        // figure the assistant uses to suggest a concrete relaxation.
+        const distToSegment = (p, a, b) => {
+          // Planar approximation, fine at tactical bbox.
+          const ax = a[0], ay = a[1]
+          const bx = b[0], by = b[1]
+          const px = p[0], py = p[1]
+          const dx = bx - ax, dy = by - ay
+          const denom = dx * dx + dy * dy
+          let t = denom > 0 ? ((px - ax) * dx + (py - ay) * dy) / denom : 0
+          t = Math.max(0, Math.min(1, t))
+          const cx = ax + t * dx, cy = ay + t * dy
+          return distanceBetween([px, py], [cx, cy])
+        }
+        const nearestRouteDistance = (vesselCoord, routeCoords) => {
+          let min = Infinity
+          for (let i = 1; i < routeCoords.length; i++) {
+            const d = distToSegment(vesselCoord, routeCoords[i - 1], routeCoords[i])
+            if (d < min) min = d
+          }
+          return Math.round(min)
+        }
+        const aisCleared = []
+        const aisStillCrossed = []
+        for (const v of aisVesselsConsidered) {
+          let relevant = false
+          let crossed  = false
+          for (const poly of v.polys) {
+            const pBbox = geometryBounds(poly)
+            if (!bboxesOverlap(pBbox, routeBbox)) continue
+            relevant = true
+            if (findLandCrossingIndex(coords, [poly]) !== -1) { crossed = true; break }
+          }
+          if (!relevant) continue
+          if (crossed) {
+            const dStart  = v.coord ? Math.round(distanceBetween(v.coord, start)) : null
+            const dEnd    = v.coord ? Math.round(distanceBetween(v.coord, end)) : null
+            const dRoute  = v.coord ? nearestRouteDistance(v.coord, coords) : null
+            // Closest endpoint — operationally "your start/end is
+            // inside this vessel's keepout" diagnosis.
+            const closestEndpoint = (dStart != null && dEnd != null)
+              ? (dStart <= dEnd ? 'start' : 'end')
+              : null
+            aisStillCrossed.push({
+              mmsi:  v.mmsi,
+              name:  v.name,
+              vessel_coord:               v.coord ?? null,
+              distance_to_route_meters:   dRoute,
+              distance_to_start_meters:   dStart,
+              distance_to_end_meters:     dEnd,
+              closest_endpoint:           closestEndpoint
+            })
+          } else {
+            aisCleared.push({ mmsi: v.mmsi, name: v.name })
+          }
+        }
+        // Suggested AIS standoff that would clear every blocked vessel.
+        // Subtract a small margin (50 m) so the route doesn't graze
+        // the new keepout boundary.
+        const minBlockerRouteDistance = aisStillCrossed.length
+          ? Math.min(...aisStillCrossed.map(v => v.distance_to_route_meters ?? Infinity))
+          : Infinity
+        const suggestedStandoffMeters = Number.isFinite(minBlockerRouteDistance)
+          ? Math.max(50, minBlockerRouteDistance - 50)
+          : null
+
         const properties = {
           name: nameOrDefault(name, 'route', featuresStore),
           color,
@@ -430,6 +546,33 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
           ...(etaInfo ? { route_etas: etaInfo } : {})
         }
         const id = await featuresStore.addFeature('route', geometry, properties)
+        const aisAudit = avoid_ais ? {
+          ais_vessels_considered: aisVesselsConsidered.length,
+          ais_vessels_cleared:    aisCleared.length,
+          ais_vessels_still_crossed: aisStillCrossed.length,
+          ais_vessels_still_crossed_detail: aisStillCrossed,
+          ais_standoff_meters:    aisStandoff,
+          ais_horizon_minutes:    horizonSeconds / 60,
+          // Recommended relaxation that would clear every blocked
+          // vessel. Surface in the response so the assistant can
+          // suggest a specific value rather than a vague
+          // "reduce standoff".
+          ais_suggested_standoff_meters: suggestedStandoffMeters
+        } : null
+        const aisWarning = aisStillCrossed.length > 0
+          ? (() => {
+              const parts = aisStillCrossed.map(v => {
+                const where = v.closest_endpoint
+                  ? ` — closest to ${v.closest_endpoint} (${v.closest_endpoint === 'start' ? v.distance_to_start_meters : v.distance_to_end_meters} m), nearest point on route ${v.distance_to_route_meters} m`
+                  : ''
+                return `${v.name ?? v.mmsi}${where}`
+              }).join('; ')
+              const fix = suggestedStandoffMeters != null
+                ? ` To clear every blocked vessel, retry with \`ais_standoff_meters: ${suggestedStandoffMeters}\` (or move the offending endpoint).`
+                : ''
+              return `Route still crosses the ${aisStandoff} m keepout for ${aisStillCrossed.length} AIS ${aisStillCrossed.length === 1 ? 'vessel' : 'vessels'}: ${parts}.${fix}`
+            })()
+          : null
         return {
           id,
           success: true,
@@ -440,7 +583,8 @@ export function waterRoutingTools({ featuresStore, aisStore, routingRegistry }) 
           avoidedFeatureCount: avoid_feature_ids.length,
           viaFeatureCount: vias.length,
           avoidedLand: avoid_land,
-          avoidedAisVesselCount: aisVesselCount,
+          ...(aisAudit ? { ais: aisAudit } : {}),
+          ...(aisWarning ? { warning: aisWarning } : {}),
           applied_avoidances: appliedAvoidances,
           ...(etaInfo ? { etas: etaInfo } : {})
         }

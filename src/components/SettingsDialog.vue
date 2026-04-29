@@ -79,6 +79,11 @@ const milStdSymbology = computed({
   set: (v) => settingsStore.setSetting('milStdSymbology', v)
 })
 
+const coastlineHiResEnabled = computed({
+  get: () => settingsStore.coastlineHiResEnabled,
+  set: (v) => settingsStore.setSetting('coastlineHiResEnabled', v)
+})
+
 const trackBreadcrumbLength = computed({
   get: () => settingsStore.trackBreadcrumbLength,
   set: (v) => settingsStore.setSetting('trackBreadcrumbLength', v)
@@ -475,6 +480,7 @@ function formatBadge(ts) {
                 inset
               />
             </div>
+
           </div>
         </v-window-item>
 
@@ -681,6 +687,25 @@ function formatBadge(ts) {
         <!-- ---- Maps ---- -->
         <v-window-item value="maps">
           <div class="pa-4">
+
+            <div class="d-flex align-center mb-3">
+              <div class="flex-grow-1 pe-3">
+                <div class="text-body-2">High-resolution coastlines (online)</div>
+                <div class="text-caption text-medium-emphasis">
+                  On by default. Augments the bundled coastlines with OSM detail (Overpass API) for tighter near-shore route accuracy. Turn off for offline-only planning; routes use local data alone.
+                </div>
+              </div>
+              <v-switch
+                v-model="coastlineHiResEnabled"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+                class="flex-shrink-0"
+              />
+            </div>
+
+            <v-divider class="my-3" />
 
             <div class="d-flex align-center justify-space-between mb-3">
               <div>
