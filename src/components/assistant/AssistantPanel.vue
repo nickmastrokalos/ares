@@ -18,6 +18,24 @@ const logRef    = ref(null)
 const inputRef  = ref(null)
 const helpOpen  = ref(false)
 
+// Composer prompt-history navigation. `historyIndex` is `-1` when
+// the operator isn't navigating; `0` is the most recent prompt
+// (we read store.promptHistory back-to-front). `draftBeforeHistory`
+// preserves whatever the operator was typing before they started
+// arrowing, so Down past the most recent restores their draft.
+const historyIndex        = ref(-1)
+const draftBeforeHistory  = ref('')
+
+// Expand toggle for long-prompt review. Compact mode caps the
+// textarea at 6 rows; expanded mode grows up to 20 so the
+// operator can read a multi-paragraph prompt before sending.
+// Session-only — resets on panel re-mount.
+const composerExpanded = ref(false)
+
+function getTextareaNode() {
+  return inputRef.value?.$el?.querySelector('textarea') ?? null
+}
+
 // Suggestive prompt library shown by the header help button. Skewed
 // toward the complex routing flows since the simple cases are
 // self-discoverable. Placeholders in <angle brackets> are meant to be
@@ -104,13 +122,60 @@ function onKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     submit()
+    return
   }
+
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    // Safe-passthrough rule: only intercept the arrow when the
+    // caret is at a boundary, so multi-line caret movement still
+    // works inside the textarea.
+    const ta = getTextareaNode()
+    const value = ta?.value ?? inputText.value
+    const start = ta?.selectionStart ?? 0
+    const end   = ta?.selectionEnd ?? 0
+    const atStart = value.length === 0 || (start === 0 && end === 0)
+    const atEnd   = value.length === 0 || (start === value.length && end === value.length)
+    const history = store.promptHistory ?? []
+
+    if (e.key === 'ArrowUp' && atStart && history.length > 0) {
+      e.preventDefault()
+      if (historyIndex.value === -1) {
+        draftBeforeHistory.value = inputText.value
+      }
+      historyIndex.value = Math.min(historyIndex.value + 1, history.length - 1)
+      inputText.value = history[history.length - 1 - historyIndex.value]
+      return
+    }
+
+    if (e.key === 'ArrowDown' && atEnd && historyIndex.value !== -1) {
+      e.preventDefault()
+      if (historyIndex.value > 0) {
+        historyIndex.value -= 1
+        inputText.value = history[history.length - 1 - historyIndex.value]
+      } else {
+        // Past the most recent: restore the in-progress draft.
+        historyIndex.value = -1
+        inputText.value = draftBeforeHistory.value
+      }
+      return
+    }
+    // Otherwise: fall through to default arrow behaviour. Don't
+    // reset historyIndex — caret-movement arrows shouldn't take
+    // the operator out of recall mode.
+    return
+  }
+
+  // Any other key (typing) anchors a fresh draft state. Next
+  // ArrowUp will restart from history[0].
+  if (historyIndex.value !== -1) historyIndex.value = -1
 }
 
 function submit() {
   const text = inputText.value.trim()
   if (!text || store.busy) return
   inputText.value = ''
+  historyIndex.value = -1
+  draftBeforeHistory.value = ''
   store.send(text)
 }
 
@@ -231,15 +296,23 @@ watch(
           ref="inputRef"
           v-model="inputText"
           placeholder="Ask the assistant…"
-          rows="2"
+          :rows="composerExpanded ? 8 : 2"
           auto-grow
-          :max-rows="6"
+          :max-rows="composerExpanded ? 20 : 6"
           density="compact"
           variant="plain"
           hide-details
           class="input-field"
           :disabled="store.busy"
           @keydown="onKeydown"
+        />
+        <v-btn
+          :icon="composerExpanded ? 'mdi-arrow-collapse' : 'mdi-arrow-expand'"
+          size="x-small"
+          variant="text"
+          class="text-medium-emphasis"
+          :title="composerExpanded ? 'Collapse composer' : 'Expand composer for review'"
+          @click="composerExpanded = !composerExpanded"
         />
         <v-btn
           icon="mdi-send"

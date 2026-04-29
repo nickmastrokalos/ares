@@ -24,6 +24,32 @@ export function featureCentroid(featuresStore, featureId) {
   return { ok: true, coord: [(w + e) / 2, (s + n) / 2] }
 }
 
+// Resolve a `trackUid` argument into a tracksStore entry. The agent
+// occasionally hands a callsign or partial uid here ("Armada 144",
+// "144") instead of the resolved CoT uid (`armada-<bigint>`),
+// typically when it skipped or mis-routed the `map_find_entity`
+// step. Direct uid lookup wins; if it misses, fall back to a single
+// substring match across each track's callsign + uid. Multi-match
+// returns an error listing the candidates so the model can
+// disambiguate on the next turn instead of silently picking one.
+function resolveTrackByUidOrName(tracksStore, trackUid) {
+  const t = tracksStore.tracks.get(trackUid)
+  if (t) return { ok: true, track: t }
+  const needle = String(trackUid).toLowerCase()
+  const hits = []
+  for (const candidate of tracksStore.tracks.values()) {
+    const callsign = (candidate.callsign ?? candidate.uid).toLowerCase()
+    const uid      = candidate.uid.toLowerCase()
+    if (callsign.includes(needle) || uid.includes(needle)) hits.push(candidate)
+  }
+  if (hits.length === 1) return { ok: true, track: hits[0] }
+  if (hits.length > 1) {
+    const list = hits.slice(0, 8).map(h => `${h.callsign ?? h.uid} (uid=${h.uid})`).join('; ')
+    return { ok: false, error: `Ambiguous CoT track "${trackUid}" — multiple matches: ${list}. Pass the full uid via map_find_entity.` }
+  }
+  return { ok: false, error: `CoT track ${trackUid} not found. Call map_find_entity first to resolve the user's name to a uid.` }
+}
+
 export function resolveEndpoint({ featuresStore, tracksStore, aisStore }, spec, label) {
   const { featureId, trackUid, vesselMmsi, coordinate } = spec
   const provided = [featureId != null, trackUid != null, vesselMmsi != null, coordinate != null].filter(Boolean).length
@@ -36,9 +62,9 @@ export function resolveEndpoint({ featuresStore, tracksStore, aisStore }, spec, 
   }
 
   if (trackUid != null) {
-    const t = tracksStore.tracks.get(trackUid)
-    if (!t) return { ok: false, error: `CoT track ${trackUid} not found.` }
-    return { ok: true, ep: { kind: 'cot', uid: trackUid, coord: [t.lon, t.lat] } }
+    const r = resolveTrackByUidOrName(tracksStore, trackUid)
+    if (!r.ok) return r
+    return { ok: true, ep: { kind: 'cot', uid: r.track.uid, coord: [r.track.lon, r.track.lat] } }
   }
 
   if (vesselMmsi != null) {
@@ -61,9 +87,9 @@ export function resolveTarget({ featuresStore, tracksStore, aisStore }, spec, la
   }
 
   if (trackUid != null) {
-    const t = tracksStore.tracks.get(trackUid)
-    if (!t) return { ok: false, error: `CoT track ${trackUid} not found.` }
-    return { ok: true, ep: { kind: 'cot', uid: trackUid, coord: [t.lon, t.lat] } }
+    const r = resolveTrackByUidOrName(tracksStore, trackUid)
+    if (!r.ok) return r
+    return { ok: true, ep: { kind: 'cot', uid: r.track.uid, coord: [r.track.lon, r.track.lat] } }
   }
 
   if (vesselMmsi != null) {
