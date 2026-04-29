@@ -284,6 +284,7 @@ const panel = api.registerPanel({
   iconSvg: '<svg ...>...</svg>',           // optional inline SVG (overrides icon)
   width: 340,                              // optional — pins panel width in px
   initialPosition: { x: 60, y: 80 },        // optional
+  infoHtml: '<div>Legend …</div>',          // optional — see "Header info legend" below
   mount(containerEl) {
     containerEl.innerHTML = '<div>Hello!</div>'
     // Optional return: cleanup function called on plugin deactivation.
@@ -302,6 +303,36 @@ the DOM (panel registration), not every time the user opens it. The DOM and
 any internal state persist across close/reopen via `v-show`. The cleanup
 function returned by `mount` runs only when the panel is unregistered
 (plugin disable / app shutdown).
+
+#### Header info legend (Ares ≥ 1.1.8 dev tip)
+
+When `infoHtml` is set, the host renders a small
+`mdi-information-outline` button next to the panel title in the
+header chrome. Hovering it pops a styled legend containing your
+HTML — useful for explaining colour codes, glyph meanings, or any
+panel-level reference info you'd otherwise burn a body row on.
+
+```js
+const swatch = (c) => `<span style="display:inline-block;width:10px;height:10px;` +
+  `border-radius:50%;background:${c};margin-right:6px;vertical-align:-1px;"></span>`
+
+api.registerPanel({
+  id:    'radios',
+  title: 'Radio Status',
+  mount: mountFn,
+  infoHtml: `
+    <div>${swatch('#3ec46d')}FRESH — last message ≤ 1 min</div>
+    <div>${swatch('#e54343')}STALE — no message in over 1 min</div>
+  `
+})
+```
+
+Plugins are trusted code, so the HTML is rendered via `v-html`.
+The popover is anchored relative to the header (no global
+floating element to manage), tears down with the panel, and is
+capped at 280 px wide. Older hosts that don't recognise
+`infoHtml` simply ignore the field — additive, no fallback
+required.
 
 The host caps each panel's height to the viewport (`100vh − pos.y − 24px`)
 and applies `overflow-y: auto` to the body, so a panel that grows large

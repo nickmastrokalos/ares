@@ -1,10 +1,14 @@
+import html2canvas from 'html2canvas-pro'
 import { writeFile } from '@tauri-apps/plugin-fs'
 import { save } from '@tauri-apps/plugin-dialog'
 import { desktopDir, join } from '@tauri-apps/api/path'
 
-// Map video clip recorder. Streams MapLibre's WebGL canvas through the
-// browser's `MediaRecorder` API and writes a video file when the
-// requested duration elapses.
+// Map video clip recorder. Composites the entire map container
+// (WebGL canvas + HTML markers + every floating panel) onto an
+// offscreen canvas every frame via html2canvas-pro, then streams
+// the offscreen canvas through `MediaRecorder`. Mirrors the
+// scope the snapshot composable produces — what you see on the
+// map is what lands in the recording, panels included.
 //
 // Cross-platform notes (we ship to Windows / macOS / Linux Tauri
 // webviews):
@@ -16,11 +20,12 @@ import { desktopDir, join } from '@tauri-apps/api/path'
 // `pickMimeType` walks a candidate list in preference order and the
 // caller never sees a hard crash if nothing's available.
 //
-// Limitation: only the WebGL canvas is captured. HTML overlay markers
-// (bullseye / bloodhound / perimeter / measure labels) are NOT in the
-// video — that would need a per-frame composite onto an offscreen
-// canvas. The snapshot composable does the composite for stills; videos
-// would pay the cost on every frame, deferred for now.
+// Frame rate: html2canvas-pro is heavyweight (a full DOM walk +
+// rasterisation per frame). The `fps` arg below is a *cap*; the
+// stream's actual rate is whatever html2canvas can keep up with —
+// typically 5–15 fps on a moderate panel layout. The video plays
+// back at real-time speed because the recorder timestamps frames
+// as they arrive, not on a fixed cadence.
 
 const MIME_CANDIDATES = [
   'video/webm;codecs=vp9,opus',
@@ -77,8 +82,8 @@ export function useMapVideo({ getMap }) {
    *     extension (`.webm` or `.mp4`, depending on the available
    *     codec) is appended if missing. Defaults to
    *     `ares_map_video_<UTC ISO timestamp>.<ext>`.
-   *   `fps`: target capture framerate (default 30). The actual rate
-   *     depends on what the canvas produces.
+   *   `fps`: target capture cap (default 30). Actual rate is
+   *     html2canvas-bound; see file header.
    *
    * @returns {Promise<{ ok: true, filePath: string, durationSeconds: number, mimeType: string }
    *                 | { ok: false, cancelled?: true, error?: string }>}
@@ -97,12 +102,28 @@ export function useMapVideo({ getMap }) {
       return { ok: false, error: 'This webview does not expose a video codec MediaRecorder can use.' }
     }
 
-    const canvas = map.getCanvas()
+    const container = map.getContainer()
+    const dpr = window.devicePixelRatio || 1
+    const rect = container.getBoundingClientRect()
+    const width  = Math.max(1, Math.round(rect.width  * dpr))
+    const height = Math.max(1, Math.round(rect.height * dpr))
+
+    // Offscreen compositor — every frame, html2canvas-pro paints
+    // the full map container (WebGL canvas + HTML markers + every
+    // floating panel) onto this. captureStream watches it and feeds
+    // MediaRecorder. The offscreen canvas is the single source of
+    // truth for recorded pixels, so the saved video matches the
+    // snapshot scope exactly.
+    const offscreen = document.createElement('canvas')
+    offscreen.width  = width
+    offscreen.height = height
+    const ctx = offscreen.getContext('2d')
+
     let stream
     try {
-      stream = canvas.captureStream(fps)
+      stream = offscreen.captureStream(fps)
     } catch (err) {
-      return { ok: false, error: `Could not capture canvas stream: ${err?.message ?? err}` }
+      return { ok: false, error: `Could not capture composite stream: ${err?.message ?? err}` }
     }
 
     let recorder
@@ -115,25 +136,41 @@ export function useMapVideo({ getMap }) {
     const chunks = []
     recorder.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data) }
 
-    // MapLibre only repaints when the camera or sources change. A static
-    // map produces zero new frames, which captures as an empty stream.
-    // Pulse `triggerRepaint` on every animation frame while recording so
-    // the canvas is always producing something for the recorder to grab.
-    let stopRaf = false
-    const rafTick = () => {
-      if (stopRaf) return
-      try { map.triggerRepaint() } catch { /* map may have been torn down */ }
-      requestAnimationFrame(rafTick)
+    // Composite-frame loop. Self-pacing via requestAnimationFrame:
+    // we kick the next frame after html2canvas resolves so a slow
+    // raster doesn't queue up backlog. MapLibre only repaints when
+    // the camera or sources change; `triggerRepaint` ensures the
+    // WebGL backbuffer is fresh for html2canvas to read.
+    let stopped = false
+    const drawFrame = () => {
+      if (stopped) return
+      ;(async () => {
+        try {
+          map.triggerRepaint()
+          const captured = await html2canvas(container, {
+            backgroundColor: null,
+            scale:        dpr,
+            useCORS:      true,
+            allowTaint:   true,
+            logging:      false,
+            ignoreElements: (el) => el.classList?.contains('maplibregl-ctrl-attrib')
+          })
+          if (!stopped) {
+            ctx.clearRect(0, 0, width, height)
+            ctx.drawImage(captured, 0, 0, width, height)
+          }
+        } catch { /* skip frame on raster error; the next tick retries */ }
+        if (!stopped) requestAnimationFrame(drawFrame)
+      })()
     }
 
     let blob
     try {
       blob = await new Promise((resolve, reject) => {
         recorder.onstop = () => {
-          stopRaf = true
-          // Tear down the stream's tracks so the canvas releases its
-          // capture-stream hook (otherwise WebKit can leak rendering
-          // resources between recordings).
+          stopped = true
+          // Tear down the stream's tracks so the offscreen canvas
+          // releases its capture-stream hook.
           try { stream.getTracks().forEach(t => t.stop()) } catch { /* no-op */ }
           if (chunks.length === 0) {
             reject(new Error('Recording produced no frames.'))
@@ -142,12 +179,15 @@ export function useMapVideo({ getMap }) {
           resolve(new Blob(chunks, { type: mimeType }))
         }
         recorder.onerror = (e) => {
-          stopRaf = true
+          stopped = true
           try { stream.getTracks().forEach(t => t.stop()) } catch { /* no-op */ }
           reject(e?.error ?? new Error('MediaRecorder error.'))
         }
         recorder.start()
-        requestAnimationFrame(rafTick)
+        // Prime the first composite synchronously-ish so captureStream
+        // has a frame ready by the time MediaRecorder starts demanding
+        // them; subsequent frames continue via the rAF loop above.
+        requestAnimationFrame(drawFrame)
         setTimeout(() => {
           if (recorder.state === 'recording') {
             try { recorder.stop() } catch (err) { reject(err) }

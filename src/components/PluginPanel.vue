@@ -19,6 +19,35 @@ const emit = defineEmits(['close'])
 const positioned = ref(false)
 const minimized   = ref(false)
 const containerEl = ref(null)
+// Hover state for the optional `panel.infoHtml` legend popover.
+// The button sits in the title bar between the title and the
+// chevron / close so plugins don't have to spend a content row
+// describing their own colour scheme. The popover itself is
+// rendered with `position: fixed` and coordinates computed from
+// the icon's bounding rect — anchoring inside the panel hits
+// `.plugin-panel { overflow: hidden }` (which is needed for the
+// rounded-corner body clip) and the popover's right edge gets
+// chopped against the panel boundary.
+const infoOpen   = ref(false)
+const infoIconEl = ref(null)
+const infoStyle  = ref({})
+
+function openInfo() {
+  if (!infoIconEl.value) { infoOpen.value = true; return }
+  const rect = infoIconEl.value.getBoundingClientRect()
+  // Anchor below-left of the icon by default; if the popover would
+  // run off the right edge of the viewport the browser clamps via
+  // the popover's own max-width — but the typical case is plenty
+  // of room to the right, so prefer that.
+  infoStyle.value = {
+    top:  `${rect.bottom + 6}px`,
+    left: `${rect.left}px`
+  }
+  infoOpen.value = true
+}
+function closeInfo() {
+  infoOpen.value = false
+}
 const { pos, onPointerDown } = useDraggable()
 const { zIndex, bringToFront } = useZIndex()
 
@@ -90,6 +119,28 @@ function handleClose() {
         style="flex-shrink:0"
       >{{ panel.icon }}</v-icon>
       <span class="panel-title">{{ panel.title }}</span>
+      <span
+        v-if="panel.infoHtml"
+        ref="infoIconEl"
+        class="panel-info-wrap"
+        @mouseenter="openInfo"
+        @mouseleave="closeInfo"
+        @pointerdown.stop
+      >
+        <v-icon
+          size="14"
+          class="text-medium-emphasis panel-info-icon"
+          aria-label="Legend"
+        >mdi-information-outline</v-icon>
+      </span>
+      <Teleport to="body">
+        <div
+          v-if="panel.infoHtml && infoOpen"
+          class="panel-info-popover"
+          :style="infoStyle"
+          v-html="panel.infoHtml"
+        />
+      </Teleport>
       <v-spacer />
       <v-btn
         :icon="minimized ? 'mdi-chevron-down' : 'mdi-chevron-up'"
@@ -169,5 +220,43 @@ function handleClose() {
 .panel-svg-icon :deep(svg) {
   width: 100%;
   height: 100%;
+}
+
+/* Optional info-legend rendered via `panel.infoHtml`. The wrapper
+   in the title bar is the hover target; the popover itself is
+   teleported to <body> (see template) so it can render past the
+   panel's `overflow: hidden` clip. */
+.panel-info-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  flex-shrink: 0;
+  cursor: help;
+}
+.panel-info-icon { line-height: 1; }
+</style>
+
+<!-- Popover lives at <body> via Teleport; scoped styles wouldn't
+     apply across the teleport boundary. Keep the visual treatment
+     here, unscoped, so the popover renders identically regardless
+     of which panel triggered it. -->
+<style>
+.panel-info-popover {
+  position: fixed;
+  z-index: 10000;
+  background: rgba(20, 20, 24, 0.96);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 400;
+  letter-spacing: normal;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  white-space: normal;
+  width: max-content;
+  max-width: 280px;
 }
 </style>

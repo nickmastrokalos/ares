@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import { useFeaturesStore } from '@/stores/features'
@@ -489,6 +489,13 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
           // container so collapsing the body via the chevron
           // doesn't shrink the panel to header-content width.
           width:           Number.isFinite(def.width) ? def.width : null,
+          // Optional HTML for an info-legend popover anchored to a
+          // small mdi-information-outline button next to the title.
+          // Hovering the button reveals the legend. Lets plugins
+          // explain their colour codes / glyph meanings without
+          // burning a row inside the panel body. Plugins are
+          // trusted code, so HTML is rendered via `v-html`.
+          infoHtml:        typeof def.infoHtml === 'string' ? def.infoHtml : null,
           initialPosition: def.initialPosition ?? { x: 60, y: 80 },
           mount:           def.mount,
           ownerId:         manifest.id
@@ -1103,6 +1110,22 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
     }
   }
 
+  // The plugin registry is owned by MapView's setup. When MapView
+  // unmounts (route navigation away from the map), every plugin
+  // that registered tools / panels / map layers / connections
+  // needs to release them — otherwise on a remount the host
+  // re-runs `loadPlugins` and the old tool registrations collide
+  // with the new ones (`tools.register: "armada_sa_list" collides
+  // with an existing tool`). Walk every plugin we have a cleanup
+  // bag for and run the standard teardown.
+  onUnmounted(() => {
+    for (const id of [..._cleanups.keys()]) {
+      try { _runCleanup(id) } catch (err) {
+        console.warn(`[plugin-registry] Teardown of "${id}" on unmount failed:`, err)
+      }
+    }
+  })
+
   // ---- Public API ----
 
   // Called by pluginLoader for each successfully imported module.
@@ -1414,6 +1437,28 @@ export function usePluginRegistry({ flyToGeometry, getMap = () => null }) {
         console.warn(`[plugin-registry] snapResolver for "${layerId}" threw:`, err)
         return null
       }
+    },
+    // Lift every plugin-rendered map layer to the top of the
+    // MapLibre stack and re-fire the layer-change notification so
+    // any host listener (e.g. useMapTracks lifting breadcrumbs
+    // above plugin sprites) re-asserts its preferred z-order on
+    // top of that. Called by host composables that lazily add
+    // their own overlay layers (bloodhound, perimeter rings) so
+    // plugin sprites + LEDs stay above those overlays — without
+    // this, the user sees the LED gumball buried under a freshly
+    // drawn bloodhound line that lands on the boat.
+    liftPluginLayers() {
+      const m = getMap()
+      if (!m) return
+      let lifted = false
+      for (const ids of _layers.values()) {
+        for (const id of ids) {
+          try {
+            if (m.getLayer(id)) { m.moveLayer(id); lifted = true }
+          } catch { /* layer was torn down between iter and move */ }
+        }
+      }
+      if (lifted) _notifyLayerChange()
     }
   }
 
