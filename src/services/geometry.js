@@ -279,6 +279,24 @@ export function segmentCrossesPolygon(a, b, geometry) {
   return pointInPolygon(a, geometry) || pointInPolygon(b, geometry)
 }
 
+// True if the open segment a-b strictly crosses any edge of any
+// supplied LineString. Used by the route planner's smoother as a
+// third LOS stage (after bitmap + exact polygon LOS) to enforce
+// high-resolution OSM coastlines fetched from Overpass — they're
+// served as open ways, not closed polygons, so we can only check
+// edge-vs-edge intersection (no point-in-polygon test).
+export function segmentCrossesAnyLineString(a, b, lineStrings) {
+  if (!Array.isArray(lineStrings) || lineStrings.length === 0) return false
+  for (const ls of lineStrings) {
+    const coords = ls?.coordinates
+    if (!Array.isArray(coords) || coords.length < 2) continue
+    for (let i = 1; i < coords.length; i++) {
+      if (segmentsIntersect(a, b, coords[i - 1], coords[i])) return true
+    }
+  }
+  return false
+}
+
 // Returns the index of the first segment of `coordinates` that crosses any
 // of the supplied land polygons, or -1 if none. Used by the assistant
 // `route_check_land_crossing` tool.

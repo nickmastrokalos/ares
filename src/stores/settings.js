@@ -25,6 +25,18 @@ const DEFAULTS = {
   // jet draw tails of identical visual length.
   trackBreadcrumbLength: 1000,  // meters
   milStdSymbology: false,
+  // Augment the bundled NE 10m coastlines with on-demand OSM
+  // coastline ways fetched from the public Overpass API. Adds
+  // ~10 m near-shore detail so route planning catches features
+  // (capes, narrow peninsulas, small islands) that NE 10m
+  // generalises away. Falls back silently to NE 10m only when
+  // offline / on rate-limit / on endpoint failure.
+  // On by default — the silent-wrong-route failure mode of the
+  // off path is operationally worse than a brief timeout when
+  // disconnected. Operators who explicitly want offline-only
+  // route planning (bandwidth-constrained, privacy-sensitive)
+  // can flip it off in Settings → Maps.
+  coastlineHiResEnabled: true,
   basemapOpacity: 1.0,
   enabledPlugins: [],         // plugin ids the operator has opted into
   assistantProvider: 'anthropic',
@@ -157,6 +169,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const trackBreadcrumbs = ref(DEFAULTS.trackBreadcrumbs)
   const trackBreadcrumbLength = ref(DEFAULTS.trackBreadcrumbLength)
   const milStdSymbology = ref(DEFAULTS.milStdSymbology)
+  const coastlineHiResEnabled = ref(DEFAULTS.coastlineHiResEnabled)
   const basemapOpacity = ref(DEFAULTS.basemapOpacity)
   const enabledPlugins = ref([...DEFAULTS.enabledPlugins])
   const assistantProvider = ref(DEFAULTS.assistantProvider)
@@ -183,6 +196,7 @@ export const useSettingsStore = defineStore('settings', () => {
     trackBreadcrumbs,
     trackBreadcrumbLength,
     milStdSymbology,
+    coastlineHiResEnabled,
     basemapOpacity,
     enabledPlugins,
     assistantProvider,
@@ -410,6 +424,7 @@ export const useSettingsStore = defineStore('settings', () => {
     trackBreadcrumbs,
     trackBreadcrumbLength,
     milStdSymbology,
+    coastlineHiResEnabled,
     basemapOpacity,
     enabledPlugins,
     assistantProvider,

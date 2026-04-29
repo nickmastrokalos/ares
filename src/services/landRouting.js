@@ -41,9 +41,46 @@
 
 import {
   findLandCrossingIndex,
+  segmentCrossesAnyLineString,
   geometryBounds,
   distanceBetween
 } from './geometry'
+import { fetchOsmCoastlines } from './coastlinesOverpass'
+import { useSettingsStore } from '@/stores/settings'
+
+// Best-effort hi-res coastline fetch. Returns [] when the operator
+// hasn't opted in (`coastlineHiResEnabled` defaults false), when
+// the fetch fails / times out, or when the Pinia store hasn't been
+// initialised yet (e.g. unit tests). Never throws — the planner
+// continues with NE 10m alone.
+async function maybeFetchHiResCoastlines(bbox) {
+  let store
+  try { store = useSettingsStore() }
+  catch (err) {
+    console.info('[landRouting] settings store not ready; skip hi-res:', err?.message ?? err)
+    return []
+  }
+  if (!store?.coastlineHiResEnabled) {
+    console.info('[landRouting] hi-res coastlines toggle is off')
+    return []
+  }
+  // Air-gap short-circuit: when the OS already says we're offline,
+  // skip the fetch entirely so we don't eat the 20 s tier-1
+  // timeout chain × 3 mirrors. The fallback to NE 10m alone is
+  // identical to the toggle-off path — just zero latency.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    console.info('[landRouting] navigator.onLine === false; skip hi-res')
+    return []
+  }
+  try {
+    const lines = await fetchOsmCoastlines(bbox)
+    console.info(`[landRouting] hi-res coastlines for bbox ${JSON.stringify(bbox)}: ${lines.length} ways`)
+    return lines
+  } catch (err) {
+    console.warn('[landRouting] hi-res coastline fetch failed:', err?.message ?? err)
+    return []
+  }
+}
 
 let landPromise = null      // dynamic-import the dataset once
 let polygonCache = null     // [{ geometry, bbox: [[w,s],[e,n]] }, …]
@@ -268,9 +305,26 @@ function segmentInLand(a, b, isLand, step) {
   return false
 }
 
-// Walk outward in a small spiral until a water cell is found. Used when an
-// endpoint snaps to a land cell (e.g. a coastal start point).
-function nearestWaterIndex(idx, bbox, step, isLand, maxRing = 8) {
+// Walk outward in a small spiral until a water cell is found. Used
+// when an endpoint snaps to a land/obstacle cell (e.g. a coastal
+// start point, or a route endpoint that lies inside an AIS keepout
+// circle). The previous fixed `maxRing = 8` cap meant a 500 m
+// keepout on a 27 m grid (≈18 cells radius) could not be escaped,
+// and `planOnBbox` would either bail with "no clear cell nearby"
+// or fall back to a degenerate path. We now scale the search
+// outward up to the bitmap's diagonal so a snap can succeed
+// anywhere there's an exit.
+function nearestWaterIndex(idx, bbox, step, isLand, maxRing = null) {
+  // Default cap = the bitmap's full diagonal in cells. That's
+  // generous enough to escape any single obstacle that fits in
+  // the search bbox, while keeping a finite bound for genuinely
+  // landlocked starts (returns null after exhausting).
+  if (maxRing == null) {
+    const [[w, s], [e, n]] = bbox
+    const cellsX = Math.ceil((e - w) / step)
+    const cellsY = Math.ceil((n - s) / step)
+    maxRing = cellsX + cellsY
+  }
   for (let ring = 0; ring <= maxRing; ring++) {
     for (let dx = -ring; dx <= ring; dx++) {
       for (let dy = -ring; dy <= ring; dy++) {
@@ -299,20 +353,28 @@ function heuristic(a, b, step) {
 // narrow channels, smaller = threads channels but clips more land.
 const LAND_BUFFER_DEG = 0.005
 
-// Greedy line-of-sight smoother. Drops intermediate waypoints whose direct
-// connection to a later waypoint stays out of (buffered) land per the
-// bitmap. Smoothing a path of N waypoints is O(N²) bitmap lookups —
-// trivial relative to the rasterization cost.
-//
-// Earlier versions of this smoother applied an absolute distance cap
-// (`MAX_SMOOTHED_LEG_M = 1000`) intended as a belt-and-suspenders against
-// long bridges across NE 10m features the polygon missed. That cap turned
-// out to interact badly with the cell size: when the bbox is large (~100
-// km), `step` is ~500 m and 1 km caps merging at < 2 cells, leaving
-// hundreds of stair-step waypoints in the output. The buffered bitmap LOS
-// check is the real safety mechanism — the cap is removed and we trust
-// the LOS test.
-function smoothPath(coords, isLand, step) {
+// Greedy line-of-sight smoother. Drops intermediate waypoints whose
+// direct connection to a later waypoint stays clear of obstacles.
+// Three-stage check per shortcut candidate (each fail-closed):
+//   1. Bitmap raster LOS (`segmentInLand`) — fast first pass.
+//   2. Exact polygon LOS (`findLandCrossingIndex`) — catches
+//      cells the rasteriser left half-marked at polygon
+//      boundaries (the scanline fill uses `Math.ceil` / `Math.floor`,
+//      so straddler cells aren't marked). Without it, AIS keepouts
+//      and coastline polygons could be crossed by smoother
+//      shortcuts.
+//   3. Exact LineString LOS (`segmentCrossesAnyLineString`) — for
+//      data sources that don't ship as closed polygons (currently:
+//      OSM coastlines fetched from Overpass for high-resolution
+//      near-shore detail). NE 10m is generalised at ~250–500 m
+//      and misses small capes / inlets entirely; the OSM ways
+//      capture them at ~10 m. We can't rasterise open ways into
+//      the bitmap (no closure algorithm yet), but we CAN refuse
+//      to smoother-shortcut through any segment that crosses one.
+// Both `precisePolygons` and `preciseLineStrings` are optional.
+// When omitted, the corresponding stage is skipped — callers that
+// don't have the data (e.g. an offline planner) don't pay for it.
+function smoothPath(coords, isLand, step, precisePolygons = null, preciseLineStrings = null) {
   if (coords.length <= 2) return coords
   const out = [coords[0]]
   let i = 0
@@ -320,7 +382,13 @@ function smoothPath(coords, isLand, step) {
     let j = coords.length - 1
     while (j > i + 1) {
       const a = coords[i], b = coords[j]
-      if (!segmentInLand(a, b, isLand, step)) break
+      const bitmapClear =
+        !segmentInLand(a, b, isLand, step)
+      const polyClear =
+        bitmapClear && (!precisePolygons || findLandCrossingIndex([a, b], precisePolygons) === -1)
+      const lineClear =
+        polyClear && (!preciseLineStrings || !segmentCrossesAnyLineString(a, b, preciseLineStrings))
+      if (bitmapClear && polyClear && lineClear) break
       j--
     }
     out.push(coords[j])
@@ -351,6 +419,50 @@ export async function checkRouteCrossesLand(coordinates) {
   return { crosses: idx >= 0, segmentIndex: idx }
 }
 
+// Mark every cell touched by the given LineStrings as an obstacle
+// in `bitmap`. Applies an optional cell-radius buffer so the wall
+// has thickness; without that A*'s diagonal step can squeeze
+// through a single-cell line. Used for OSM coastlines fetched
+// from Overpass — they're served as open ways (LineStrings, not
+// polygons), so we can't use the scanline polygon fill. Walling
+// the boundary is enough to block A* from threading land cells
+// the underlying polygon dataset (NE 10m) missed.
+function addLineStringsToBitmap(bitmap, lineStrings, bbox, step, bufferCells = 1) {
+  if (!Array.isArray(lineStrings) || lineStrings.length === 0) return
+  const { grid, cellsX, cellsY } = bitmap
+  const [[w, s]] = bbox
+  const mark = (cx, cy) => {
+    if (cx < 0 || cx >= cellsX || cy < 0 || cy >= cellsY) return
+    const yLo = Math.max(0, cy - bufferCells)
+    const yHi = Math.min(cellsY - 1, cy + bufferCells)
+    const xLo = Math.max(0, cx - bufferCells)
+    const xHi = Math.min(cellsX - 1, cx + bufferCells)
+    for (let by = yLo; by <= yHi; by++) {
+      const off = by * cellsX
+      for (let bx = xLo; bx <= xHi; bx++) grid[off + bx] = 1
+    }
+  }
+  for (const ls of lineStrings) {
+    const coords = ls?.coordinates
+    if (!Array.isArray(coords) || coords.length < 2) continue
+    for (let i = 1; i < coords.length; i++) {
+      const [x1, y1] = coords[i - 1]
+      const [x2, y2] = coords[i]
+      const cx1 = (x1 - w) / step
+      const cy1 = (y1 - s) / step
+      const cx2 = (x2 - w) / step
+      const cy2 = (y2 - s) / step
+      // 2× over-sample (cells/2 step) so axis-near-aligned segments
+      // don't skip cells under round-to-int.
+      const samples = Math.max(1, Math.ceil(Math.max(Math.abs(cx2 - cx1), Math.abs(cy2 - cy1)) * 2))
+      for (let n = 0; n <= samples; n++) {
+        const t = n / samples
+        mark(Math.round(cx1 + (cx2 - cx1) * t), Math.round(cy1 + (cy2 - cy1) * t))
+      }
+    }
+  }
+}
+
 // Build a combined obstacle bitmap by rasterizing each layer with its
 // own buffer and OR-ing the results. Used when the planner needs to
 // avoid multiple obstacle types with different buffer requirements
@@ -378,7 +490,7 @@ function buildCombinedBitmap(layers, bbox, step) {
 // smoothing. Callers (`planWaterRoute`, `planRouteAvoidingObstacles`)
 // own their own bitmap construction so they can apply different
 // per-layer buffers and stack obstacle types.
-function planOnBbox(start, end, bbox, bitmap, step, { gridSize, noPathReason }) {
+function planOnBbox(start, end, bbox, bitmap, step, { gridSize, noPathReason, precisePolygons = null, preciseLineStrings = null }) {
   const isLand = makeLandTest(bitmap, bbox, step)
 
   let startIdx = toIndex(start, bbox, step)
@@ -419,6 +531,18 @@ function planOnBbox(start, end, bbox, bitmap, step, { gridSize, noPathReason }) 
       if (nCoord[0] < bbox[0][0] || nCoord[0] > bbox[1][0] ||
           nCoord[1] < bbox[0][1] || nCoord[1] > bbox[1][1]) continue
       if (isLand(nCoord)) continue
+      // Diagonal pinch: a diagonal step from (x,y) to (x±1, y±1)
+      // physically traverses both (x±1, y) and (x, y±1) corner
+      // cells. If BOTH are obstacles, the move would slice
+      // through a single-cell-thick wall (e.g. an OSM coastline
+      // we just rasterised). Reject. Standard 8-neighbour A*
+      // hardening — preserves passability through real one-cell
+      // straits where only one corner is land.
+      if (dx !== 0 && dy !== 0) {
+        const c1 = fromIndex([cur.idx[0] + dx, cur.idx[1]], bbox, step)
+        const c2 = fromIndex([cur.idx[0],      cur.idx[1] + dy], bbox, step)
+        if (isLand(c1) && isLand(c2)) continue
+      }
       const nk = key(nIdx)
       const tentative = (gScore.get(ck) ?? Infinity) + cost
       if (tentative < (gScore.get(nk) ?? Infinity)) {
@@ -444,7 +568,7 @@ function planOnBbox(start, end, bbox, bitmap, step, { gridSize, noPathReason }) 
   path[0] = start
   path[path.length - 1] = end
 
-  const smoothed = smoothPath(path, isLand, step)
+  const smoothed = smoothPath(path, isLand, step, precisePolygons, preciseLineStrings)
   let len = 0
   for (let i = 1; i < smoothed.length; i++) {
     len += distanceBetween(smoothed[i - 1], smoothed[i])
@@ -462,7 +586,14 @@ function planOnBbox(start, end, bbox, bitmap, step, { gridSize, noPathReason }) 
  * @returns {Promise<{ ok: true, coordinates: Array<[number, number]>, lengthMeters: number }
  *                  | { ok: false, reason: string }>}
  */
-export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
+export async function planWaterRoute(start, end, { gridSize = 200, landBufferMeters = null } = {}) {
+  // landBufferMeters overrides LAND_BUFFER_DEG when supplied —
+  // matches the same knob on `planRouteAvoidingObstacles`. Default
+  // (~555 m) compensates for NE 10m's ~250–500 m generalisation;
+  // tune down for tighter near-shore routes.
+  const effectiveLandBufferDeg = (landBufferMeters != null && Number.isFinite(landBufferMeters))
+    ? Math.max(0, landBufferMeters) / 111_000
+    : LAND_BUFFER_DEG
   if (!Array.isArray(start) || !Array.isArray(end)) {
     return { ok: false, reason: 'start and end must be [lng, lat] coordinates' }
   }
@@ -477,25 +608,63 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
     }
   }
 
-  const bbox = paddedBbox(start, end)
-  const polygons = await polygonsInBbox(bbox)
-  if (polygons.length === 0) {
-    return {
-      ok: true,
-      coordinates: [start, end],
-      lengthMeters: distanceBetween(start, end)
+  // Try-then-grow: A* searches inside a padded bbox; if no path is
+  // found, the route may need to detour around a peninsula whose tip
+  // lies past the padding. Retry with progressively larger padding
+  // before giving up. Each attempt re-fetches coastline polygons so
+  // newly-included land is rasterised; that's a one-shot cost vs.
+  // the alternative (returning no-path on a route that's clearly
+  // navigable). Tier list goes from fast/local → wide/global.
+  const TIERS = [
+    { padFraction: 0.25, padMin: 0.05 },  // local — fast path
+    { padFraction: 0.75, padMin: 0.20 },  // moderate detours (~22 km min)
+    { padFraction: 2.0,  padMin: 0.60 },  // major detours (~66 km min)
+    { padFraction: 4.0,  padMin: 1.50 }   // continental — peninsula-around
+                                          // routes, e.g. Strait of Hormuz
+                                          // where the only water connection
+                                          // sits ~85 km off the straight
+                                          // line.
+  ]
+  let lastReason = 'no water path found between start and end within the search bbox'
+  for (const tier of TIERS) {
+    const bbox = paddedBbox(start, end, [], tier.padFraction, tier.padMin)
+    const polygons = await polygonsInBbox(bbox)
+    if (polygons.length === 0) {
+      return {
+        ok: true,
+        coordinates: [start, end],
+        lengthMeters: distanceBetween(start, end)
+      }
     }
+    const step = chooseStep(bbox, gridSize)
+    const bitmap = buildCombinedBitmap(
+      [{ polygons, bufferDeg: effectiveLandBufferDeg }],
+      bbox, step
+    )
+    // Optional hi-res OSM coastline ways (Overpass) — fed to the
+    // smoother as a third LOS stage AND rasterised into the
+    // A* bitmap as walls so A* itself can't diagonal-step
+    // through capes / peninsulas that NE 10m generalised away.
+    // No-op when the operator hasn't enabled the toggle.
+    const preciseLineStrings = await maybeFetchHiResCoastlines(bbox)
+    if (preciseLineStrings.length) {
+      addLineStringsToBitmap(bitmap, preciseLineStrings, bbox, step, 0)
+    }
+    // Coastline polygons get the same exact-LOS check that user
+    // obstacles get in `planRouteAvoidingObstacles`. Without it
+    // the smoother can collapse a detour through cells the
+    // rasterizer left half-marked at coastline edges, and the
+    // resulting route physically clips peninsulas / capes.
+    const attempt = planOnBbox(start, end, bbox, bitmap, step, {
+      gridSize,
+      precisePolygons: polygons,
+      preciseLineStrings,
+      noPathReason: 'no water path found between start and end within the search bbox'
+    })
+    if (attempt.ok) return attempt
+    lastReason = attempt.reason
   }
-
-  const step = chooseStep(bbox, gridSize)
-  const bitmap = buildCombinedBitmap(
-    [{ polygons, bufferDeg: LAND_BUFFER_DEG }],
-    bbox, step
-  )
-  return planOnBbox(start, end, bbox, bitmap, step, {
-    gridSize,
-    noPathReason: 'no water path found between start and end within the search bbox'
-  })
+  return { ok: false, reason: lastReason }
 }
 
 /**
@@ -515,7 +684,15 @@ export async function planWaterRoute(start, end, { gridSize = 200 } = {}) {
  *   polygons (default false). When true, land gets its own
  *   `LAND_BUFFER_DEG` buffer regardless of `bufferDeg`.
  */
-export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, { gridSize = 200, bufferDeg = 0, includeLand = false } = {}) {
+export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, { gridSize = 200, bufferDeg = 0, includeLand = false, landBufferMeters = null } = {}) {
+  // landBufferMeters overrides LAND_BUFFER_DEG when supplied —
+  // operator-tunable coastline standoff. The default
+  // (0.005° ≈ 555 m) is conservative because NE 10m generalises
+  // to ~500 m; with hi-res OSM coastlines now augmenting the
+  // bitmap a tighter margin is operationally fine.
+  const effectiveLandBufferDeg = (landBufferMeters != null && Number.isFinite(landBufferMeters))
+    ? Math.max(0, landBufferMeters) / 111_000
+    : LAND_BUFFER_DEG
   if (!Array.isArray(start) || !Array.isArray(end)) {
     return { ok: false, reason: 'start and end must be [lng, lat] coordinates' }
   }
@@ -528,22 +705,18 @@ export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, {
     }
   }
 
-  // Search bbox: cover start, end, and any user obstacle bboxes. (Land
-  // polygons are clipped to this bbox via polygonsInBbox below — we don't
-  // want a continent-sized land polygon to expand the search area.)
+  // Search bbox: cover start, end, and any user obstacle bboxes.
+  // (Land polygons are clipped to the bbox via polygonsInBbox so a
+  // continent-sized land polygon doesn't expand the search area.)
   const obstacleBboxes = userPolygons.map(geometryBounds).filter(Boolean)
-  const bbox = paddedBbox(start, end, obstacleBboxes)
 
-  // Land polygons are loaded only when needed.
-  const landPolygons = includeLand ? await polygonsInBbox(bbox) : []
-
-  // Direct check: if the straight line crosses neither user obstacles
-  // nor land, no planning needed.
-  const crossesUser = userPolygons.length > 0 &&
-    findLandCrossingIndex([start, end], userPolygons) !== -1
-  const crossesLand = landPolygons.length > 0 &&
-    findLandCrossingIndex([start, end], landPolygons) !== -1
-  if (!crossesUser && !crossesLand) {
+  // Quick direct check on a tight bbox so the common "straight line
+  // is fine" case stays fast. Land polygons are pulled inside the
+  // tier loop so each retry can pick up coastline that newly enters
+  // the wider bbox.
+  if (userPolygons.length > 0 &&
+      findLandCrossingIndex([start, end], userPolygons) === -1 &&
+      !includeLand) {
     return {
       ok: true,
       coordinates: [start, end],
@@ -551,18 +724,59 @@ export async function planRouteAvoidingObstacles(start, end, obstaclePolygons, {
     }
   }
 
-  const step = chooseStep(bbox, gridSize)
-  const layers = []
-  if (userPolygons.length) layers.push({ polygons: userPolygons, bufferDeg })
-  if (landPolygons.length) layers.push({ polygons: landPolygons, bufferDeg: LAND_BUFFER_DEG })
-  const bitmap = buildCombinedBitmap(layers, bbox, step)
-
-  return planOnBbox(start, end, bbox, bitmap, step, {
-    gridSize,
-    noPathReason: includeLand
-      ? 'no path found around the supplied obstacles and land within the search bbox'
-      : 'no path found around the supplied obstacles within the search bbox'
-  })
+  // Try-then-grow: first attempt uses the tight bbox; if A* can't
+  // find a path (e.g. the route needs to detour around a peninsula
+  // whose tip lies past the padding), retry with progressively
+  // larger padding before giving up.
+  const TIERS = [
+    { padFraction: 0.25, padMin: 0.05 },
+    { padFraction: 0.75, padMin: 0.15 },
+    { padFraction: 2.0,  padMin: 0.40 }
+  ]
+  const baseReason = includeLand
+    ? 'no path found around the supplied obstacles and land within the search bbox'
+    : 'no path found around the supplied obstacles within the search bbox'
+  let lastReason = baseReason
+  for (const tier of TIERS) {
+    const bbox = paddedBbox(start, end, obstacleBboxes, tier.padFraction, tier.padMin)
+    const landPolygons = includeLand ? await polygonsInBbox(bbox) : []
+    const crossesUser = userPolygons.length > 0 &&
+      findLandCrossingIndex([start, end], userPolygons) !== -1
+    const crossesLand = landPolygons.length > 0 &&
+      findLandCrossingIndex([start, end], landPolygons) !== -1
+    if (!crossesUser && !crossesLand) {
+      return {
+        ok: true,
+        coordinates: [start, end],
+        lengthMeters: distanceBetween(start, end)
+      }
+    }
+    const step = chooseStep(bbox, gridSize)
+    const layers = []
+    if (userPolygons.length) layers.push({ polygons: userPolygons, bufferDeg })
+    if (landPolygons.length) layers.push({ polygons: landPolygons, bufferDeg: effectiveLandBufferDeg })
+    const bitmap = buildCombinedBitmap(layers, bbox, step)
+    const precisePolygons = [...userPolygons, ...landPolygons]
+    // Hi-res OSM coastlines only help when the route is supposed
+    // to stay clear of land — skip the network round-trip for
+    // pure-obstacle (e.g. AIS-only) routing. When we do fetch,
+    // walls go straight into the A* bitmap on top of the polygon
+    // raster; the LineString LOS check still fires in the
+    // smoother for shortcuts that escape the wall.
+    const preciseLineStrings = includeLand ? await maybeFetchHiResCoastlines(bbox) : null
+    if (preciseLineStrings && preciseLineStrings.length) {
+      addLineStringsToBitmap(bitmap, preciseLineStrings, bbox, step, 0)
+    }
+    const attempt = planOnBbox(start, end, bbox, bitmap, step, {
+      gridSize,
+      precisePolygons,
+      preciseLineStrings,
+      noPathReason: baseReason
+    })
+    if (attempt.ok) return attempt
+    lastReason = attempt.reason
+  }
+  return { ok: false, reason: lastReason }
 }
 
 /**
