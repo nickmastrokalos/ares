@@ -101,7 +101,7 @@ const showApiKey = ref(false)
                 <div class="text-caption text-medium-emphasis">
                   Model identifier sent to the provider API.
                   <span v-if="assistantProvider === 'anthropic'">e.g. claude-sonnet-4-6, claude-opus-4-7</span>
-                  <span v-else-if="assistantProvider === 'openai'">e.g. gpt-4o, gpt-4o-mini</span>
+                  <span v-else-if="assistantProvider === 'openai'">e.g. gpt-5.4, gpt-5.4-mini</span>
                 </div>
               </div>
               <v-text-field

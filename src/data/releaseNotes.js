@@ -24,16 +24,32 @@ export const RELEASES = [
   },
   {
     version: '1.1.8',
-    date: '2026-04-28',
+    date: '2026-04-29',
     added: [
-      'Plugin host: `api.map.addLayer({ snapResolver })` lets a plugin\'s custom map layer participate in host selection composables (perimeter, bloodhound). The resolver maps a clicked feature to a host owner ref (`{ kind: \'cot\', uid }`, etc.) so the ring or line snaps to the bridged host entity even when the plugin\'s sprite is larger than the underlying host marker.'
+      'Plugin host: `api.map.addLayer({ snapResolver })` lets a plugin\'s custom map layer participate in host selection composables (perimeter, bloodhound). The resolver maps a clicked feature to a host owner ref (`{ kind: \'cot\', uid }`, etc.) so the ring or line snaps to the bridged host entity even when the plugin\'s sprite is larger than the underlying host marker.',
+      'Water routing pulls high-fidelity OSM coastlines (Overpass API) on top of the bundled Natural Earth 10m so capes, narrow peninsulas, and small islands NE 10m generalises away are now respected. Default 500 m standoff from shore — override per-call by saying things like "hug the coast" or "wider berth". Toggle in Settings → Maps; falls back silently to NE 10m when offline.',
+      'Route planner is more eager to commit to the destination — fewer intermediate detours that drift off the start→end line.',
+      'Route planner is aware of weather, illumination, and sea state when those plugins are enabled. The assistant will prompt to enable a missing plugin instead of silently refusing. Try things like "create a route from X to Y that minimizes sea state and maximizes darkness over the next 24 hours and tell me what time to leave".',
+      'AIS audit on `map_draw_route_avoiding_features` now reports, per blocked vessel, which endpoint is inside the keepout, the distances involved, and `ais_suggested_standoff_meters` — the largest standoff that would still clear every blocker — so the assistant can suggest a concrete numeric retry instead of a vague "reduce standoff".',
+      'Ghost tracks now persist per mission across app restarts — name, route, start waypoint, direction, speed. On load every ghost reloads idle at its configured start waypoint; operators restart motion explicitly.',
+      'Ghosts are renamable from the panel (click the name) and from the assistant (`ghost_rename`). The default name now follows the rest of Ares: `ghost-xxxx`.',
+      'Ghost edit popover (panel and assistant): pick a different waypoint along the assigned route or flip travel direction. Disabled while the ghost is running — stop or reset first. Tools: `ghost_set_waypoint`, `ghost_set_direction`.',
+      'Assistant composer remembers prior prompts for the session. Click in the textarea and press Up / Down to scroll back through what you sent. A new expand toggle on the composer grows the textarea up to 20 rows so a long multi-paragraph prompt is fully readable before send.',
+      'Map video recording now captures the entire map container — WebGL canvas, HTML markers, and every floating panel currently open over the map — matching what the snapshot tool produces.',
+      'Plugin host: `registerPanel({ infoHtml })` adds an info-legend popover anchored to a small `mdi-information-outline` button next to the panel title, so plugins can explain colour codes / glyph meanings without burning a body row. `pluginRegistry.liftPluginLayers()` lets host overlay composables (bloodhound, perimeter rings) restore plugin sprites + LEDs above their freshly-drawn lines.'
     ],
     changed: [
-      'Map snapshot now includes every floating panel open over the map (host + plugin) alongside the basemap, layers, and HTML markers — no more silently omitted Armada / AIS / Track List / Bloodhound / Perimeter panels in saved PNGs.'
+      'Map snapshot now includes every floating panel open over the map (host + plugin) alongside the basemap, layers, and HTML markers — no more silently omitted Armada / AIS / Track List / Bloodhound / Perimeter panels in saved PNGs.',
+      'Bloodhound and perimeter state survives navigation away from the map view (in-memory Pinia stores). Lines and rings come back as you left them when you return to MapView.',
+      'Settings → Assistant model placeholder updated to `gpt-5.4` / `gpt-5.4-mini` examples.',
+      'Assistant entity resolver: when the agent passes a callsign or partial uid where a CoT track uid is expected, the resolver now falls back to a substring match across callsign + uid. Multi-match returns a disambiguation list instead of silently picking one.'
     ],
     fixed: [
       'Perimeter and bloodhound click-to-attach now snap to plugin-rendered tracks (e.g. Armada SA boats). Previously the plugin\'s custom sprite covered the host\'s smaller CoT dot and clicks missed the snap target entirely.',
-      'Breadcrumb trails on plugin-emitted CoT tracks now stay visible. Trails are dashed (2/2 cadence) and the breadcrumb layer is automatically lifted above plugin map content so a short trail under a plugin sprite no longer disappears.'
+      'Breadcrumb trails on plugin-emitted CoT tracks now stay visible. Trails are dashed (2/2 cadence) and the breadcrumb layer is automatically lifted above plugin map content so a short trail under a plugin sprite no longer disappears.',
+      'Ghost speed input no longer snaps back to the prior value while the ghost is running — keystrokes are buffered locally and only committed on Enter / blur.',
+      'Routing planner can now escape an endpoint that lands inside a large keepout (e.g. a 500 m AIS keepout on a 27 m grid). The "nearest water" search now scales to the bitmap diagonal instead of a fixed 8-cell ring.',
+      'Plugin teardown runs on MapView unmount, so re-entering the map view no longer throws "tool collides with an existing tool" when a plugin re-registers.'
     ]
   },
   {
