@@ -1,8 +1,10 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { circlePolygon, distanceBetween, geometryBounds } from '@/services/geometry'
 import { useTracksStore } from '@/stores/tracks'
 import { useAisStore } from '@/stores/ais'
 import { useFeaturesStore } from '@/stores/features'
+import { usePerimetersStore } from '@/stores/perimeters'
 
 const RINGS_SOURCE = 'perimeter-rings'
 const RINGS_LAYER  = 'perimeter-rings-line'
@@ -35,14 +37,23 @@ const SNAP_LAYERS = [
 ]
 
 export function useMapPerimeters(getMap, pluginSnap = null) {
-  const tracksStore   = useTracksStore()
-  const aisStore      = useAisStore()
-  const featuresStore = useFeaturesStore()
+  const tracksStore     = useTracksStore()
+  const aisStore        = useAisStore()
+  const featuresStore   = useFeaturesStore()
+  const perimetersStore = usePerimetersStore()
 
-  const perimeters      = new Map()  // ownerKey -> perimeter
-  const perimeterCount  = ref(0)
+  // Persisted source-of-truth lives in `perimetersStore.entries`
+  // (Map<ownerKey, { owner, radius, alert }>). The composable owns
+  // a parallel `breached` Set per key — that's recomputed from
+  // current track positions on every tick and isn't worth
+  // persisting. Keys in `breaches` track the keys in
+  // `perimetersStore.entries`; entries dropped from the store get
+  // their breaches lazily cleaned up on the next reresolve.
+  const breaches        = new Map()  // ownerKey -> Set<intruderKey>
   const bumpTick        = ref(0)
-  const defaultRadius   = ref(500)   // meters
+  // Re-expose the store's defaultRadius as a Ref so the panel's
+  // existing `.value` reads (PerimeterPanel.vue) keep working.
+  const { defaultRadius } = storeToRefs(perimetersStore)
   const isSelecting     = ref(false)
 
   const perimeterSelecting = computed(() => isSelecting.value)
@@ -57,17 +68,17 @@ export function useMapPerimeters(getMap, pluginSnap = null) {
   let stopFeatureWatch      = null
   let stopManualHiddenWatch = null
 
-  // Reactive list for panel + assistant tools. Rebuilds on add/remove/clear
-  // (perimeterCount bump) and on re-resolve ticks (bumpTick).
+  // Reactive list for panel + assistant tools. Rebuilds on store
+  // mutations (entries swap reactively) and on reresolve ticks
+  // (bumpTick fires when coords or breach sets shift).
   const perimeterList = computed(() => {
-    void perimeterCount.value
     void bumpTick.value
-    return [...perimeters.entries()].map(([ownerKey, p]) => ({
+    return [...perimetersStore.entries.entries()].map(([ownerKey, p]) => ({
       ownerKey,
       owner: { ...p.owner, label: labelForOwner(p.owner) },
       radius: p.radius,
       alert:  p.alert,
-      breached: [...p.breached].map(k => {
+      breached: [...(breaches.get(ownerKey) ?? [])].map(k => {
         const [kind, id] = splitKey(k)
         const ep = makeEndpointFromKey(kind, id)
         return {
@@ -216,6 +227,11 @@ export function useMapPerimeters(getMap, pluginSnap = null) {
         }
       })
     }
+    // Perimeter layers are added lazily on first use — usually
+    // after plugins registered theirs. Without this lift, a fresh
+    // perimeter ring or breach halo paints over plugin sprites +
+    // LEDs that happen to live inside or on the ring's path.
+    pluginSnap?.liftPluginLayers?.()
   }
 
   // ---- Breach + display loop ----
@@ -286,19 +302,20 @@ export function useMapPerimeters(getMap, pluginSnap = null) {
     const ringFeatures = []
     const haloFeatures = []
 
-    for (const [ownerKey, p] of perimeters) {
+    for (const [ownerKey, p] of perimetersStore.entries) {
       // Hidden owners suppress both the ring and any breach halos —
-      // the perimeter object stays in memory but goes silent until
-      // the owner is shown again. Avoids the operator getting
+      // the perimeter object stays in the store but goes silent
+      // until the owner is shown again. Avoids the operator getting
       // "Perimeter breach: X in Y" toasts for a Y they explicitly
       // hid from view.
       if (isOwnerHidden(p.owner)) continue
+      const breachedSet = breaches.get(ownerKey) ?? new Set()
       ringFeatures.push({
         type: 'Feature',
-        properties: { ownerKey, breached: p.breached.size > 0 },
+        properties: { ownerKey, breached: breachedSet.size > 0 },
         geometry: circlePolygon(p.owner.coord, p.radius, 64)
       })
-      for (const intruderKey of p.breached) {
+      for (const intruderKey of breachedSet) {
         const coord = intruderCoord(intruderKey)
         if (!coord) continue
         haloFeatures.push({
@@ -313,42 +330,50 @@ export function useMapPerimeters(getMap, pluginSnap = null) {
     map.getSource(HALOS_SOURCE)?.setData({ type: 'FeatureCollection', features: haloFeatures })
   }
 
-  // Re-resolve every owner, recompute breaches, rebuild sources. Called from
-  // store watchers and after direct API mutations (add/remove/setRadius/…).
+  // Re-resolve every owner, recompute breaches, rebuild sources.
+  // Called from store watchers and after direct API mutations.
   function reresolveAll() {
-    if (!perimeters.size) return
+    if (!perimetersStore.entries.size) return
 
-    // 1. Drop perimeters whose owner anchor disappeared — deleted manual
-    //    feature, removed/stale-pruned CoT track, or aged-out AIS vessel.
-    //    Mirrors bloodhound; hidden anchors stay (visibility != removal).
-    for (const [ownerKey, p] of [...perimeters]) {
+    // 1. Drop perimeters whose owner anchor disappeared — deleted
+    //    manual feature, removed / stale-pruned CoT track, or
+    //    aged-out AIS vessel. Hidden anchors stay (visibility !=
+    //    removal). Done by walking the store and removing through
+    //    its action so reactivity propagates to the panel + alerts.
+    for (const [ownerKey, p] of [...perimetersStore.entries]) {
       const o = p.owner
       const gone =
         (o.kind === 'feature' && !featuresStore.features.some(f => f.id === o.featureId)) ||
         (o.kind === 'cot'     && !tracksStore.tracks.get(o.uid)) ||
         (o.kind === 'ais'     && !aisStore.vessels.get(o.mmsi))
-      if (gone) perimeters.delete(ownerKey)
-    }
-
-    // 2. Re-resolve owner coord.
-    for (const [, p] of perimeters) {
-      const c = resolveCoord(p.owner)
-      if (c) p.owner.coord = c
-    }
-
-    // 3. Recompute breaches for perimeters with alert on. Hidden
-    // owners get an empty breach set so the alert chip / toast
-    // pipeline (computed off `perimeters[].breached`) goes quiet
-    // for them too — not just the on-map ring.
-    for (const [ownerKey, p] of perimeters) {
-      if (!p.alert || isOwnerHidden(p.owner)) {
-        p.breached = new Set()
-      } else {
-        p.breached = computeBreaches(p, ownerKey)
+      if (gone) {
+        perimetersStore.remove(ownerKey)
+        breaches.delete(ownerKey)
       }
     }
 
-    perimeterCount.value = perimeters.size
+    // 2. Re-resolve owner coord — write back to the store so the
+    //    persisted last-known position reflects current reality.
+    for (const [ownerKey, p] of perimetersStore.entries) {
+      const c = resolveCoord(p.owner)
+      if (c) perimetersStore.updateOwnerCoord(ownerKey, c)
+    }
+
+    // 3. Recompute breaches. Hidden owners or alert-off entries
+    //    get an empty set so the alert pipeline goes quiet.
+    for (const [ownerKey, p] of perimetersStore.entries) {
+      if (!p.alert || isOwnerHidden(p.owner)) {
+        breaches.set(ownerKey, new Set())
+      } else {
+        breaches.set(ownerKey, computeBreaches(p, ownerKey))
+      }
+    }
+
+    // 4. Drop breach entries for store keys that no longer exist.
+    for (const k of [...breaches.keys()]) {
+      if (!perimetersStore.entries.has(k)) breaches.delete(k)
+    }
+
     rebuildSources()
     bumpTick.value++
   }
@@ -504,18 +529,18 @@ export function useMapPerimeters(getMap, pluginSnap = null) {
   // ---- Public programmatic API ----
 
   // Add or replace the perimeter on a track. `owner` is a typed ref
-  // ({kind, uid|mmsi|featureId, coord}). Returns the ownerKey or null if the
-  // map isn't ready yet.
+  // ({kind, uid|mmsi|featureId, coord}). Returns the ownerKey or null
+  // if the map isn't ready yet. Persists in `perimetersStore` so the
+  // entry survives a route navigation away from MapView and back.
   function addPerimeter(owner, radius, alert = true) {
     const map = getMap()
     if (!map) return null
     ensureSourcesAndLayers()
     const key = ownerKeyOf(owner)
-    perimeters.set(key, {
-      owner: { ...owner },
+    perimetersStore.set(key, {
+      owner,
       radius: Number(radius) || 0,
-      alert:  Boolean(alert),
-      breached: new Set()
+      alert:  Boolean(alert)
     })
     ensureWatchers()
     ensureKeyHandler()
@@ -524,52 +549,82 @@ export function useMapPerimeters(getMap, pluginSnap = null) {
   }
 
   function removePerimeter(ownerKey) {
-    if (!perimeters.has(ownerKey)) return false
-    perimeters.delete(ownerKey)
-    perimeterCount.value = perimeters.size
+    if (!perimetersStore.remove(ownerKey)) return false
+    breaches.delete(ownerKey)
     rebuildSources()
     bumpTick.value++
-    if (!perimeters.size) {
+    if (!perimetersStore.entries.size) {
       stopWatchers()
     }
     return true
   }
 
   function setRadius(ownerKey, radius) {
-    const p = perimeters.get(ownerKey)
-    if (!p) return false
-    p.radius = Number(radius) || 0
+    if (!perimetersStore.entries.has(ownerKey)) return false
+    perimetersStore.patch(ownerKey, { radius: Number(radius) || 0 })
     reresolveAll()
     return true
   }
 
   function setAlert(ownerKey, alert) {
-    const p = perimeters.get(ownerKey)
-    if (!p) return false
-    p.alert = Boolean(alert)
+    if (!perimetersStore.entries.has(ownerKey)) return false
+    perimetersStore.patch(ownerKey, { alert: Boolean(alert) })
     reresolveAll()
     return true
   }
 
   function setDefaultRadius(r) {
-    defaultRadius.value = Number(r) || 0
+    perimetersStore.setDefaultRadius(r)
   }
 
   function clearAll() {
     exitSelecting()
-    perimeters.clear()
-    perimeterCount.value = 0
+    perimetersStore.clear()
+    breaches.clear()
     rebuildSources()
     bumpTick.value++
     stopWatchers()
     removeKeyHandler()
   }
 
+  // Hydrate from the store. Called by MapView from the
+  // `map.on('load', ...)` callback so the map is guaranteed to be
+  // ready (the composable's `getMap()` is a closure over a plain
+  // `let`, which Vue's `watch` can't track for re-fire). When the
+  // user navigates back to the map after the composable was torn
+  // down, the store still holds every perimeter's owner / radius
+  // / alert — re-build the sources + layers and re-resolve coords
+  // against the live entity stores.
+  //
+  // CRITICAL: do NOT call `reresolveAll()` here. That function
+  // auto-purges any perimeter whose owner uid isn't currently in
+  // `tracksStore.tracks` — and on a fresh map mount, no tracks
+  // are loaded yet. CoT listeners reconnect a few lines later in
+  // MapView's load handler, plugin tracks need their first
+  // heartbeat. If we re-resolve now, every persisted perimeter
+  // gets dropped before its owner has a chance to come back.
+  // Instead: draw the ring at the persisted last-known coord,
+  // then let the regular watchers handle subsequent updates and
+  // (eventually) the not-actually-coming-back removals.
+  function init() {
+    const map = getMap()
+    if (!map) return
+    if (!perimetersStore.entries.size) return
+    ensureSourcesAndLayers()
+    ensureWatchers()
+    ensureKeyHandler()
+    rebuildSources()
+    bumpTick.value++
+  }
+
   onUnmounted(() => {
     removeClickHandler()
     removeKeyHandler()
     stopWatchers()
-    perimeters.clear()
+    // Note: do NOT clear `perimetersStore.entries` — that's the
+    // whole point of the persistence. Local breach state and map
+    // sources tear down with the map.
+    breaches.clear()
     const map = getMap()
     if (!map) return
     if (map.getLayer(HALOS_LAYER)) map.removeLayer(HALOS_LAYER)
@@ -579,6 +634,7 @@ export function useMapPerimeters(getMap, pluginSnap = null) {
   })
 
   return {
+    init,
     perimeterSelecting,
     perimeters: perimeterList,
     defaultRadius,

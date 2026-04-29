@@ -647,6 +647,14 @@ onMounted(async () => {
     initAdsbLayers()
     bullseyeApi.init()
     annotationsApi.init()
+    // Bloodhound + perimeter persist their data in Pinia stores so
+    // they survive a navigation away from MapView. Re-hydrate from
+    // those stores now that the new map is ready.
+    bloodhoundApi.init()
+    perimeterApi.init()
+    // Ghosts persist to SQLite per-mission. Re-anchor each one to
+    // its start waypoint in the idle state — see ghosts.js init().
+    ghostsStore.init(props.missionId)
 
     // Start any connections that are enabled at the time the map loaded.
     // Plugin-owned connections additionally require their plugin to be
